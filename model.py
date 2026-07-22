@@ -274,23 +274,36 @@ def solve(
     # traslate sufficiente a coprire l'intero orizzonte del modello, non
     # solo il ciclo immediatamente precedente/successivo.
     n_shifts = math.ceil(horizon / T_min) + 2
+    BIG = 10**7  # limite tecnico largo per i domini delle variabili ausiliarie
+
+    def _as_intvar(expr, name):
+        """Materializza un'espressione lineare (variabile + costanti, anche
+        con coefficienti negativi) in un vero e proprio IntVar, legato
+        all'espressione con un vincolo di uguaglianza. Passare sempre
+        IntVar "puri" a NewIntervalVar (invece di espressioni composte
+        direttamente) e' piu' robusto fra le diverse versioni di OR-Tools."""
+        v = model.NewIntVar(-BIG, BIG, name)
+        model.Add(v == expr)
+        return v
 
     def add_cyclic_no_overlap(start_a, end_a, start_b, end_b, name):
         """Impone che [start_a,end_a] non si sovrapponga MAI a [start_b,end_b]
         ne' ad alcuna sua traslazione di un multiplo intero di T (positivo o
         negativo), catturando correttamente la periodicita' anche quando i
         due eventi sono sfasati di piu' di un ciclo."""
+        sa = _as_intvar(start_a, name + "_sA")
+        ea = _as_intvar(end_a, name + "_eA")
         size_a = model.NewIntVar(0, horizon, name + "_szA")
-        model.Add(size_a == end_a - start_a)
-        interval_a = model.NewIntervalVar(start_a, size_a, end_a, name + "_A")
+        model.Add(size_a == ea - sa)
+        interval_a = model.NewIntervalVar(sa, size_a, ea, name + "_A")
 
         intervals = [interval_a]
         for shift in range(-n_shifts, n_shifts + 1):
-            s_b = start_b + shift * Tv
-            e_b = end_b + shift * Tv
+            sb = _as_intvar(start_b + shift * Tv, f"{name}_sB_{shift}")
+            eb = _as_intvar(end_b + shift * Tv, f"{name}_eB_{shift}")
             size_b = model.NewIntVar(0, 2 * horizon, f"{name}_szB_{shift}")
-            model.Add(size_b == e_b - s_b)
-            interval_b = model.NewIntervalVar(s_b, size_b, e_b, f"{name}_B_{shift}")
+            model.Add(size_b == eb - sb)
+            interval_b = model.NewIntervalVar(sb, size_b, eb, f"{name}_B_{shift}")
             intervals.append(interval_b)
         model.AddNoOverlap(intervals)
 
