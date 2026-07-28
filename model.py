@@ -729,6 +729,77 @@ def solve_auto_zones(
 
 
 # --------------------------------------------------------------------------
+# Scelta automatica ANCHE del numero di carroponti
+# --------------------------------------------------------------------------
+#
+# Piu' carroponti possono solo ampliare (mai restringere) cio' che e'
+# fattibile: se una linea ce la fa con N carroponti, aggiungerne un altro
+# (spezzando ulteriormente le zone) non puo' peggiorare le cose. Percio' la
+# ricerca del numero minimo di carroponti e' un semplice sweep crescente
+# N=1,2,3,... che si ferma al primo N per cui `solve_auto_zones` trova una
+# suddivisione in zone fattibile entro la tolleranza di takt time data.
+
+
+def solve_auto_hoists(
+    data: ProblemData,
+    max_hoists: int = 6,
+    min_hoists: int = 1,
+    time_limit_per_candidate: float = 8.0,
+    max_candidates_per_hoist_count: int = 500,
+    log_progress: bool = False,
+) -> tuple[Solution, Optional[list[HoistZone]], Optional[int]]:
+    """Cerca automaticamente sia il numero minimo di carroponti necessario
+    sia le zone di ciascuno: prova n_hoists = min_hoists, min_hoists+1, ...,
+    max_hoists in ordine crescente e si ferma al primo valore per cui
+    esiste una suddivisione in zone fattibile entro la tolleranza di takt
+    time data (`data.takt_min`/`data.takt_max`).
+
+    Restituisce (Solution, zones, n_hoists). Se nessun numero di
+    carroponti fino a max_hoists risulta fattibile, Solution.status sara'
+    "INFEASIBLE" e zones/n_hoists saranno None -- in tal caso prova ad
+    aumentare max_hoists o la tolleranza sul takt time.
+    """
+    n_moves = data.n_moves
+    max_hoists = min(max_hoists, n_moves)
+    if min_hoists < 1:
+        raise ValueError("min_hoists deve essere >= 1")
+    if min_hoists > max_hoists:
+        raise ValueError(
+            f"min_hoists ({min_hoists}) supera max_hoists effettivo ({max_hoists}, "
+            f"limitato al numero di mosse)."
+        )
+
+    sweep = []
+    for n_hoists in range(min_hoists, max_hoists + 1):
+        if log_progress:
+            print(f"--- Provo con {n_hoists} carroponte/i ---")
+        try:
+            sol, zones = solve_auto_zones(
+                data,
+                n_hoists,
+                time_limit_per_candidate=time_limit_per_candidate,
+                max_candidates=max_candidates_per_hoist_count,
+                log_progress=log_progress,
+            )
+        except ValueError as e:
+            # troppe suddivisioni possibili per questo n_hoists: lo segnalo
+            # e provo comunque il numero di carroponti successivo, invece
+            # di far fallire l'intera ricerca.
+            sweep.append({"n_hoists": n_hoists, "status": "SKIPPED", "error": str(e)})
+            if log_progress:
+                print(f"  saltato: {e}")
+            continue
+
+        sweep.append({"n_hoists": n_hoists, "status": sol.status, "T": sol.T})
+        if sol.status in ("OPTIMAL", "FEASIBLE"):
+            sol.raw["hoist_sweep"] = sweep
+            sol.raw["n_hoists"] = n_hoists
+            return sol, zones, n_hoists
+
+    return Solution(status="INFEASIBLE", T=None, raw={"hoist_sweep": sweep}), None, None
+
+
+# --------------------------------------------------------------------------
 # Estensioni possibili -- non implementate in questo file
 # --------------------------------------------------------------------------
 #

@@ -49,19 +49,42 @@ salvato `ciclogramma.png` col grafico.
 4. **Takt time**: `takt_min`, `takt_max` (puoi calcolarli da
    `nominale ± tolleranza`).
 5. **Carroponti e zone** (`HoistZone`): ogni carroponte serve una **zona
-   contigua** di mosse (indici di trasporto, non di vasca). Il **numero**
-   di carroponti resta un input (`n_hoists`, hard-coded). Le **zone**
-   invece possono essere:
-   - scelte **automaticamente**: passa `zones=None` a `ProblemData` e usa
-     `solve_auto_zones(data, n_hoists=...)` al posto di `solve(data)` — vedi
-     sotto;
-   - oppure specificate a mano (lista di `HoistZone`) e usa `solve(data)`
-     direttamente, se hai gia' un'idea precisa di come dividere la linea.
+   contigua** di mosse (indici di trasporto, non di vasca). Ci sono tre
+   modi per specificarli, dal piu' al meno automatico:
+   - **numero di carroponti + zone entrambi automatici**: usa
+     `solve_auto_hoists(data, max_hoists=...)` — cerca il numero minimo di
+     carroponti che rispetta il takt time dato, e per ciascuno le zone
+     migliori;
+   - **numero di carroponti fissato, zone automatiche**: passa
+     `zones=None` a `ProblemData` e usa
+     `solve_auto_zones(data, n_hoists=...)`;
+   - **tutto manuale**: specifica `zones` (lista di `HoistZone`) e usa
+     `solve(data)` direttamente, se hai gia' un'idea precisa di come
+     dividere la linea.
 6. **Sicurezza**: `hoist_length` (ingombro) e `safety_distance` (margine
    minimo aggiuntivo) vengono usati per allargare le finestre temporali di
    occupazione dei punti di confine fra zone adiacenti.
 
-### Scelta automatica delle zone
+### Scelta automatica del numero di carroponti e delle zone
+
+```python
+data = ProblemData(..., zones=None, ...)
+solution, zones, n_hoists = solve_auto_hoists(data, max_hoists=4, time_limit_per_candidate=15.0,
+                                               log_progress=True)
+```
+
+`solve_auto_hoists` prova N = 1, 2, 3, ... carroponti (fino a `max_hoists`)
+in ordine crescente e si ferma al **primo** N per cui esiste una
+suddivisione in zone fattibile entro la tolleranza di takt time data —
+poiche' aggiungere carroponti puo' solo ampliare cio' che e' fattibile
+(mai restringerlo), il primo N fattibile e' anche il minimo. Per ciascun N
+tentato, internamente chiama `solve_auto_zones` (vedi sotto). Se nessun N
+fino a `max_hoists` e' fattibile, `solution.status` sara' `"INFEASIBLE"` e
+`zones`/`n_hoists` saranno `None` — in tal caso prova ad aumentare
+`max_hoists` o la tolleranza sul takt time. Il dettaglio di ogni tentativo
+(N, esito, T se trovato) e' anche in `solution.raw["hoist_sweep"]`.
+
+### Scelta automatica delle sole zone (numero di carroponti fissato)
 
 ```python
 data = ProblemData(..., zones=None, ...)
@@ -136,15 +159,19 @@ cinematica (`kinematics.py`), costruzione delle strutture dati e delle loro
 validazioni (incluso `zones=None`), l'enumerazione delle suddivisioni
 contigue (`_enumerate_contiguous_partitions`, con verifica che ogni
 suddivisione copra tutte le mosse esattamente una volta), i controlli di
-validazione di `solve_auto_zones` (n_hoists eccessivo, max_candidates
-superato), e la ricostruzione della traiettoria (`_build_zone_trajectory`)
-con valori scelti a mano — incluso un caso con **ordine di visita non
-sequenziale** (es. un carroponte con zona di 4 mosse che le esegue
-nell'ordine 0→2→1→3→0) e un caso limite di puro arrotondamento numerico
-(la causa del secondo bug segnalato, ora corretto con una tolleranza
-proporzionata alla risoluzione dei tick). Il codice delle funzioni `solve`
-e `solve_auto_zones` e' stato controllato riga per riga contro la API di
-OR-Tools CP-SAT ed e' sintatticamente corretto (`py_compile` su tutti i
-file), ma **non** e' stato possibile eseguire una risoluzione CP-SAT reale
-end-to-end. Consiglio di eseguire `python esempio.py` sulla tua macchina
+validazione di `solve_auto_zones` e `solve_auto_hoists` (n_hoists/
+min_hoists/max_hoists eccessivi o incoerenti, max_candidates superato), lo
+sweep crescente su N carroponti di `solve_auto_hoists` (verificato che
+parta da `min_hoists` e proceda correttamente fino al primo tentativo di
+risoluzione reale), e la ricostruzione della traiettoria
+(`_build_zone_trajectory`) con valori scelti a mano — incluso un caso con
+**ordine di visita non sequenziale** (es. un carroponte con zona di 4 mosse
+che le esegue nell'ordine 0→2→1→3→0) e un caso limite di puro arrotondamento
+numerico (la causa del secondo bug segnalato, ora corretto con una
+tolleranza proporzionata alla risoluzione dei tick). Il codice delle
+funzioni `solve`, `solve_auto_zones` e `solve_auto_hoists` e' stato
+controllato riga per riga contro la API di OR-Tools CP-SAT ed e'
+sintatticamente corretto (`py_compile` su tutti i file), ma **non** e'
+stato possibile eseguire una risoluzione CP-SAT reale end-to-end. Consiglio
+di eseguire `python esempio.py` sulla tua macchina
 (con `pip install ortools`) e di segnalarmi eventuali errori residui.
