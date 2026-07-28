@@ -58,6 +58,8 @@ APPROCCIO SCELTO E SUE ASSUNZIONI (importante leggere prima di usare il codice)
 
 from __future__ import annotations
 
+import dataclasses
+import itertools
 import math
 from dataclasses import dataclass, field
 from typing import Optional
@@ -106,21 +108,24 @@ class ProblemData:
     kin_loaded: Kinematics  # cinematica carroponte CON pezzo
     hoist_length: float  # [m] ingombro del carroponte
     safety_distance: float  # [m] distanza di sicurezza minima fra due carroponti
-    zones: list[HoistZone]  # una per carroponte, in ordine crescente di posizione
+    zones: Optional[list[HoistZone]] = None  # una per carroponte; None = da
+    # scegliere automaticamente con
+    # solve_auto_zones(...)
     time_scale: int = 100  # tick al secondo (risoluzione temporale interna)
 
     def __post_init__(self):
         n_moves = len(self.route) - 1
         if n_moves < 1:
             raise ValueError("route deve contenere almeno 2 stazioni (1 mossa)")
-        covered = []
-        for z in self.zones:
-            covered.extend(range(z.lo, z.hi + 1))
-        if covered != list(range(n_moves)):
-            raise ValueError(
-                f"le zone devono coprire in modo contiguo ed esclusivo le mosse "
-                f"0..{n_moves - 1}; trovato: {covered}"
-            )
+        if self.zones is not None:
+            covered = []
+            for z in self.zones:
+                covered.extend(range(z.lo, z.hi + 1))
+            if covered != list(range(n_moves)):
+                raise ValueError(
+                    f"le zone devono coprire in modo contiguo ed esclusivo le mosse "
+                    f"0..{n_moves - 1}; trovato: {covered}"
+                )
         for s in self.route:
             if s.tank_id not in self.tanks:
                 raise ValueError(f"vasca '{s.tank_id}' non definita in tanks")
@@ -140,6 +145,11 @@ class ProblemData:
 
     @property
     def n_hoists(self) -> int:
+        if self.zones is None:
+            raise ValueError(
+                "data.zones e' None (non ancora scelto): usa solve_auto_zones(...) "
+                "per farlo scegliere automaticamente, oppure impostalo esplicitamente."
+            )
         return len(self.zones)
 
     def station_position(self, idx: int) -> float:
@@ -214,6 +224,12 @@ class Solution:
 def solve(
     data: ProblemData, time_limit_s: float = 20.0, log_search: bool = False
 ) -> Solution:
+    if data.zones is None:
+        raise ValueError(
+            "data.zones e' None: specifica le zone esplicitamente oppure usa "
+            "solve_auto_zones(data, n_hoists=...) per farle scegliere automaticamente."
+        )
+
     # Import posticipato: cosi' il resto del modulo (dataclass, cinematica,
     # extraction, plotting) resta utilizzabile/testabile anche senza ortools
     # installato.
@@ -596,27 +612,141 @@ def _build_zone_trajectory(
 
 
 # --------------------------------------------------------------------------
+# Scelta automatica delle zone
+# --------------------------------------------------------------------------
+#
+# Le zone (quali mosse assegnare a quale carroponte) NON sono decise
+# dentro al modello CP-SAT unico: sarebbe possibile (variabili di confine
+# fra zone), ma renderebbe il modello sensibilmente piu' complesso e
+# rischioso da validare senza un ambiente con OR-Tools a disposizione.
+# La scelta qui e' piu' semplice e robusta: si enumerano TUTTE le
+# suddivisioni contigue possibili delle mosse in `n_hoists` zone, si
+# risolve il modello (gia' testato) `solve()` per ciascuna, e si tiene la
+# soluzione con il takt time minore fra quelle fattibili. Un pre-filtro
+# economico scarta le suddivisioni palesemente infattibili (una zona il
+# cui solo trasporto-a-carico, senza contare alcun trasferimento a vuoto,
+# supera gia' da solo il takt time massimo) senza invocare CP-SAT.
+#
+# Il numero di suddivisioni contigue possibili e' C(n_moves-1, n_hoists-1):
+# per problemi di dimensioni realistiche (una manciata di carroponti,
+# qualche decina di mosse al massimo) resta gestibile, ma cresce in fretta.
+# Vedi il parametro `max_candidates` per un limite di sicurezza.
+
+
+def _enumerate_contiguous_partitions(n_moves: int, n_hoists: int):
+    """Genera tutte le liste di HoistZone che suddividono le mosse
+    0..n_moves-1 in n_hoists gruppi contigui e non vuoti, nell'ordine."""
+    for cuts in itertools.combinations(range(n_moves - 1), n_hoists - 1):
+        bounds = [-1] + list(cuts) + [n_moves - 1]
+        yield [HoistZone(bounds[i] + 1, bounds[i + 1]) for i in range(n_hoists)]
+
+
+def solve_auto_zones(
+    data: ProblemData,
+    n_hoists: int,
+    time_limit_per_candidate: float = 8.0,
+    max_candidates: int = 500,
+    log_progress: bool = False,
+) -> tuple[Solution, Optional[list[HoistZone]]]:
+    """Prova automaticamente tutte le suddivisioni contigue delle mosse in
+    `n_hoists` zone (una per carroponte) e restituisce la soluzione con il
+    takt time minore fra quelle trovate fattibili, insieme alle zone che
+    l'hanno generata.
+
+    `data.zones` puo' essere None (verra' ignorato/sovrascritto per ogni
+    tentativo). Restituisce (Solution, zones) -- se nessuna suddivisione e'
+    fattibile, Solution.status sara' "INFEASIBLE" e zones sara' None.
+    """
+    n_moves = data.n_moves
+    if n_hoists < 1:
+        raise ValueError("n_hoists deve essere >= 1")
+    if n_hoists > n_moves:
+        raise ValueError(
+            f"n_hoists ({n_hoists}) non puo' superare il numero di mosse ({n_moves}): "
+            f"ogni carroponte deve avere almeno una mossa."
+        )
+
+    n_combinations = math.comb(n_moves - 1, n_hoists - 1)
+    if n_combinations > max_candidates:
+        raise ValueError(
+            f"Il numero di suddivisioni possibili ({n_combinations}) supera "
+            f"max_candidates ({max_candidates}). Aumenta max_candidates se vuoi "
+            f"comunque una ricerca esaustiva (puo' richiedere molto tempo), oppure "
+            f"riduci il numero di mosse/carroponti, oppure specifica tu stesso le "
+            f"zone e usa solve() direttamente."
+        )
+
+    travel_loaded_seconds = [
+        _travel_time_seconds(data.move_distance(k), data.kin_loaded)
+        for k in range(n_moves)
+    ]
+
+    best_solution: Optional[Solution] = None
+    best_zones: Optional[list[HoistZone]] = None
+    n_tried = 0
+    n_skipped = 0
+
+    for zones in _enumerate_contiguous_partitions(n_moves, n_hoists):
+        # pre-filtro economico: una zona il cui solo trasporto-a-carico
+        # (senza nemmeno contare trasferimenti a vuoto) gia' supera il
+        # takt time massimo e' certamente infattibile, qualunque sia
+        # l'ordine di visita.
+        content_ok = all(
+            sum(travel_loaded_seconds[k] for k in range(z.lo, z.hi + 1))
+            <= data.takt_max
+            for z in zones
+        )
+        if not content_ok:
+            n_skipped += 1
+            continue
+
+        candidate_data = dataclasses.replace(data, zones=zones)
+        n_tried += 1
+        sol = solve(candidate_data, time_limit_s=time_limit_per_candidate)
+        if log_progress:
+            zone_str = ", ".join(f"[{z.lo}-{z.hi}]" for z in zones)
+            info = f"T={sol.T:.2f}s" if sol.T is not None else sol.status
+            print(f"  zone {zone_str}: {info}")
+        if sol.status in ("OPTIMAL", "FEASIBLE") and sol.T is not None:
+            if best_solution is None or sol.T < best_solution.T:
+                best_solution = sol
+                best_zones = zones
+
+    if best_solution is None:
+        return (
+            Solution(
+                status="INFEASIBLE",
+                T=None,
+                raw={"n_tried": n_tried, "n_skipped": n_skipped},
+            ),
+            None,
+        )
+
+    best_solution.raw["n_tried"] = n_tried
+    best_solution.raw["n_skipped"] = n_skipped
+    best_solution.raw["zones"] = best_zones
+    return best_solution, best_zones
+
+
+# --------------------------------------------------------------------------
 # Estensioni possibili -- non implementate in questo file
 # --------------------------------------------------------------------------
-# 1. Zone decise dal solver: invece di passare `zones` come input fisso,
-#    introdurre variabili intere "boundary_h" (posizione di confine fra
-#    carroponte h e h+1) e ricostruire i vincoli sopra parametricamente.
 #
-# 2. Assegnazione non contigua fra zone (un carroponte che sconfina
+# 1. Assegnazione non contigua fra zone (un carroponte che sconfina
 #    occasionalmente nel territorio del vicino): richiederebbe estendere
 #    il circuito e la logica di confine a insiemi di mosse non fissi.
 #
-# 3. Piu' ricette (prodotti diversi che seguono percorsi diversi fra le
+# 2. Piu' ricette (prodotti diversi che seguono percorsi diversi fra le
 #    vasche): si generalizza duplicando la catena actual_time per ciascuna
 #    ricetta, con un takt time complessivo che tiene conto del mix
 #    produttivo, e condividendo le vasche/i carroponti fra le ricette con
 #    ulteriori vincoli di non-sovrapposizione.
 #
-# 4. Collisione modellata in modo meno conservativo: invece di riservare
+# 3. Collisione modellata in modo meno conservativo: invece di riservare
 #    l'intera finestra [arrivo, partenza] a una stazione di confine, usare
 #    il profilo di posizione reale (position_profile in kinematics.py) per
 #    calcolare l'intervallo temporale esatto in cui il carroponte e'
 #    entro `safety_distance` dal confine, invece dell'intera sosta.
 #
-# 5. Tempo di presa/rilascio pezzo (immersione/emersione verticale) come
+# 4. Tempo di presa/rilascio pezzo (immersione/emersione verticale) come
 #    costante aggiuntiva su ogni travel_loaded/travel_empty.

@@ -2,8 +2,9 @@
 esempio.py
 ----------
 Esempio d'uso completo: definizione di una linea con 6 stazioni (carico,
-4 vasche di processo, scarico) servita da 2 carroponti, risoluzione del
-ciclogramma con CP-SAT e visualizzazione del risultato.
+4 vasche di processo, scarico) servita da 2 carroponti, con le ZONE scelte
+automaticamente, risoluzione del ciclogramma con CP-SAT e visualizzazione
+del risultato.
 
 Per eseguirlo:
     pip install ortools matplotlib
@@ -16,7 +17,7 @@ matplotlib.use("Agg")  # rimuovi questa riga se lavori in un ambiente interattiv
 import matplotlib.pyplot as plt
 
 from kinematics import Kinematics
-from model import Tank, StationSpec, HoistZone, ProblemData, solve
+from model import Tank, StationSpec, HoistZone, ProblemData, solve, solve_auto_zones
 from plotting import plot_cyclogram
 
 
@@ -47,7 +48,6 @@ def main():
         StationSpec("PASSIVAZIONE", 30, 45),
         StationSpec("SCARICO", 0, 0),
     ]
-    n_moves = len(route) - 1  # 6 mosse (indici 0..5)
 
     # ---------------------------------------------------------------
     # 3) Cinematica dei carroponti (vuoto / carico)
@@ -65,16 +65,11 @@ def main():
     safety_distance = 0.6  # [m] distanza minima aggiuntiva fra due carroponti
 
     # ---------------------------------------------------------------
-    # 5) Numero di carroponti e relative zone (hard-coded, v1).
-    #    Zone espresse come range di indici di MOSSA:
-    #      carroponte 1: mosse 0..2  (CARICO -> SGRASSO -> RISCIACQUO_1 -> ZINCATURA)
-    #      carroponte 2: mosse 3..5  (ZINCATURA -> RISCIACQUO_2 -> PASSIVAZIONE -> SCARICO)
-    #    Confine/handoff sulla vasca ZINCATURA (indice stazione 3).
+    # 5) Numero di carroponti: resta un INPUT (hard-coded). Le ZONE
+    #    (quali vasche assegnare a quale carroponte) sono invece scelte
+    #    automaticamente da solve_auto_zones: passiamo zones=None.
     # ---------------------------------------------------------------
-    zones = [
-        HoistZone(0, 2),
-        HoistZone(3, n_moves - 1),
-    ]
+    n_hoists = 2
 
     data = ProblemData(
         tanks=tanks,
@@ -85,34 +80,49 @@ def main():
         kin_loaded=kin_loaded,
         hoist_length=hoist_length,
         safety_distance=safety_distance,
-        zones=zones,
+        zones=None,  # <-- da scegliere automaticamente
         time_scale=100,  # risoluzione: centesimi di secondo
     )
 
     print(
-        f"Stazioni: {data.n_stations}  |  Mosse: {data.n_moves}  |  Carroponti: {data.n_hoists}"
+        f"Stazioni: {data.n_stations}  |  Mosse: {data.n_moves}  |  Carroponti: {n_hoists}"
     )
     print(f"Takt time ammesso: [{data.takt_min:.1f}, {data.takt_max:.1f}] s")
 
     # ---------------------------------------------------------------
-    # 6) Risoluzione
+    # 6) Risoluzione: prova tutte le suddivisioni contigue delle mosse in
+    #    n_hoists zone e tiene quella con il takt time minore.
     # ---------------------------------------------------------------
-    solution = solve(data, time_limit_s=20.0, log_search=False)
-    print(f"Stato solver: {solution.status}")
+    print("Provo automaticamente le suddivisioni in zone possibili...")
+    solution, zones = solve_auto_zones(
+        data, n_hoists=n_hoists, time_limit_per_candidate=15.0, log_progress=True
+    )
+    print(
+        f"Stato: {solution.status}  "
+        f"(suddivisioni tentate: {solution.raw.get('n_tried', '?')}, "
+        f"scartate a priori: {solution.raw.get('n_skipped', '?')})"
+    )
 
     if solution.status not in ("OPTIMAL", "FEASIBLE"):
-        print("Nessuna soluzione trovata entro la tolleranza di takt time data.")
-        print("Prova ad aumentare la tolleranza, ribilanciare le zone o aumentare")
-        print("il numero di carroponti.")
+        print("Nessuna suddivisione in zone e' risultata fattibile entro la")
+        print("tolleranza di takt time data. Prova ad aumentare la tolleranza")
+        print("o il numero di carroponti.")
         return
 
+    print(f"Zone scelte automaticamente: {[(z.lo, z.hi) for z in zones]}")
     print(f"Takt time trovato: {solution.T:.2f} s")
+
+    # data.zones e' rimasto None: per il grafico serve la versione con le
+    # zone effettivamente usate dalla soluzione trovata.
+    import dataclasses
+
+    data_final = dataclasses.replace(data, zones=zones)
 
     # ---------------------------------------------------------------
     # 7) Grafico del ciclogramma (2 cicli per mostrare la periodicita')
     # ---------------------------------------------------------------
     plot_cyclogram(
-        data,
+        data_final,
         solution,
         n_cycles=2,
         title="Ciclogramma linea di zincatura",

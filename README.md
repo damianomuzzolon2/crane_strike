@@ -49,34 +49,60 @@ salvato `ciclogramma.png` col grafico.
 4. **Takt time**: `takt_min`, `takt_max` (puoi calcolarli da
    `nominale ± tolleranza`).
 5. **Carroponti e zone** (`HoistZone`): ogni carroponte serve una **zona
-   contigua** di mosse (indici di trasporto, non di vasca). Il numero di
-   carroponti e le zone sono un **input** in questa v1 (non decisi dal
-   solver) — vedi sotto per come sceglierle.
+   contigua** di mosse (indici di trasporto, non di vasca). Il **numero**
+   di carroponti resta un input (`n_hoists`, hard-coded). Le **zone**
+   invece possono essere:
+   - scelte **automaticamente**: passa `zones=None` a `ProblemData` e usa
+     `solve_auto_zones(data, n_hoists=...)` al posto di `solve(data)` — vedi
+     sotto;
+   - oppure specificate a mano (lista di `HoistZone`) e usa `solve(data)`
+     direttamente, se hai gia' un'idea precisa di come dividere la linea.
 6. **Sicurezza**: `hoist_length` (ingombro) e `safety_distance` (margine
    minimo aggiuntivo) vengono usati per allargare le finestre temporali di
    occupazione dei punti di confine fra zone adiacenti.
 
-### Come scegliere le zone (v1)
+### Scelta automatica delle zone
 
-Dividi le stazioni in gruppi contigui, uno per carroponte, nell'ordine
-fisico lungo la rotaia. Il "confine" fra due carroponti adiacenti e' la
-stazione dove l'uno consegna e l'altro preleva. Una divisione ragionevole
-di partenza: bilancia il "contenuto" di ciascuna zona (somma di tempi di
-percorrenza e permanenza) in modo che nessuna zona superi da sola il takt
-time massimo — altrimenti quel carroponte non riuscirebbe a stare nel
-ciclo (vedi limitazioni sotto).
+```python
+data = ProblemData(..., zones=None, ...)
+solution, zones = solve_auto_zones(data, n_hoists=2, time_limit_per_candidate=15.0,
+                                    log_progress=True)
+```
+
+`solve_auto_zones` prova **tutte** le suddivisioni contigue possibili delle
+mosse in `n_hoists` zone (scartando a priori, senza invocare CP-SAT, quelle
+palesemente infattibili: una zona il cui solo trasporto-a-carico supera
+gia' da solo il takt time massimo) e tiene la soluzione con il takt time
+minore fra quelle fattibili. Il numero di suddivisioni possibili e'
+`C(n_moves-1, n_hoists-1)`: per una manciata di carroponti e qualche decina
+di mosse resta gestibile, ma cresce in fretta — il parametro
+`max_candidates` (default 500) fa fallire la chiamata con un messaggio
+chiaro se la ricerca esaustiva rischia di essere troppo lunga, cosi' puoi
+decidere se aumentarlo, ridurre il problema, o specificare le zone a mano.
+
+Nota: `data.zones` resta `None` dopo la chiamata (non viene modificato);
+usa `zones` (il secondo valore restituito) — ad es. con
+`dataclasses.replace(data, zones=zones)` — se ti serve un `ProblemData`
+completo per altri usi (es. richiamare `plot_cyclogram`).
 
 ## Assunzioni e limitazioni importanti (leggere prima di fidarsi dei risultati)
 
 Il modello implementato (vedi commenti dettagliati in testa a `model.py`)
 fa scelte di modellazione precise, in particolare:
 
-- **Zone contigue e fisse**: ogni carroponte gestisce sempre lo stesso
-  gruppo di mosse (stazioni). E' l'approccio piu' diffuso nella pratica
-  industriale, ma non e' la formulazione piu' generale possibile (le zone
-  sono un input, non decise dal solver).
+- **Zone contigue**: ogni carroponte gestisce sempre un gruppo contiguo di
+  mosse (stazioni). E' l'approccio piu' diffuso nella pratica industriale,
+  ma non e' la formulazione piu' generale possibile (un carroponte non puo'
+  "scavalcare" il territorio di un altro).
+- **Le zone sono scelte per enumerazione esaustiva, non dentro al modello
+  CP-SAT**: `solve_auto_zones` risolve un modello CP-SAT separato per
+  ciascuna suddivisione candidata e tiene la migliore, invece di rendere il
+  confine fra zone una variabile del modello unico. E' una scelta
+  deliberatamente piu' semplice e robusta (riusa `solve()` cosi' com'e',
+  gia' testato) a scapito della scalabilita' per problemi con molte mosse e
+  molti carroponti — vedi `max_candidates`.
 - **Ordine di visita libero entro la zona**: ogni carroponte puo' visitare
-  le mosse della propria zona in QUALSIASI ordine ad ogni ciclo (non piu'
+  le mosse della propria zona in QUALSIASI ordine ad ogni ciclo (non
   costretto a un unico giro sequenziale + un solo rientro), modellato con
   un vincolo di circuito ciclico (`AddCircuit`). Questo permette di trovare
   un ciclogramma fattibile anche quando il tempo "a calendario" della zona
@@ -97,9 +123,9 @@ fa scelte di modellazione precise, in particolare:
   prodotti diversi in questa versione).
 
 Nella sezione finale di `model.py` ("Estensioni possibili") sono descritte
-le direzioni per superare le limitazioni residue (zone decise dal solver,
-assegnazione non contigua fra zone, piu' ricette, collisione meno
-conservativa, tempi di presa/rilascio pezzo).
+le direzioni per superare le limitazioni residue (assegnazione non
+contigua fra zone, piu' ricette, collisione meno conservativa, tempi di
+presa/rilascio pezzo).
 
 ## Nota sui test effettuati
 
@@ -107,16 +133,18 @@ In questo ambiente di sviluppo non e' stato possibile installare `ortools`
 (nessun accesso di rete), quindi **la risoluzione CP-SAT vera e propria non
 e' stata eseguita qui**. Sono stati pero' testati direttamente:
 cinematica (`kinematics.py`), costruzione delle strutture dati e delle loro
-validazioni, e in particolare la ricostruzione della traiettoria
-(`_build_zone_trajectory`) con valori scelti a mano — incluso un caso con
-**ordine di visita non sequenziale** (es. un carroponte con zona di 4 mosse
-che le esegue nell'ordine 0→2→1→3→0, "saltando" avanti e indietro) per
-verificare che i segmenti risultino continui nel tempo e nello spazio e che
-il ciclo si chiuda correttamente su T. E' stato inoltre verificato il caso
-degenere di zona con una sola mossa. Il codice della funzione `solve`
-(inclusa la parte nuova con `AddCircuit` e le variabili di fase locale) e'
-stato controllato riga per riga contro la API di OR-Tools CP-SAT ed e'
-sintatticamente corretto (`py_compile` su tutti i file). Consiglio di
-eseguire `python esempio.py` sulla tua macchina (con `pip install ortools`)
-e di segnalarmi eventuali errori residui: possibili, data la complessita'
-del modello, senza un test end-to-end reale con il solver.
+validazioni (incluso `zones=None`), l'enumerazione delle suddivisioni
+contigue (`_enumerate_contiguous_partitions`, con verifica che ogni
+suddivisione copra tutte le mosse esattamente una volta), i controlli di
+validazione di `solve_auto_zones` (n_hoists eccessivo, max_candidates
+superato), e la ricostruzione della traiettoria (`_build_zone_trajectory`)
+con valori scelti a mano — incluso un caso con **ordine di visita non
+sequenziale** (es. un carroponte con zona di 4 mosse che le esegue
+nell'ordine 0→2→1→3→0) e un caso limite di puro arrotondamento numerico
+(la causa del secondo bug segnalato, ora corretto con una tolleranza
+proporzionata alla risoluzione dei tick). Il codice delle funzioni `solve`
+e `solve_auto_zones` e' stato controllato riga per riga contro la API di
+OR-Tools CP-SAT ed e' sintatticamente corretto (`py_compile` su tutti i
+file), ma **non** e' stato possibile eseguire una risoluzione CP-SAT reale
+end-to-end. Consiglio di eseguire `python esempio.py` sulla tua macchina
+(con `pip install ortools`) e di segnalarmi eventuali errori residui.
