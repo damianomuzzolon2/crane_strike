@@ -72,16 +72,21 @@ Il modello implementato (vedi commenti dettagliati in testa a `model.py`)
 fa scelte di modellazione precise, in particolare:
 
 - **Zone contigue e fisse**: ogni carroponte gestisce sempre lo stesso
-  gruppo di mosse, nello stesso ordine, ogni ciclo. E' l'approccio piu'
-  diffuso nella pratica industriale, ma non e' la formulazione piu'
-  generale possibile.
-- **Il modello e' corretto (sound) ma non completo**: ogni soluzione
-  trovata e' un ciclogramma fisicamente valido, privo di collisioni. Se
-  pero' il solver restituisce INFEASIBLE, non e' detto che il problema sia
-  davvero irrisolvibile: potrebbe servire una schedulazione piu' sofisticata
-  in cui un carroponte "si destreggia" fra piu' pezzi diversi nella propria
-  zona (non rappresentata qui). Prima di concludere che serve piu' hardware,
-  prova a ribilanciare le zone o ad aumentare la tolleranza sul takt time.
+  gruppo di mosse (stazioni). E' l'approccio piu' diffuso nella pratica
+  industriale, ma non e' la formulazione piu' generale possibile (le zone
+  sono un input, non decise dal solver).
+- **Ordine di visita libero entro la zona**: ogni carroponte puo' visitare
+  le mosse della propria zona in QUALSIASI ordine ad ogni ciclo (non piu'
+  costretto a un unico giro sequenziale + un solo rientro), modellato con
+  un vincolo di circuito ciclico (`AddCircuit`). Questo permette di trovare
+  un ciclogramma fattibile anche quando il tempo "a calendario" della zona
+  (attese nelle vasche incluse) supera abbondantemente il takt time: il
+  carroponte puo' andare a servire un'altra mossa mentre un pezzo e'
+  ancora a bagno, invece di restare fermo ad aspettare. Il vincolo che
+  resta davvero rigido e' che la somma dei tempi di trasporto carico e dei
+  trasferimenti a vuoto necessari (esclusi i tempi di attesa nelle vasche)
+  stia entro il takt time: se anche questo viene superato, nessun ordine
+  di visita puo' risolvere il problema.
 - **Collisioni modellate solo ai confini di zona**: e' l'unico punto in cui
   due carroponti condividono fisicamente lo spazio in questa formulazione.
   Le finestre di occupazione usate sono conservative (tutto l'intervallo fra
@@ -89,11 +94,11 @@ fa scelte di modellazione precise, in particolare:
   davvero sicura, ma potrebbe scartarne alcune "al limite" che in pratica
   sarebbero fattibili con un margine di sicurezza piu' fine.
 - **Un solo percorso vasche** condiviso da tutti i pezzi (nessun mix di
-  prodotti diversi in questa v1).
+  prodotti diversi in questa versione).
 
 Nella sezione finale di `model.py` ("Estensioni possibili") sono descritte
-le direzioni per superare queste limitazioni (zone decise dal solver,
-instradamento non contiguo via `AddCircuit`, piu' ricette, collisione meno
+le direzioni per superare le limitazioni residue (zone decise dal solver,
+assegnazione non contigua fra zone, piu' ricette, collisione meno
 conservativa, tempi di presa/rilascio pezzo).
 
 ## Nota sui test effettuati
@@ -102,12 +107,16 @@ In questo ambiente di sviluppo non e' stato possibile installare `ortools`
 (nessun accesso di rete), quindi **la risoluzione CP-SAT vera e propria non
 e' stata eseguita qui**. Sono stati pero' testati direttamente:
 cinematica (`kinematics.py`), costruzione delle strutture dati e delle loro
-validazioni, costruzione ed estrazione della traiettoria
-(`_build_trajectories`), normalizzazione di fase e disegno del ciclogramma
-(`plotting.py`), il tutto con valori scelti a mano e verificati
-manualmente contro i vincoli del modello. Il codice della funzione `solve`
-e' stato controllato riga per riga contro la API di OR-Tools CP-SAT ed e'
+validazioni, e in particolare la ricostruzione della traiettoria
+(`_build_zone_trajectory`) con valori scelti a mano — incluso un caso con
+**ordine di visita non sequenziale** (es. un carroponte con zona di 4 mosse
+che le esegue nell'ordine 0→2→1→3→0, "saltando" avanti e indietro) per
+verificare che i segmenti risultino continui nel tempo e nello spazio e che
+il ciclo si chiuda correttamente su T. E' stato inoltre verificato il caso
+degenere di zona con una sola mossa. Il codice della funzione `solve`
+(inclusa la parte nuova con `AddCircuit` e le variabili di fase locale) e'
+stato controllato riga per riga contro la API di OR-Tools CP-SAT ed e'
 sintatticamente corretto (`py_compile` su tutti i file). Consiglio di
 eseguire `python esempio.py` sulla tua macchina (con `pip install ortools`)
-e di segnalarmi eventuali errori residui: sono ovviamente possibile in un
-modello di questa complessita' senza un test end-to-end reale.
+e di segnalarmi eventuali errori residui: possibili, data la complessita'
+del modello, senza un test end-to-end reale con il solver.

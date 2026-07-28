@@ -17,16 +17,24 @@ APPROCCIO SCELTO E SUE ASSUNZIONI (importante leggere prima di usare il codice)
 2. Ogni carroponte serve una ZONA CONTIGUA di stazioni (zone-based CHSP):
    e' l'approccio piu' diffuso nella pratica industriale (ogni carroponte ha
    una porzione di linea di sua competenza). Le zone sono un INPUT (non
-   decise dal solver in questa v1) -- vedi "Estensioni possibili".
-   Poiche' le zone sono contigue, il pickup di una mossa e' sempre nello
-   stesso punto del drop-off della mossa precedente della stessa zona:
-   quindi ENTRO la zona non serve mai un transito a vuoto, tranne nel
-   "rientro ciclico" a fine zona (vedi punto 3).
+   decise dal solver in questa versione) -- vedi "Estensioni possibili".
 
-3. Ogni carroponte, dopo aver consegnato il pezzo alla fine della propria
-   zona, deve rientrare A VUOTO all'inizio della propria zona per essere
-   pronto al ciclo successivo (T secondi dopo). Questo rientro e' l'unico
-   spostamento a vuoto modellato esplicitamente.
+3. **Ordine di visita flessibile entro la zona** (v2): a differenza di una
+   prima versione che imponeva un unico giro sequenziale (stazione lo, poi
+   lo+1, ..., poi hi, poi un solo rientro a vuoto), qui ogni carroponte puo'
+   visitare le mosse della propria zona in QUALSIASI ordine ad ogni ciclo,
+   "destreggiandosi" fra piu' pezzi diversi (ad es. mentre un pezzo e'
+   ancora a bagno in una vasca con tempo di processo lungo, il carroponte
+   puo' andare a servire un'altra mossa della zona invece di restare fermo
+   ad aspettare). Questo e' modellato con un vincolo di CIRCUITO ciclico
+   (`CpModel.AddCircuit`) sulle mosse della zona: il carroponte compie,
+   ogni periodo T, un giro che tocca tutte le sue mosse esattamente una
+   volta, nell'ordine che il solver ritiene piu' conveniente, con tempi di
+   trasferimento a vuoto fra una mossa e la successiva (qualunque essa sia).
+   Questo permette di trovare soluzioni fattibili anche quando il contenuto
+   "a calendario" della zona (tempi di attesa nelle vasche inclusi) supera
+   abbondantemente il takt time -- cosa che il vecchio schema sequenziale
+   non riusciva a rappresentare.
 
 4. Le collisioni possono avvenire SOLO nelle stazioni di confine fra due
    zone adiacenti (l'unico punto fisico condiviso fra due carroponti).
@@ -36,14 +44,16 @@ APPROCCIO SCELTO E SUE ASSUNZIONI (importante leggere prima di usare il codice)
    sovrappongano MAI, nemmeno considerando la periodicita' (ciclo T).
 
 5. Il modello e' CORRETTO (sound): ogni soluzione trovata e' un ciclogramma
-   fisicamente valido e privo di collisioni. NON e' pero' COMPLETO: se un
-   carroponte dovesse "destreggiarsi" fra piu' pezzi diversi all'interno
-   della propria zona in un ordine non strettamente sequenziale (necessario
-   solo se il contenuto totale della zona, cioe' somma di attese e
-   spostamenti, supera il takt time), questo schema non lo rappresenta e il
-   solver puo' restituire INFEASIBLE anche se esisterebbe in teoria un
-   ciclogramma piu' sofisticato. In quel caso conviene ribilanciare le zone
-   o aumentare il numero di carroponti.
+   fisicamente valido e privo di collisioni. Rispetto alla versione con
+   ordine fisso, questa e' anche molto piu' COMPLETA (rappresenta la
+   quasi totalita' degli schemi di funzionamento realistici per un
+   carroponte in una zona), ma resta comunque una scelta di modellazione:
+   il vincolo davvero limitante ora e' che il contenuto "vivo" della zona
+   (somma dei tempi di trasporto carico + trasferimenti a vuoto necessari,
+   ESCLUSI i tempi di attesa nelle vasche) deve stare entro il takt time --
+   se anche questo viene superato, nessun ordine di visita puo' salvare la
+   situazione e serve ribilanciare le zone o aumentare il numero di
+   carroponti.
 """
 
 from __future__ import annotations
@@ -173,10 +183,36 @@ class Solution:
 # --------------------------------------------------------------------------
 # Costruzione e risoluzione del modello CP-SAT
 # --------------------------------------------------------------------------
+#
+# STRUTTURA DEL MODELLO (aggiornata per l'ordine di visita flessibile)
+#
+# 1. Catena di flusso pezzo (`actual_time`): invariata rispetto alla v1.
+#    actual_time[k] = istante di prelievo della mossa k per un pezzo di
+#    riferimento che attraversa l'intera linea; incatenata dai vincoli di
+#    permanenza min/max in ciascuna vasca.
+#
+# 2. Per ciascun carroponte (zona di mosse Z_h): invece di un ordine fisso
+#    lo,lo+1,...,hi + un unico rientro, si costruisce un CIRCUITO ciclico
+#    (`AddCircuit`) sulle mosse di Z_h: il carroponte le visita tutte
+#    esattamente una volta per periodo, nell'ordine che il solver sceglie.
+#    Per confrontare istanti che nella catena `actual_time` possono essere
+#    separati da piu' periodi T (tipico se una vasca ha un tempo di
+#    processo lungo), ogni mossa k riceve una variabile locale
+#    `local_pick[k]` = actual_time[k] mod T, ottenuta con una ricerca su un
+#    numero finito di "giri" possibili (mantenendo tutto LINEARE: nessun
+#    prodotto fra due variabili). La mossa lo_h e' presa come riferimento
+#    di "chiusura periodo": l'arco che rientra su di essa nel circuito e'
+#    l'unico a cui si somma +T.
+#
+# 3. Le variabili libere `dep_hi` (istante di partenza dal confine
+#    superiore della zona) e `arr_lo` (istante di arrivo, pronto, al
+#    confine inferiore) sono usate sia per ricostruire la traiettoria sia
+#    per il vincolo di non collisione ai confini fra zone adiacenti
+#    (identico nello spirito alla v1).
 
 
 def solve(
-    data: ProblemData, time_limit_s: float = 15.0, log_search: bool = False
+    data: ProblemData, time_limit_s: float = 20.0, log_search: bool = False
 ) -> Solution:
     # Import posticipato: cosi' il resto del modulo (dataclass, cinematica,
     # extraction, plotting) resta utilizzabile/testabile anche senza ortools
@@ -214,20 +250,26 @@ def solve(
     T_min, T_max = T_(data.takt_min), T_(data.takt_max)
     Tv = model.NewIntVar(T_min, T_max, "T")
 
-    # -- Orizzonte per i domini delle variabili (limite tecnico, non fisico) --
+    # -- Orizzonte e limiti tecnici per i domini delle variabili -----------
     horizon = (
         4 * T_max
         + sum(T_(s.dwell_max) for s in data.route)
         + sum(travel_loaded)
         + 10 * scale
     )
+    BIG = 10**7
+    n_shifts = math.ceil(horizon / T_min) + 2
 
-    # -- Variabili "actual_time[k]" = istante di inizio della mossa k
-    #    (istante di prelievo del pezzo dalla stazione k), per un pezzo di
-    #    riferimento che attraversa l'intera linea. Non sono vincolate a
-    #    stare dentro [0,T): rappresentano un tempo assoluto di riferimento;
-    #    la periodicita' entra in gioco solo nei vincoli di "rientro" e di
-    #    non-collisione (vedi sotto). --------------------------------------
+    def _as_intvar(expr, name):
+        """Materializza un'espressione lineare in un vero IntVar, legato
+        all'espressione con un vincolo di uguaglianza. Passare sempre IntVar
+        "puri" a NewIntervalVar (invece di espressioni composte) e' piu'
+        robusto fra le diverse versioni di OR-Tools."""
+        v = model.NewIntVar(-BIG, BIG, name)
+        model.Add(v == expr)
+        return v
+
+    # -- 1) Catena di flusso pezzo (invariata rispetto alla v1) -------------
     actual_time = [model.NewIntVar(0, horizon, f"at_{k}") for k in range(data.n_moves)]
     model.Add(actual_time[0] == 0)
 
@@ -241,56 +283,140 @@ def solve(
         model.Add(actual_time[k] >= arrival + dwell_min)
         model.Add(actual_time[k] <= arrival + dwell_max)
 
-    # -- Per ogni zona (= carroponte): variabile "depart" (istante in cui
-    #    lascia la stazione di confine superiore per rientrare a vuoto
-    #    all'inizio della propria zona) e vincolo di rientro entro T. -------
-    depart = []
-    arrive_back = []
+    # -- 2) Per ciascun carroponte: circuito ciclico sulle mosse della
+    #    propria zona, con ordine di visita libero. ------------------------
+    zone_data = []
     for h, z in enumerate(data.zones):
-        drop_off_time = (
-            actual_time[z.hi] + travel_loaded[z.hi]
-        )  # arrivo a stazione hi+1
-        d = model.NewIntVar(0, horizon, f"depart_{h}")
-        model.Add(d >= drop_off_time)
-        depart.append(d)
+        moves = list(range(z.lo, z.hi + 1))
+        n_h = len(moves)
+        lo_h, hi_h = z.lo, z.hi
 
-        pos_hi1 = data.station_position(z.hi + 1)
-        pos_lo = data.station_position(z.lo)
-        t_empty_return = travel_empty_ticks(pos_hi1, pos_lo)
-        arr_back = d + t_empty_return
-        arrive_back.append(arr_back)
+        # -- fase locale (in [0,T)) di ciascuna mossa della zona, agganciata
+        #    alla catena globale actual_time tramite una ricerca su un
+        #    numero finito di possibili "giri" (shift): resta tutto LINEARE.
+        local_pick = {}
+        for k in moves:
+            lp = model.NewIntVar(0, T_max - 1, f"lp_{h}_{k}")
+            lits = []
+            for m in range(0, n_shifts + 1):
+                lit = model.NewBoolVar(f"lp_{h}_{k}_shift_{m}")
+                model.Add(lp == actual_time[k] - m * Tv).OnlyEnforceIf(lit)
+                lits.append(lit)
+            model.AddExactlyOne(lits)
+            model.Add(lp < Tv)
+            local_pick[k] = lp
 
-        # deve rientrare in tempo per il prelievo successivo (T secondi dopo
-        # l'attuale prelievo alla stazione lo)
-        model.Add(arr_back <= actual_time[z.lo] + Tv)
+        finish = {
+            k: _as_intvar(local_pick[k] + travel_loaded[k], f"fin_{h}_{k}")
+            for k in moves
+        }
 
-    # -- Vincoli di non collisione alle stazioni di confine fra zone
+        if n_h == 1:
+            # Caso degenere: una sola mossa nella zona. Il "circuito" e'
+            # semplicemente andata (mossa) + ritorno a vuoto, come in v1.
+            k0 = moves[0]
+            dep_hi = model.NewIntVar(0, BIG, f"dep_hi_{h}")
+            model.Add(dep_hi >= finish[k0])
+            arr_lo = model.NewIntVar(0, BIG, f"arr_lo_{h}")
+            t_ret = travel_empty_ticks(
+                data.station_position(hi_h + 1), data.station_position(lo_h)
+            )
+            model.Add(arr_lo == dep_hi + t_ret)
+            model.Add(arr_lo <= local_pick[lo_h] + Tv)
+            zone_data.append(
+                dict(
+                    h=h,
+                    z=z,
+                    moves=moves,
+                    local_pick=local_pick,
+                    finish=finish,
+                    dep_hi=dep_hi,
+                    arr_lo=arr_lo,
+                    arc_lits=None,
+                )
+            )
+            continue
+
+        # -- circuito generale per n_h > 1: il carroponte visita tutte le
+        #    mosse della zona una volta a periodo, in un ordine libero. ----
+        local_idx = {k: i for i, k in enumerate(moves)}
+        arc_lits = {}
+        arcs_for_circuit = []
+        for k1 in moves:
+            for k2 in moves:
+                if k1 == k2:
+                    continue
+                lit = model.NewBoolVar(f"arc_{h}_{k1}_{k2}")
+                arc_lits[(k1, k2)] = lit
+                arcs_for_circuit.append((local_idx[k1], local_idx[k2], lit))
+        model.AddCircuit(arcs_for_circuit)
+
+        # vincolo di tempo per ciascun arco possibile: se selezionato,
+        # bisogna riuscire ad arrivare in tempo alla mossa successiva
+        # (con +T solo se si sta richiudendo il periodo su lo_h).
+        for (k1, k2), lit in arc_lits.items():
+            t_emp = travel_empty_ticks(
+                data.station_position(k1 + 1), data.station_position(k2)
+            )
+            bound = local_pick[k2] + (Tv if k2 == lo_h else 0)
+            model.Add(finish[k1] + t_emp <= bound).OnlyEnforceIf(lit)
+
+        # -- variabili libere di confine (per traiettoria e non-collisione) --
+        dep_hi = model.NewIntVar(0, BIG, f"dep_hi_{h}")
+        model.Add(dep_hi >= finish[hi_h])
+        for k2 in moves:
+            if k2 == hi_h:
+                continue
+            t_emp = travel_empty_ticks(
+                data.station_position(hi_h + 1), data.station_position(k2)
+            )
+            bound = local_pick[k2] + (Tv if k2 == lo_h else 0)
+            model.Add(dep_hi + t_emp <= bound).OnlyEnforceIf(arc_lits[(hi_h, k2)])
+
+        arr_lo = model.NewIntVar(0, BIG, f"arr_lo_{h}")
+        for k1 in moves:
+            if k1 == lo_h:
+                continue
+            t_emp = travel_empty_ticks(
+                data.station_position(k1 + 1), data.station_position(lo_h)
+            )
+            model.Add(arr_lo >= finish[k1] + t_emp).OnlyEnforceIf(arc_lits[(k1, lo_h)])
+        model.Add(arr_lo <= local_pick[lo_h] + Tv)
+
+        # se l'arco hi_h -> lo_h e' selezionato (rientro diretto, senza
+        # visitare altre mosse nel mezzo), dep_hi e arr_lo descrivono lo
+        # STESSO spostamento a vuoto: vanno legati fra loro esattamente.
+        if (hi_h, lo_h) in arc_lits:
+            t_emp_direct = travel_empty_ticks(
+                data.station_position(hi_h + 1), data.station_position(lo_h)
+            )
+            model.Add(arr_lo == dep_hi + t_emp_direct).OnlyEnforceIf(
+                arc_lits[(hi_h, lo_h)]
+            )
+
+        zone_data.append(
+            dict(
+                h=h,
+                z=z,
+                moves=moves,
+                local_pick=local_pick,
+                finish=finish,
+                dep_hi=dep_hi,
+                arr_lo=arr_lo,
+                arc_lits=arc_lits,
+            )
+        )
+
+    # -- 3) Vincoli di non collisione alle stazioni di confine fra zone
     #    adiacenti (uniche stazioni fisicamente condivise). -----------------
-    # NOTA IMPORTANTE: due eventi periodici di periodo T possono essere
-    # sfasati anche di PIU' di un ciclo: ad esempio se una vasca ha un
-    # tempo di processo molto piu' lungo del takt time (tipico dei bagni di
-    # trattamento superficiale), l'evento "pericoloso" nel confine puo'
-    # distare diversi multipli di T. Percio' generiamo un numero di copie
-    # traslate sufficiente a coprire l'intero orizzonte del modello, non
-    # solo il ciclo immediatamente precedente/successivo.
-    n_shifts = math.ceil(horizon / T_min) + 2
-    BIG = 10**7  # limite tecnico largo per i domini delle variabili ausiliarie
-
-    def _as_intvar(expr, name):
-        """Materializza un'espressione lineare (variabile + costanti, anche
-        con coefficienti negativi) in un vero e proprio IntVar, legato
-        all'espressione con un vincolo di uguaglianza. Passare sempre
-        IntVar "puri" a NewIntervalVar (invece di espressioni composte
-        direttamente) e' piu' robusto fra le diverse versioni di OR-Tools."""
-        v = model.NewIntVar(-BIG, BIG, name)
-        model.Add(v == expr)
-        return v
-
+    # NOTA: due eventi periodici di periodo T possono essere sfasati anche
+    # di PIU' di un ciclo (vasche con tempo di processo lungo rispetto al
+    # takt time): generiamo un numero di copie traslate sufficiente a
+    # coprire l'intero orizzonte del modello.
     def add_cyclic_no_overlap(start_a, end_a, start_b, end_b, name):
         """Impone che [start_a,end_a] non si sovrapponga MAI a [start_b,end_b]
         ne' ad alcuna sua traslazione di un multiplo intero di T (positivo o
-        negativo), catturando correttamente la periodicita' anche quando i
-        due eventi sono sfasati di piu' di un ciclo."""
+        negativo)."""
         sa = _as_intvar(start_a, name + "_sA")
         ea = _as_intvar(end_a, name + "_eA")
         size_a = model.NewIntVar(0, horizon, name + "_szA")
@@ -308,24 +434,15 @@ def solve(
         model.AddNoOverlap(intervals)
 
     for h in range(data.n_hoists - 1):
-        z_left = data.zones[h]
-        z_right = data.zones[h + 1]
+        zL, zR = zone_data[h], zone_data[h + 1]
+        z_left, z_right = zL["z"], zR["z"]
         assert z_left.hi + 1 == z_right.lo, "le zone devono essere contigue"
 
-        # occupazione del confine da parte del carroponte di sinistra:
-        # da quando consegna (drop-off) a quando riparte (depart), +margine
-        drop_off_left = actual_time[z_left.hi] + travel_loaded[z_left.hi]
-        occ_left_start = drop_off_left - safety_buffer
-        occ_left_end = depart[h] + safety_buffer
+        occ_left_start = zL["finish"][z_left.hi] - safety_buffer
+        occ_left_end = zL["dep_hi"] + safety_buffer
 
-        # occupazione del confine da parte del carroponte di destra: come
-        # costruito sopra, arrive_back[h+1] e' il rientro che rende il
-        # carroponte pronto per il prelievo del GIRO SUCCESSIVO (T secondi
-        # dopo l'attuale actual_time[lo]) -- percio' la finestra corretta è
-        # da arrive_back fino a (actual_time[lo] + T), non fino a
-        # actual_time[lo] stesso.
-        occ_right_start = arrive_back[h + 1] - safety_buffer
-        occ_right_end = actual_time[z_right.lo] + Tv + safety_buffer
+        occ_right_start = zR["arr_lo"] - safety_buffer
+        occ_right_end = zR["local_pick"][z_right.lo] + Tv + safety_buffer
 
         add_cyclic_no_overlap(
             occ_left_start,
@@ -349,17 +466,36 @@ def solve(
         return Solution(status=status_name, T=None)
 
     T_seconds = data.to_seconds(solver.Value(Tv))
-    at_values = [data.to_seconds(solver.Value(v)) for v in actual_time]
-    depart_values = [data.to_seconds(solver.Value(v)) for v in depart]
 
-    segments_per_hoist = _build_trajectories(data, at_values, depart_values, T_seconds)
+    segments_per_hoist = []
+    for zd in zone_data:
+        z = zd["z"]
+        moves = zd["moves"]
+        lp_val = {k: data.to_seconds(solver.Value(zd["local_pick"][k])) for k in moves}
+        dep_hi_val = data.to_seconds(solver.Value(zd["dep_hi"]))
+        arr_lo_val = data.to_seconds(solver.Value(zd["arr_lo"]))
 
-    raw = {
-        "actual_time": at_values,
-        "depart": depart_values,
-        "objective": solver.ObjectiveValue(),
-        "wall_time": solver.WallTime(),
-    }
+        if zd["arc_lits"] is None:
+            order = [z.lo]
+        else:
+            nxt = {}
+            for (k1, k2), lit in zd["arc_lits"].items():
+                if solver.Value(lit):
+                    nxt[k1] = k2
+            order = [z.lo]
+            cur = z.lo
+            while True:
+                cur = nxt[cur]
+                if cur == z.lo:
+                    break
+                order.append(cur)
+
+        segs = _build_zone_trajectory(
+            data, z, order, lp_val, dep_hi_val, arr_lo_val, T_seconds
+        )
+        segments_per_hoist.append(segs)
+
+    raw = {"objective": solver.ObjectiveValue(), "wall_time": solver.WallTime()}
     return Solution(
         status=status_name, T=T_seconds, segments_per_hoist=segments_per_hoist, raw=raw
     )
@@ -367,85 +503,108 @@ def solve(
 
 # --------------------------------------------------------------------------
 # Costruzione della traiettoria (posizione nel tempo) a partire dai valori
-# risolti. Separata dalla risoluzione CP-SAT cosi' da poter essere testata
-# anche senza risolvere realmente un modello (es. con valori scelti a mano).
+# risolti, per UNA zona/carroponte. Separata dalla risoluzione CP-SAT cosi'
+# da poter essere testata anche senza risolvere realmente un modello (es.
+# con valori scelti a mano).
 # --------------------------------------------------------------------------
 
 
-def _build_trajectories(
-    data: ProblemData, actual_time: list[float], depart: list[float], T: float
-) -> list[list[Segment]]:
-    """Costruisce, per ciascun carroponte, la sequenza di segmenti che ne
-    descrive la traiettoria entro UN ciclo. Poiche' actual_time[] descrive
-    un unico "pezzo di riferimento" che attraversa l'intera linea (e quindi
-    puo' avere valori grandi, anche diversi multipli di T, per le zone piu'
-    a valle), qui normalizziamo la traiettoria di ogni carroponte in modo
-    che il suo primo prelievo cada nell'intervallo [0,T): questo allinea
-    visivamente tutti i carroponti sulla stessa finestra 0..T, come e'
-    convenzione nei ciclogrammi."""
-    segments_per_hoist: list[list[Segment]] = []
-    for h, z in enumerate(data.zones):
-        segs: list[Segment] = []
-        phase = actual_time[z.lo] % T  # fase del prelievo iniziale dentro [0,T)
-        lap_offset = actual_time[z.lo] - phase  # multiplo di T da sottrarre a tutto
+def _build_zone_trajectory(
+    data: ProblemData,
+    zone: HoistZone,
+    order: list[int],
+    local_pick: dict[int, float],
+    dep_hi: float,
+    arr_lo: float,
+    T: float,
+) -> list[Segment]:
+    """order: lista degli indici di mossa nell'ordine in cui il carroponte
+    le esegue entro un periodo (parte e torna a zone.lo).
+    local_pick[k]: istante [s], in [0,T), di prelievo per la mossa k.
+    dep_hi: istante [s] in cui il carroponte lascia il confine superiore
+        della zona (dopo la mossa zone.hi) per il successivo spostamento a
+        vuoto (puo' differire dal minimo stretto: e' una scelta del solver).
+    arr_lo: istante [s] in cui il carroponte torna pronto al confine
+        inferiore della zona (zone.lo), per il prelievo di QUESTO ciclo +T.
+    """
+    # Tolleranza numerica: il modello CP-SAT lavora con tempi arrotondati al
+    # tick (risoluzione 1/time_scale secondi), mentre qui ricalcoliamo i
+    # tempi di percorrenza con la formula cinematica "esatta" in virgola
+    # mobile -- le due cose possono differire di qualche tick per puro
+    # arrotondamento, senza che ci sia un'incoerenza reale nel modello.
+    EPS = max(10.0 / data.time_scale, 1e-6)
+    segs: list[Segment] = []
+    n = len(order)
 
-        def shift_time(t):
-            return t - lap_offset
+    for i, k in enumerate(order):
+        x0 = data.station_position(k)
+        x1 = data.station_position(k + 1)
+        t0 = local_pick[k]
+        t1 = t0 + _travel_time_seconds(abs(x1 - x0), data.kin_loaded)
+        segs.append(Segment("loaded", t0, t1, x0, x1, data.kin_loaded))
 
-        for k in range(z.lo, z.hi + 1):
-            x0 = data.station_position(k)
-            x1 = data.station_position(k + 1)
-            t0 = shift_time(actual_time[k])
-            t1 = t0 + _travel_time_seconds(abs(x1 - x0), data.kin_loaded)
-            segs.append(Segment("loaded", t0, t1, x0, x1, data.kin_loaded))
-            if k < z.hi:
-                t_next = shift_time(actual_time[k + 1])
-                if t_next > t1:
-                    segs.append(Segment("wait", t1, t_next, x1, x1, None))
-        # attesa (eventuale) prima del rientro a vuoto
-        last_drop_time = segs[-1].t_end
-        d = shift_time(depart[h])
-        if d < last_drop_time - 1e-6:
+        is_last = i == n - 1
+        nxt_k = order[0] if is_last else order[i + 1]
+        x1_next = data.station_position(nxt_k)
+        travel_e = _travel_time_seconds(abs(x1_next - x1), data.kin_empty)
+
+        depart_known = k == zone.hi
+        arrive_known = nxt_k == zone.lo
+
+        if depart_known and arrive_known:
+            depart_t, arrive_t = dep_hi, arr_lo
+        elif depart_known:
+            depart_t = dep_hi
+            arrive_t = depart_t + travel_e
+        elif arrive_known:
+            arrive_t = arr_lo
+            depart_t = arrive_t - travel_e
+        else:
+            # transizione interna alla zona: nessuna variabile libera
+            # dedicata nel modello. Convenzione per la visualizzazione:
+            # parte non appena possibile (nessuna attesa "gratuita" prima
+            # della partenza; l'eventuale margine e' mostrato come attesa
+            # DOPO l'arrivo, prima del prelievo successivo).
+            depart_t = t1
+            arrive_t = depart_t + travel_e
+
+        if depart_t < t1 - EPS:
             raise ValueError(
-                f"depart[{h}]={d} precede la consegna dell'ultimo pezzo ({last_drop_time}): "
-                f"valori incoerenti (nel modello CP-SAT questo e' impedito da un vincolo)."
+                f"Valori incoerenti: partenza ({depart_t}) precede la consegna "
+                f"({t1}) per la mossa {k}. Controlla i vincoli del modello."
             )
-        if d > last_drop_time:
-            segs.append(
-                Segment("wait", last_drop_time, d, segs[-1].x_end, segs[-1].x_end, None)
+        elif depart_t < t1:
+            depart_t = t1  # scarto minuscolo di arrotondamento, non un errore reale
+        if depart_t > t1 + EPS:
+            segs.append(Segment("wait", t1, depart_t, x1, x1, None))
+        segs.append(Segment("empty", depart_t, arrive_t, x1, x1_next, data.kin_empty))
+
+        target_pick = local_pick[nxt_k] + (T if nxt_k == zone.lo else 0)
+        if target_pick < arrive_t - EPS:
+            raise ValueError(
+                f"Valori incoerenti: arrivo ({arrive_t}) e' successivo al prelievo "
+                f"target ({target_pick}) per la mossa {nxt_k}. Controlla i vincoli."
             )
-        # rientro a vuoto
-        x_hi1 = data.station_position(z.hi + 1)
-        x_lo = data.station_position(z.lo)
-        t_arrive_back = d + _travel_time_seconds(abs(x_hi1 - x_lo), data.kin_empty)
-        segs.append(Segment("empty", d, t_arrive_back, x_hi1, x_lo, data.kin_empty))
-        # attesa fino al prossimo ciclo (prelievo successivo)
-        next_pickup = shift_time(actual_time[z.lo]) + T
-        if next_pickup > t_arrive_back:
-            segs.append(Segment("wait", t_arrive_back, next_pickup, x_lo, x_lo, None))
-        segments_per_hoist.append(segs)
-    return segments_per_hoist
+        elif target_pick < arrive_t:
+            target_pick = (
+                arrive_t  # scarto minuscolo di arrotondamento, non un errore reale
+            )
+        if target_pick > arrive_t + EPS:
+            segs.append(Segment("wait", arrive_t, target_pick, x1_next, x1_next, None))
+
+    return segs
 
 
 # --------------------------------------------------------------------------
-# Estensioni possibili (v2 e oltre) -- non implementate in questo file
+# Estensioni possibili -- non implementate in questo file
 # --------------------------------------------------------------------------
 # 1. Zone decise dal solver: invece di passare `zones` come input fisso,
 #    introdurre variabili intere "boundary_h" (posizione di confine fra
 #    carroponte h e h+1) e ricostruire i vincoli sopra parametricamente.
-#    Aumenta la qualita' delle soluzioni ma anche la complessita' del
-#    modello (i coefficienti travel_loaded/travel_empty smettono di essere
-#    costanti se dipendono da confini variabili... in realta' restano
-#    costanti per-mossa, cambia solo *quale* mossa appartiene a quale
-#    carroponte: percio' e' fattibile con variabili booleane is_h_k, in
-#    modo analogo a quanto discusso nella progettazione).
 #
-# 2. Assegnazione non contigua / instradamento generale: un carroponte che
-#    "salta" fra mosse non consecutive (utile se il contenuto di una zona
-#    supera il takt time). Richiede una formulazione a circuito (vedi
-#    `model.AddCircuit` / `AddMultipleCircuit` di OR-Tools) o una
-#    formulazione a job-shop con intervalli opzionali per ogni coppia
-#    (mossa, carroponte) e vincoli di NoOverlap generalizzati.
+# 2. Assegnazione non contigua fra zone (un carroponte che sconfina
+#    occasionalmente nel territorio del vicino): richiederebbe estendere
+#    il circuito e la logica di confine a insiemi di mosse non fissi.
 #
 # 3. Piu' ricette (prodotti diversi che seguono percorsi diversi fra le
 #    vasche): si generalizza duplicando la catena actual_time per ciascuna
