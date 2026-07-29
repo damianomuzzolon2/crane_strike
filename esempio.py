@@ -21,6 +21,7 @@ import matplotlib.pyplot as plt
 from kinematics import Kinematics
 from model import Tank, StationSpec, HoistZone, ProblemData, solve_auto_hoists
 from plotting import plot_cyclogram
+from verify import verify_solution
 
 
 def main():
@@ -118,7 +119,21 @@ def main():
     data_final = dataclasses.replace(data, zones=zones)
 
     # ---------------------------------------------------------------
-    # 7) Grafico del ciclogramma (2 cicli per mostrare la periodicita')
+    # 7) Verifica indipendente: ricontrolla la soluzione in Python puro,
+    #    senza passare da CP-SAT, campionando finemente le posizioni reali
+    #    dei carroponti. Serve a intercettare eventuali errori nella
+    #    formulazione del modello, che altrimenti nessuno noterebbe.
+    #    Non e' bloccante: il grafico va disegnato comunque.
+    # ---------------------------------------------------------------
+    report = verify_solution(data_final, solution)
+    print(report.summary())
+    if not report.ok:
+        print("ATTENZIONE: la soluzione NON supera la verifica indipendente.")
+        print("Le violazioni elencate sopra vanno esaminate prima di usare")
+        print("questo ciclogramma su un impianto reale.")
+
+    # ---------------------------------------------------------------
+    # 8) Grafico del ciclogramma (2 cicli per mostrare la periodicita')
     # ---------------------------------------------------------------
     plot_cyclogram(
         data_final,

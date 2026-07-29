@@ -26,6 +26,9 @@ periodici. È una scelta valida: il codice qui sotto la usa.
 - `model.py` — strutture dati di input, costruzione del modello CP-SAT e
   risoluzione, estrazione della traiettoria di ciascun carroponte.
 - `plotting.py` — disegna il ciclogramma (posizione vs tempo).
+- `verify.py` — **verificatore indipendente**: ricontrolla in Python puro
+  (senza CP-SAT) che la soluzione trovata sia davvero valida.
+- `test_verify.py` — test del verificatore, non richiede OR-Tools.
 - `esempio.py` — esempio completo end-to-end, eseguibile da riga di comando.
 
 ## Installazione ed esecuzione
@@ -108,6 +111,70 @@ usa `zones` (il secondo valore restituito) — ad es. con
 `dataclasses.replace(data, zones=zones)` — se ti serve un `ProblemData`
 completo per altri usi (es. richiamare `plot_cyclogram`).
 
+## Verifica indipendente della soluzione
+
+```python
+from verify import verify_solution
+
+report = verify_solution(data_final, solution)   # data_final ha le zone valorizzate
+print(report.summary())
+if not report.ok:
+    ...
+```
+
+`esempio.py` la esegue automaticamente dopo ogni risoluzione.
+
+Il verificatore **non usa CP-SAT**: riparte dalla soluzione e ricontrolla ogni
+vincolo in Python puro. Serve a rispondere alla domanda "e se fosse sbagliata
+la formulazione stessa del modello?" — in quel caso il solver restituisce
+comunque una soluzione dichiarata `OPTIMAL` e nulla se ne accorgerebbe.
+Controlla:
+
+1. struttura (takt time nella banda, zone contigue e coprenti);
+2. **layout**: stazioni cosi' vicine a un confine di zona che il modello non
+   le vincola (vedi sotto);
+3. coerenza dei segmenti (continuita' nel tempo e nello spazio, ciclo di
+   durata esattamente T, traiettoria che si richiude);
+4. copertura delle mosse e durate delle tratte contro la cinematica reale;
+5. coerenza di fase, cioe' la linearizzazione modulo T del modello;
+6. permanenze min/max in vasca, dai tempi **assoluti**;
+7. fattibilita' degli spostamenti a vuoto;
+8. **collisioni reali**: la posizione di ogni carroponte viene campionata con
+   `position_profile` (il profilo cinematico vero, non solo gli estremi delle
+   finestre) e si controlla `|x_i(t) - x_j(t)| >= hoist_length + safety_distance`
+   per ogni coppia e ogni istante;
+9. quanti pezzi stanno contemporaneamente in ciascuna vasca.
+
+Il campionamento del punto 8 include **tutti** gli spigoli dei profili
+cinematici piu' una griglia uniforme di un tick. Fra due spigoli la posizione
+e' un polinomio di grado ≤ 2, quindi l'errore del minimo cosi' trovato e'
+limitato in modo rigoroso da `(a_i + a_j)·dt²/8` — circa 0,02 mm con i valori
+di default. Il valore e' riportato in `report.sampling_error_bound`.
+
+### Il verificatore e' piu' severo del modello (di proposito)
+
+Il modello riserva l'intera finestra di sosta alla stazione di **confine** fra
+due zone, gonfiata di un buffer temporale ricavato da **mezzo** ingombro
+(`hoist_length/2 + safety_distance`). Il verificatore invece pretende
+`hoist_length + safety_distance` fra i due carroponti **ovunque e sempre**.
+
+Sul confine i due criteri sono compatibili: la non sovrapposizione delle
+finestre separa partenza e arrivo di due buffer, e poiche' lo spazio percorso
+da fermo cresce in modo convesso, nell'istante peggiore entrambi i carroponti
+sono ad almeno mezzo ingombro dal confine, su lati opposti. La separazione
+garantita e' quindi `hoist_length + 2·safety_distance`, piu' del richiesto.
+
+**La garanzia cade in un caso preciso**: se la stazione *adiacente* a una
+stazione di confine dista meno di `hoist_length + safety_distance`, il
+carroponte ci sosta dentro la zona di esclusione del vicino, e il modello non
+ha alcun vincolo che lo impedisca. Il controllo 2 segnala questa condizione in
+anticipo, come avviso; il controllo 8 la trova poi come errore se si traduce
+in una collisione vera. E' una **lacuna nota del modello**, non un falso
+positivo del verificatore: con vasche molto ravvicinate CP-SAT restituisce
+soluzioni `OPTIMAL` che il verificatore respinge, ed ha ragione lui.
+Nell'esempio fornito le vasche distano almeno 2,5 m contro 1,8 m richiesti,
+quindi la condizione e' rispettata e la verifica passa pulita.
+
 ## Assunzioni e limitazioni importanti (leggere prima di fidarsi dei risultati)
 
 Il modello implementato (vedi commenti dettagliati in testa a `model.py`)
@@ -142,6 +209,14 @@ fa scelte di modellazione precise, in particolare:
   arrivo e partenza), quindi il modello non rifiuta mai una soluzione
   davvero sicura, ma potrebbe scartarne alcune "al limite" che in pratica
   sarebbero fattibili con un margine di sicurezza piu' fine.
+  **Attenzione**: questo vale solo se le stazioni adiacenti a un confine
+  distano almeno `hoist_length + safety_distance`; altrimenti il modello ha
+  una vera lacuna — vedi "Il verificatore e' piu' severo del modello".
+- **Nessun vincolo di capienza delle vasche**: nulla impedisce che piu' pezzi
+  si trovino contemporaneamente nella stessa vasca. Accade sistematicamente
+  quando la permanenza supera il takt time (nell'esempio ZINCATURA ha una
+  permanenza di ~200 s con takt 110 s, quindi ci sono sempre 2 pezzi dentro).
+  Il verificatore lo riporta come nota informativa.
 - **Un solo percorso vasche** condiviso da tutti i pezzi (nessun mix di
   prodotti diversi in questa versione).
 
@@ -152,9 +227,30 @@ presa/rilascio pezzo).
 
 ## Nota sui test effettuati
 
-In questo ambiente di sviluppo non e' stato possibile installare `ortools`
-(nessun accesso di rete), quindi **la risoluzione CP-SAT vera e propria non
-e' stata eseguita qui**. Sono stati pero' testati direttamente:
+```bash
+python kinematics.py     # autotest della cinematica
+python test_verify.py    # test del verificatore (non richiede OR-Tools)
+python esempio.py        # risoluzione CP-SAT reale + verifica + grafico
+```
+
+**La risoluzione CP-SAT e' ora eseguita e verificata end-to-end.** Sull'esempio
+fornito il solver trova `T = 110 s` con un solo carroponte e il verificatore
+indipendente conferma la soluzione senza errori. Sono stati provati anche i
+casi a 2 e 3 carroponti forzati (zone imposte a mano): separazione minima
+rispettivamente 3,50 m e 3,00 m contro 1,80 m richiesti.
+
+`test_verify.py` contiene 13 casi: uno corretto e dodici rotti di proposito
+(collisione statica, collisione visibile solo campionando dentro il
+movimento, permanenze fuori tolleranza, periodicita' incoerente, ciclo di
+durata sbagliata, discontinuita', tratta piu' veloce della cinematica, layout
+stretto, takt fuori banda, capienza vasca, input malformato, soluzione senza
+valori risolti). Tutti e 13 passano.
+
+### Storia precedente
+
+Nella prima stesura non era stato possibile installare `ortools`
+(nessun accesso di rete), quindi la risoluzione CP-SAT non era mai stata
+eseguita. Erano stati testati solo:
 cinematica (`kinematics.py`), costruzione delle strutture dati e delle loro
 validazioni (incluso `zones=None`), l'enumerazione delle suddivisioni
 contigue (`_enumerate_contiguous_partitions`, con verifica che ogni
@@ -168,10 +264,7 @@ risoluzione reale), e la ricostruzione della traiettoria
 **ordine di visita non sequenziale** (es. un carroponte con zona di 4 mosse
 che le esegue nell'ordine 0→2→1→3→0) e un caso limite di puro arrotondamento
 numerico (la causa del secondo bug segnalato, ora corretto con una
-tolleranza proporzionata alla risoluzione dei tick). Il codice delle
-funzioni `solve`, `solve_auto_zones` e `solve_auto_hoists` e' stato
-controllato riga per riga contro la API di OR-Tools CP-SAT ed e'
-sintatticamente corretto (`py_compile` su tutti i file), ma **non** e'
-stato possibile eseguire una risoluzione CP-SAT reale end-to-end. Consiglio
-di eseguire `python esempio.py` sulla tua macchina
-(con `pip install ortools`) e di segnalarmi eventuali errori residui.
+tolleranza proporzionata alla risoluzione dei tick). Il codice era stato
+controllato riga per riga contro la API di OR-Tools CP-SAT, ma senza mai
+eseguirlo: e' esattamente il rischio residuo che il verificatore indipendente
+descritto sopra e' stato costruito per coprire.

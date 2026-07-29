@@ -164,6 +164,28 @@ class ProblemData:
     def to_seconds(self, ticks: int) -> float:
         return ticks / self.time_scale
 
+    @property
+    def eps_seconds(self) -> float:
+        """Tolleranza numerica coerente con la risoluzione dei tick. Il modello
+        CP-SAT arrotonda ogni durata al tick; chi ricalcola le stesse durate in
+        virgola mobile deve accettare uno scarto di questo ordine."""
+        return max(10.0 / self.time_scale, 1e-6)
+
+    # -- durate delle tratte (unico punto in cui sono definite) -------------
+    #
+    # Tutto il resto del codice (modello CP-SAT, ricostruzione traiettoria,
+    # pre-filtro delle zone, verificatore) DEVE passare da qui: cosi' una
+    # modifica alla definizione di "durata di una mossa" si propaga ovunque
+    # senza rischio di disallineamenti.
+
+    def loaded_leg_seconds(self, k: int) -> float:
+        """Durata TOTALE [s] della mossa k, dal prelievo alla consegna."""
+        return _travel_time_seconds(self.move_distance(k), self.kin_loaded)
+
+    def empty_leg_seconds(self, pos_a: float, pos_b: float) -> float:
+        """Durata [s] di uno spostamento a vuoto fra due posizioni."""
+        return _travel_time_seconds(abs(pos_b - pos_a), self.kin_empty)
+
 
 # --------------------------------------------------------------------------
 # Risultato
@@ -183,11 +205,30 @@ class Segment:
 
 
 @dataclass
+class HoistPlan:
+    """Valori risolti per un carroponte, cosi' come li ha decisi il solver.
+
+    Serve al verificatore indipendente (verify.py): dai soli Segment non si
+    potrebbero ricostruire i tempi ASSOLUTI (`actual_time`), perche' le fasi
+    locali sono note solo modulo T. Senza questi valori il controllo delle
+    permanenze sarebbe ambiguo per multipli interi del takt time."""
+
+    zone: HoistZone
+    order: list[int]  # indici di mossa, nell'ordine di esecuzione, da zone.lo
+    local_pick: dict[int, float]  # [s] istante di prelievo, in [0,T)
+    finish: dict[int, float]  # [s] istante di consegna
+    dep_hi: float  # [s] partenza dal confine superiore
+    arr_lo: float  # [s] arrivo al confine inferiore
+
+
+@dataclass
 class Solution:
     status: str  # 'OPTIMAL' | 'FEASIBLE' | 'INFEASIBLE' | ...
     T: Optional[float]  # takt time trovato [s]
     segments_per_hoist: list[list[Segment]] = field(default_factory=list)
     raw: dict = field(default_factory=dict)  # valori grezzi utili per debug
+    plans: list[HoistPlan] = field(default_factory=list)  # uno per carroponte
+    actual_time: list[float] = field(default_factory=list)  # [s], una per mossa
 
 
 # --------------------------------------------------------------------------
@@ -243,13 +284,10 @@ def solve(
 
     # -- Tempi di percorrenza precalcolati (le posizioni delle vasche sono
     #    fisse, quindi i tempi di percorrenza sono costanti, non variabili) --
-    travel_loaded = [
-        T_(_travel_time_seconds(data.move_distance(k), data.kin_loaded))
-        for k in range(data.n_moves)
-    ]
+    travel_loaded = [T_(data.loaded_leg_seconds(k)) for k in range(data.n_moves)]
 
     def travel_empty_ticks(pos_a: float, pos_b: float) -> int:
-        return T_(_travel_time_seconds(abs(pos_b - pos_a), data.kin_empty))
+        return T_(data.empty_leg_seconds(pos_a, pos_b))
 
     # Margine di sicurezza temporale da applicare alle finestre di occupazione
     # dei punti di confine, per tenere conto dell'ingombro fisico del
@@ -484,10 +522,12 @@ def solve(
     T_seconds = data.to_seconds(solver.Value(Tv))
 
     segments_per_hoist = []
+    plans: list[HoistPlan] = []
     for zd in zone_data:
         z = zd["z"]
         moves = zd["moves"]
         lp_val = {k: data.to_seconds(solver.Value(zd["local_pick"][k])) for k in moves}
+        fin_val = {k: data.to_seconds(solver.Value(zd["finish"][k])) for k in moves}
         dep_hi_val = data.to_seconds(solver.Value(zd["dep_hi"]))
         arr_lo_val = data.to_seconds(solver.Value(zd["arr_lo"]))
 
@@ -510,10 +550,30 @@ def solve(
             data, z, order, lp_val, dep_hi_val, arr_lo_val, T_seconds
         )
         segments_per_hoist.append(segs)
+        plans.append(
+            HoistPlan(
+                zone=z,
+                order=order,
+                local_pick=lp_val,
+                finish=fin_val,
+                dep_hi=dep_hi_val,
+                arr_lo=arr_lo_val,
+            )
+        )
 
-    raw = {"objective": solver.ObjectiveValue(), "wall_time": solver.WallTime()}
+    raw = {
+        "objective": solver.ObjectiveValue(),
+        "wall_time": solver.WallTime(),
+        "safety_buffer_s": data.to_seconds(safety_buffer),
+        "T_ticks": solver.Value(Tv),
+    }
     return Solution(
-        status=status_name, T=T_seconds, segments_per_hoist=segments_per_hoist, raw=raw
+        status=status_name,
+        T=T_seconds,
+        segments_per_hoist=segments_per_hoist,
+        raw=raw,
+        plans=plans,
+        actual_time=[data.to_seconds(solver.Value(v)) for v in actual_time],
     )
 
 
@@ -548,7 +608,7 @@ def _build_zone_trajectory(
     # tempi di percorrenza con la formula cinematica "esatta" in virgola
     # mobile -- le due cose possono differire di qualche tick per puro
     # arrotondamento, senza che ci sia un'incoerenza reale nel modello.
-    EPS = max(10.0 / data.time_scale, 1e-6)
+    EPS = data.eps_seconds
     segs: list[Segment] = []
     n = len(order)
 
@@ -556,13 +616,13 @@ def _build_zone_trajectory(
         x0 = data.station_position(k)
         x1 = data.station_position(k + 1)
         t0 = local_pick[k]
-        t1 = t0 + _travel_time_seconds(abs(x1 - x0), data.kin_loaded)
+        t1 = t0 + data.loaded_leg_seconds(k)
         segs.append(Segment("loaded", t0, t1, x0, x1, data.kin_loaded))
 
         is_last = i == n - 1
         nxt_k = order[0] if is_last else order[i + 1]
         x1_next = data.station_position(nxt_k)
-        travel_e = _travel_time_seconds(abs(x1_next - x1), data.kin_empty)
+        travel_e = data.empty_leg_seconds(x1, x1_next)
 
         depart_known = k == zone.hi
         arrive_known = nxt_k == zone.lo
@@ -676,10 +736,7 @@ def solve_auto_zones(
             f"zone e usa solve() direttamente."
         )
 
-    travel_loaded_seconds = [
-        _travel_time_seconds(data.move_distance(k), data.kin_loaded)
-        for k in range(n_moves)
-    ]
+    travel_loaded_seconds = [data.loaded_leg_seconds(k) for k in range(n_moves)]
 
     best_solution: Optional[Solution] = None
     best_zones: Optional[list[HoistZone]] = None

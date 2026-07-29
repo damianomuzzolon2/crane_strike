@@ -86,6 +86,30 @@ def position_profile(t: float, distance: float, kin: Kinematics) -> float:
             return d_half + v_peak * t_dec - 0.5 * kin.a_max * t_dec**2
 
 
+def profile_breakpoints(distance: float, kin: Kinematics) -> tuple[float, ...]:
+    """Istanti [s], relativi all'inizio del movimento, in cui il profilo di
+    posizione cambia tratto (gli "spigoli" della curva).
+
+    - profilo trapezoidale: (0, t_ramp, t_ramp + t_cruise, t_total)
+    - profilo triangolare:  (0, t_total/2, t_total)
+    - distanza nulla:       (0.0,)
+
+    Fra due spigoli consecutivi la posizione e' un polinomio di grado <= 2 in
+    t. Campionando anche tutti gli spigoli si puo' quindi limitare in modo
+    RIGOROSO l'errore commesso cercando un minimo su una griglia finita.
+    """
+    d = abs(distance)
+    if d == 0:
+        return (0.0,)
+    t_total = travel_time(d, kin)
+    d_acc = kin.v_max**2 / kin.a_max
+    if d >= d_acc:
+        t_ramp = kin.v_max / kin.a_max
+        t_cruise = t_total - 2 * t_ramp
+        return (0.0, t_ramp, t_ramp + t_cruise, t_total)
+    return (0.0, t_total / 2, t_total)
+
+
 if __name__ == "__main__":
     # Auto-test rapido
     k = Kinematics(v_max=1.0, a_max=0.5)
@@ -100,4 +124,7 @@ if __name__ == "__main__":
         assert (
             abs(p_end - dist) < 1e-6
         ), "la posizione finale deve coincidere con la distanza"
+        bps = profile_breakpoints(dist, k)
+        assert bps[0] == 0.0 and abs(bps[-1] - T) < 1e-9, "spigoli incoerenti con T"
+        assert list(bps) == sorted(bps), "gli spigoli devono essere crescenti"
     print("OK: kinematics.py funziona correttamente")
