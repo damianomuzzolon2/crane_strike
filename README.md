@@ -45,7 +45,8 @@ salvato `ciclogramma.png` col grafico.
 
 1. **Vasche** (`Tank`): id e posizione `[m]` lungo la rotaia.
 2. **Percorso** (`route`, lista di `StationSpec`): sequenza di vasche che il
-   pezzo attraversa, con tempo di permanenza `[min,max]` in secondi.
+   pezzo attraversa, con tempo di permanenza `[min,max]` in secondi e numero
+   di posti simultanei (`capacity`, default 1 — vedi sotto).
    Assunzione v1: **un solo percorso condiviso da tutti i pezzi**.
 3. **Cinematica**: `Kinematics(v_max, a_max)` separata per carroponte vuoto
    e carico.
@@ -68,6 +69,46 @@ salvato `ciclogramma.png` col grafico.
    minimo aggiuntivo) vengono usati per allargare le finestre temporali di
    occupazione dei punti di confine fra zone adiacenti.
 7. **Movimentazione verticale**: `pick_time` e `release_time` (vedi sotto).
+
+### Capienza delle vasche (`capacity`)
+
+`StationSpec.capacity` e' il numero di **posti simultanei** nella vasca, e vale
+`1` per default. I pezzi entrano ogni `T` secondi e ciascuno tiene occupato un
+posto per
+
+```text
+occupazione = release_time + dwell + pick_time
+```
+
+— non solo il tempo in bagno: il telaio ingombra il posto dall'inizio
+dell'immersione fino alla fine dell'emersione. I pezzi contemporaneamente
+presenti sono `ceil(occupazione / T)`, e il modello impone
+
+```text
+occupazione <= capacity * T
+```
+
+che e' esattamente equivalente. `capacity` e' una costante intera e `T` una
+variabile, quindi il vincolo resta lineare e non costa praticamente nulla.
+
+Il default `1` e' deliberatamente il caso restrittivo: obbliga a **dichiarare**
+le vasche multi-posto invece di lasciarlo implicito. Conseguenza pratica: con
+`capacity=1` il takt time non puo' scendere sotto l'occupazione della vasca
+piu' lenta. Nell'esempio ZINCATURA ha una permanenza di ~190 s con takt 110 s,
+quindi e' dichiarata `capacity=2`.
+
+Se una vasca e' irrimediabilmente insufficiente
+(`release + dwell_min + pick > capacity * takt_max`), `ProblemData` lo rifiuta
+subito con un messaggio esplicito, invece di lasciar restituire un
+`INFEASIBLE` muto dopo minuti di ricerca.
+
+Due limiti da conoscere:
+
+- la prima e l'ultima stazione (carico/scarico) sono fuori dalla catena delle
+  permanenze e quindi **non** hanno vincolo di capienza;
+- il vincolo e' per **tappa del percorso**, non per vasca fisica: se la stessa
+  vasca compare in due tappe, i posti richiesti si sommano e il modello non se
+  ne accorge. Il verificatore lo segnala come avviso.
 
 ### Tempo di presa e rilascio (immersione/emersione)
 
@@ -176,7 +217,8 @@ Controlla:
    `position_profile` (il profilo cinematico vero, non solo gli estremi delle
    finestre) e si controlla `|x_i(t) - x_j(t)| >= hoist_length + safety_distance`
    per ogni coppia e ogni istante;
-9. quanti pezzi stanno contemporaneamente in ciascuna vasca.
+9. capienza delle vasche: quanti posti servono davvero contro quanti sono
+   dichiarati in `capacity`.
 
 Il campionamento del punto 8 include **tutti** gli spigoli dei profili
 cinematici piu' una griglia uniforme di un tick. Fra due spigoli la posizione
@@ -245,11 +287,9 @@ fa scelte di modellazione precise, in particolare:
   **Attenzione**: questo vale solo se le stazioni adiacenti a un confine
   distano almeno `hoist_length + safety_distance`; altrimenti il modello ha
   una vera lacuna — vedi "Il verificatore e' piu' severo del modello".
-- **Nessun vincolo di capienza delle vasche**: nulla impedisce che piu' pezzi
-  si trovino contemporaneamente nella stessa vasca. Accade sistematicamente
-  quando la permanenza supera il takt time (nell'esempio ZINCATURA ha una
-  permanenza di ~200 s con takt 110 s, quindi ci sono sempre 2 pezzi dentro).
-  Il verificatore lo riporta come nota informativa.
+- **Capienza delle vasche**: vincolata tramite `StationSpec.capacity`, ma solo
+  per le stazioni intermedie e **per tappa del percorso**, non per vasca
+  fisica (vedi la sezione dedicata sopra).
 - **Un solo percorso vasche** condiviso da tutti i pezzi (nessun mix di
   prodotti diversi in questa versione).
 
@@ -270,8 +310,9 @@ fornito (con i tempi verticali attivi) il solver trova `T = 110 s` con 2
 carroponti, separazione minima 3,50 m contro 1,80 m richiesti, e il
 verificatore indipendente conferma la soluzione senza errori.
 
-`test_verify.py` contiene 16 casi (37 asserzioni): uno corretto, dodici rotti
-di proposito e tre di regressione sulle fasi verticali. Tutti passano.
+`test_verify.py` contiene 18 casi (43 asserzioni): uno corretto, dodici rotti
+di proposito, tre di regressione sulle fasi verticali e due sulla capienza.
+Tutti passano.
 
 ### Cosa ha gia' trovato il verificatore
 

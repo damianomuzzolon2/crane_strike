@@ -60,10 +60,10 @@ def kinds(report, kind: str, severity: str | None = None) -> list:
 
 
 def make_data(positions, dwells, zones, **kw) -> ProblemData:
+    """dwells: lista di (dwell_min, dwell_max) oppure (dwell_min, dwell_max,
+    capacity) per stazione."""
     tanks = {f"V{i}": Tank(f"V{i}", p) for i, p in enumerate(positions)}
-    route = [
-        StationSpec(f"V{i}", lo, hi) for i, (lo, hi) in enumerate(dwells)
-    ]
+    route = [StationSpec(f"V{i}", *spec) for i, spec in enumerate(dwells)]
     params = dict(
         tanks=tanks,
         route=route,
@@ -327,25 +327,123 @@ def test_takt_fuori_banda():
 
 
 def test_capienza_vasca():
-    print("\n[11] piu' pezzi contemporaneamente nella stessa vasca")
-    data = make_data(
-        positions=[0.0, 5.0, 10.0, 15.0, 20.0],
-        dwells=[(0, 0), (30, 90), (150, 250), (30, 90), (0, 0)],
-        zones=[HoistZone(0, 1), HoistZone(2, 3)],
+    print("\n[11] capienza della vasca (posti simultanei)")
+    positions = [0.0, 5.0, 10.0, 15.0, 20.0]
+    zones = [HoistZone(0, 1), HoistZone(2, 3)]
+    T = 100.0
+
+    def caso(cap):
+        data = make_data(
+            positions=positions,
+            dwells=[(0, 0), (30, 90), (150, 300, cap), (30, 90), (0, 0)],
+            zones=zones,
+        )
+        d0 = data.loaded_leg_seconds(0)
+        # +2 periodi sulla mossa 2: il pezzo resta in V2 per oltre due takt,
+        # quindi ce ne sono sempre 3 dentro contemporaneamente
+        sol = build_solution(
+            data, T, [{0: 0.0, 1: d0 + 40.0}, {2: 10.0, 3: 55.0}], extra_periods={2: 2}
+        )
+        return data, verify_solution(data, sol)
+
+    _, r1 = caso(1)
+    check(
+        r1.tank_occupancy.get("V2", 1) == 3,
+        f"conteggio posti richiesti in V2 = {r1.tank_occupancy.get('V2')} (atteso 3)",
+    )
+    check(
+        len(kinds(r1, "tank_capacity", "error")) == 1 and not r1.ok,
+        "con capacity=1 e' un ERRORE",
+    )
+    _, r3 = caso(3)
+    check(
+        r3.ok and len(kinds(r3, "tank_capacity", "info")) == 1,
+        "con capacity=3 e' solo una nota informativa",
+    )
+
+    # l'occupazione di un posto comprende anche le fasi verticali
+    data_v = make_data(
+        positions=positions,
+        dwells=[(0, 0), (30, 90), (30, 90), (30, 90), (0, 0)],
+        zones=zones,
+        pick_time=6.0,
+        release_time=4.0,
+    )
+    check(
+        abs(data_v.slot_occupancy_seconds(2, 50.0) - 60.0) < 1e-9,
+        "occupazione posto = rilascio + bagno + presa",
+    )
+
+
+def test_capienza_validazione():
+    print("\n[12] validazione della capienza in ProblemData")
+    base = dict(
+        positions=[0.0, 5.0, 10.0],
+        zones=[HoistZone(0, 1)],
+    )
+    try:
+        make_data(dwells=[(0, 0), (30, 90, 0), (0, 0)], **base)
+        check(False, "capacity=0 doveva essere respinta")
+    except ValueError as e:
+        check("capacity deve essere >= 1" in str(e), f"capacity=0 respinta: {e}")
+
+    # capienza palesemente insufficiente: infattibile qualunque sia il resto
+    try:
+        make_data(
+            dwells=[(0, 0), (300, 400), (0, 0)],
+            takt_min=50.0,
+            takt_max=200.0,
+            **base,
+        )
+        check(False, "capienza impossibile doveva essere respinta")
+    except ValueError as e:
+        check(
+            "occupa un posto per almeno" in str(e),
+            "capienza impossibile respinta con messaggio esplicito",
+        )
+    # con 2 posti la stessa configurazione passa
+    d = make_data(
+        dwells=[(0, 0), (300, 400, 2), (0, 0)],
+        takt_min=50.0,
+        takt_max=200.0,
+        **base,
+    )
+    check(d.route[1].capacity == 2, "con capacity=2 la stessa linea e' accettata")
+
+
+def test_vasca_ripetuta():
+    print("\n[13] stessa vasca fisica usata in piu' tappe del percorso")
+    tanks = {
+        "CAR": Tank("CAR", 0.0),
+        "LAV": Tank("LAV", 5.0),
+        "SCA": Tank("SCA", 10.0),
+    }
+    # il pezzo torna nella stessa vasca LAV due volte
+    route = [
+        StationSpec("CAR", 0, 0),
+        StationSpec("LAV", 30, 90, capacity=2),
+        StationSpec("LAV", 30, 90, capacity=2),
+        StationSpec("SCA", 0, 0),
+    ]
+    data = ProblemData(
+        tanks=tanks,
+        route=route,
+        takt_min=50.0,
+        takt_max=200.0,
+        kin_empty=KIN_EMPTY,
+        kin_loaded=KIN_LOADED,
+        hoist_length=1.2,
+        safety_distance=0.6,
+        zones=[HoistZone(0, 1), HoistZone(2, 2)],
+        time_scale=100,
     )
     T = 100.0
-    d0 = data.loaded_leg_seconds(0)
-    # +2 periodi sulla mossa 2: il pezzo resta in V2 per oltre due takt,
-    # quindi ce ne sono sempre 3 dentro contemporaneamente
-    sol = build_solution(
-        data, T, [{0: 0.0, 1: d0 + 40.0}, {2: 10.0, 3: 55.0}], extra_periods={2: 2}
-    )
+    sol = build_solution(data, T, [{0: 0.0, 1: 40.0}, {2: 75.0}], extra_periods={2: 1})
     r = verify_solution(data, sol)
     check(
-        r.tank_occupancy.get("V2", 1) >= 2,
-        f"conteggio pezzi in vasca V2 = {r.tank_occupancy.get('V2')}",
+        len(kinds(r, "tank_capacity", "warning")) == 1,
+        "avvisa che i posti si sommano fra le tappe",
     )
-    check(len(kinds(r, "tank_capacity", "info")) >= 1, "riportato come nota informativa")
 
 
 def test_fasi_verticali():
@@ -471,7 +569,7 @@ def test_stazione_condivisa():
 
 
 def test_input_malformato():
-    print("\n[12] input malformato: eccezione, non report")
+    print("\n[17] input malformato: eccezione, non report")
     data, sol = reference_case()
     for descr, arg_data, arg_sol in [
         ("status infattibile", data, dataclasses.replace(sol, status="INFEASIBLE")),
@@ -486,7 +584,7 @@ def test_input_malformato():
 
 
 def test_senza_valori_risolti():
-    print("\n[13] degrado gentile senza solution.plans")
+    print("\n[18] degrado gentile senza solution.plans")
     data, sol = reference_case()
     ridotta = Solution(
         status=sol.status, T=sol.T, segments_per_hoist=sol.segments_per_hoist
@@ -518,6 +616,8 @@ def main():
     test_layout_stretto()
     test_takt_fuori_banda()
     test_capienza_vasca()
+    test_capienza_validazione()
+    test_vasca_ripetuta()
     test_fasi_verticali()
     test_zero_verticale_non_regressione()
     test_stazione_condivisa()

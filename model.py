@@ -47,6 +47,16 @@ APPROCCIO SCELTO E SUE ASSUNZIONI (importante leggere prima di usare il codice)
    confine dista almeno hoist_length + safety_distance. Con vasche piu'
    ravvicinate il modello ha una lacuna reale -- verify.py la segnala.
 
+4-bis. Ogni vasca ha un numero dichiarato di POSTI (`StationSpec.capacity`,
+   default 1). Poiche' i pezzi entrano ogni T secondi e ciascuno occupa un
+   posto per (immersione + bagno + emersione), il modello impone
+   occupazione <= capacity * T, che equivale a "i pezzi contemporaneamente
+   presenti non superano i posti". Vale solo per le stazioni intermedie
+   (carico e scarico sono fuori dalla catena) e per TAPPA del percorso, non
+   per vasca fisica: se la stessa vasca compare due volte nella ricetta, i
+   posti richiesti si sommano e il modello non se ne accorge (verify.py lo
+   segnala).
+
 5. Il moto orizzontale segue il profilo cinematico di kinematics.py; la
    movimentazione VERTICALE del pezzo (discesa gancio, aggancio, emersione,
    immersione, sgancio, risalita) e' modellata come due costanti,
@@ -96,6 +106,12 @@ class StationSpec:
     tank_id: str
     dwell_min: float  # [s] tempo minimo di permanenza (tolleranza -)
     dwell_max: float  # [s] tempo massimo di permanenza (tolleranza +)
+    # Posti simultanei nella vasca. Con pezzi che entrano ogni T secondi e che
+    # occupano un posto per `occupazione` secondi, i pezzi contemporaneamente
+    # presenti sono ceil(occupazione / T): con capacity=1 (default) la
+    # permanenza non puo' superare il takt time. Metterlo esplicitamente > 1
+    # e' il modo di dichiarare una vasca multi-posto.
+    capacity: int = 1
 
 
 @dataclass(frozen=True)
@@ -156,6 +172,26 @@ class ProblemData:
             raise ValueError("takt_min > takt_max")
         if self.pick_time < 0 or self.release_time < 0:
             raise ValueError("pick_time e release_time devono essere >= 0")
+        for i, s in enumerate(self.route):
+            if s.capacity < 1:
+                raise ValueError(
+                    f"capacity deve essere >= 1 per la vasca '{s.tank_id}' "
+                    f"(stazione {i}), trovato {s.capacity}"
+                )
+        # Capienza palesemente insufficiente: il problema e' infattibile
+        # qualunque siano zone, numero di carroponti e ordine di visita.
+        # Meglio dirlo subito e chiaramente che restituire un INFEASIBLE muto.
+        for s_idx in range(1, len(self.route) - 1):
+            spec = self.route[s_idx]
+            occ_min = self.slot_occupancy_seconds(s_idx, spec.dwell_min)
+            if occ_min > spec.capacity * self.takt_max:
+                raise ValueError(
+                    f"vasca '{spec.tank_id}' (stazione {s_idx}): un pezzo occupa "
+                    f"un posto per almeno {occ_min:.1f}s, ma con capacity="
+                    f"{spec.capacity} e takt_max={self.takt_max:.1f}s il limite "
+                    f"e' {spec.capacity * self.takt_max:.1f}s. Aumenta capacity "
+                    f"(vasca multi-posto), riduci dwell_min, o alza takt_max."
+                )
 
     # -- comodita' --------------------------------------------------------
     @property
@@ -210,6 +246,18 @@ class ProblemData:
     def release_time_at(self, station_idx: int) -> float:
         """Tempo di rilascio [s] alla stazione data."""
         return self.release_time
+
+    def slot_occupancy_seconds(self, station_idx: int, dwell: float) -> float:
+        """Per quanto tempo [s] un pezzo tiene occupato un POSTO nella vasca
+        `station_idx`, dato il suo tempo in bagno `dwell`.
+
+        Non coincide col dwell: il telaio ingombra il posto dall'inizio
+        dell'immersione fino alla fine dell'emersione, quindi va aggiunto il
+        rilascio in entrata e la presa in uscita. E' questa la grandezza da
+        confrontare con `capacity * T`, non il solo tempo in bagno."""
+        return (
+            self.release_time_at(station_idx) + dwell + self.pick_time_at(station_idx)
+        )
 
     def loaded_leg_seconds(self, k: int) -> float:
         """Durata TOTALE [s] della mossa k: presa dalla vasca k, traslazione
@@ -378,11 +426,23 @@ def solve(
         station = (
             k  # la vasca k viene raggiunta dalla mossa k-1 e lasciata dalla mossa k
         )
-        dwell_min = T_(data.route[station].dwell_min)
-        dwell_max = T_(data.route[station].dwell_max)
+        spec = data.route[station]
+        dwell_min = T_(spec.dwell_min)
+        dwell_max = T_(spec.dwell_max)
         arrival = actual_time[k - 1] + travel_loaded[k - 1]
         model.Add(actual_time[k] >= arrival + dwell_min)
         model.Add(actual_time[k] <= arrival + dwell_max)
+
+        # -- 1-bis) Capienza della vasca -------------------------------------
+        # I pezzi entrano nella vasca ogni T secondi e ciascuno tiene occupato
+        # un posto per `slot_occupancy` secondi (immersione + bagno +
+        # emersione), quindi i pezzi contemporaneamente presenti sono
+        # ceil(occupazione / T). Imporre occupazione <= capacity * T e'
+        # esattamente equivalente a ceil(occupazione / T) <= capacity.
+        # `capacity` e' una costante intera e Tv una variabile: il prodotto
+        # resta LINEARE, quindi il vincolo non costa praticamente nulla.
+        occ_extra = T_(data.release_time_at(station)) + T_(data.pick_time_at(station))
+        model.Add(actual_time[k] - arrival + occ_extra <= spec.capacity * Tv)
 
     # -- 2) Per ciascun carroponte: circuito ciclico sulle mosse della
     #    propria zona, con ordine di visita libero. ------------------------

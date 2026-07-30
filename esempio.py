@@ -40,13 +40,19 @@ def main():
 
     # ---------------------------------------------------------------
     # 2) Percorso del pezzo: sequenza di stazioni con tempo di
-    #    permanenza [min,max] in secondi (tolleranza di processo)
+    #    permanenza [min,max] in secondi (tolleranza di processo) e
+    #    numero di posti simultanei nella vasca (capacity, default 1).
+    #
+    #    ZINCATURA ha una permanenza di ~200 s con takt time ~110 s:
+    #    per forza di cose ci sono sempre 2 pezzi dentro, quindi deve
+    #    essere una vasca a (almeno) 2 posti. Se fosse a posto singolo
+    #    il takt time non potrebbe scendere sotto la permanenza.
     # ---------------------------------------------------------------
     route = [
         StationSpec("CARICO", 0, 0),
         StationSpec("SGRASSO", 60, 90),
         StationSpec("RISCIACQUO_1", 20, 40),
-        StationSpec("ZINCATURA", 180, 220),
+        StationSpec("ZINCATURA", 180, 220, capacity=2),
         StationSpec("RISCIACQUO_2", 20, 40),
         StationSpec("PASSIVAZIONE", 30, 45),
         StationSpec("SCARICO", 0, 0),

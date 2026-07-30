@@ -825,28 +825,75 @@ def _check_transfers(data, plans, T, time_tol, add):
 def _check_tank_capacity(data, solution, T, add) -> dict[str, int]:
     """9) Quanti pezzi stanno contemporaneamente in ciascuna vasca.
 
-    I pezzi entrano ogni T secondi e restano `dwell`: ne sono presenti
-    ceil(dwell / T) alla volta. Per ora e' solo un'informazione; il modello
-    non ha (ancora) un vincolo di capienza."""
+    I pezzi entrano ogni T secondi e ciascuno tiene occupato un posto per
+    `slot_occupancy_seconds` (immersione + bagno + emersione): ne sono presenti
+    ceil(occupazione / T) alla volta. Se superano `capacity` e' un errore."""
     occupancy: dict[str, int] = {}
     if not solution.actual_time or len(solution.actual_time) != data.n_moves:
         return occupancy
     at = solution.actual_time
+    per_tank_steps: dict[str, list[int]] = {}
     for k in range(1, data.n_moves):
         spec = data.route[k]
+        per_tank_steps.setdefault(spec.tank_id, []).append(k)
         dwell = at[k] - (at[k - 1] + data.loaded_leg_seconds(k - 1))
-        n = max(1, math.ceil(dwell / T - 1e-9))
+        occ = data.slot_occupancy_seconds(k, dwell)
+        n = max(1, math.ceil(occ / T - 1e-9))
         occupancy[spec.tank_id] = max(occupancy.get(spec.tank_id, 1), n)
-        if n > 1:
+        dettaglio = (
+            f"occupazione posto {occ:.0f}s (bagno {dwell:.0f}s + fasi "
+            f"verticali {occ - dwell:.0f}s) / takt {T:.0f}s"
+        )
+        if n > spec.capacity:
+            add(
+                "tank_capacity",
+                "error",
+                f"nella vasca '{spec.tank_id}' servono {n} posti ma capacity="
+                f"{spec.capacity}: {dettaglio}",
+                station=k,
+                value=float(n),
+                bound=float(spec.capacity),
+                slack=float(spec.capacity - n),
+            )
+        elif n > 1:
             add(
                 "tank_capacity",
                 "info",
                 f"nella vasca '{spec.tank_id}' ci sono sempre {n} pezzi "
-                f"contemporaneamente (permanenza {dwell:.0f}s / takt {T:.0f}s): "
-                f"serve una vasca a {n} posti",
+                f"contemporaneamente su {spec.capacity} posti dichiarati: "
+                f"{dettaglio}",
                 station=k,
                 value=float(n),
-                bound=1.0,
+                bound=float(spec.capacity),
+                slack=float(spec.capacity - n),
+            )
+
+    # Stessa vasca fisica usata in piu' tappe del percorso: il vincolo del
+    # modello e' per TAPPA, non per vasca, quindi i posti si sommano.
+    for tank_id, steps in per_tank_steps.items():
+        if len(steps) > 1:
+            totale = sum(
+                max(
+                    1,
+                    math.ceil(
+                        data.slot_occupancy_seconds(
+                            s, at[s] - (at[s - 1] + data.loaded_leg_seconds(s - 1))
+                        )
+                        / T
+                        - 1e-9
+                    ),
+                )
+                for s in steps
+            )
+            occupancy[tank_id] = totale
+            add(
+                "tank_capacity",
+                "warning",
+                f"la vasca '{tank_id}' compare in {len(steps)} tappe del "
+                f"percorso (stazioni {steps}): i posti richiesti si sommano a "
+                f"{totale}, ma il modello impone capacity separatamente per "
+                f"ciascuna tappa",
+                value=float(totale),
             )
     return occupancy
 
