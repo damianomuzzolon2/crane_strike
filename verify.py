@@ -192,7 +192,7 @@ class _Trajectory:
         if not segments:
             raise ValueError("traiettoria senza segmenti")
         self.T = T
-        self.segs = sorted(segments, key=lambda s: s.t_start)
+        self.segs = sorted(segments, key=lambda s: (s.t_start, s.t_end))
         self.t0 = self.segs[0].t_start
         self.starts = [s.t_start for s in self.segs]
 
@@ -487,7 +487,7 @@ def _check_per_hoist(data, solution, plans, T, time_tol, add) -> list[_Trajector
         if not segs:
             add("continuity", "error", "traiettoria vuota", hoists=(h,))
             continue
-        segs = sorted(segs, key=lambda s: s.t_start)
+        segs = sorted(segs, key=lambda s: (s.t_start, s.t_end))
 
         # -- continuita' nel tempo e nello spazio --
         for a, b in zip(segs, segs[1:]):
@@ -577,15 +577,35 @@ def _check_per_hoist(data, solution, plans, T, time_tol, add) -> list[_Trajector
                     )
                     continue
                 seen[k] = seen.get(k, 0) + 1
+                # Due controlli distinti, e servono entrambi: la sola
+                # traslazione orizzontale deve rispettare la cinematica, e la
+                # mossa nel suo insieme (con le fasi verticali adiacenti) deve
+                # durare quanto dichiarato. Controllare solo il totale
+                # lascerebbe passare una traslazione impossibile compensata da
+                # una presa piu' lunga.
+                atteso_h = data.horizontal_loaded_seconds(k)
+                durata_h = s.t_end - s.t_start
+                if abs(durata_h - atteso_h) > time_tol:
+                    add(
+                        "segment_duration",
+                        "error",
+                        f"la traslazione a carico dura {durata_h:.3f}s invece "
+                        f"di {atteso_h:.3f}s",
+                        hoists=(h,),
+                        move=k,
+                        t=s.t_start,
+                        value=durata_h,
+                        bound=atteso_h,
+                        slack=durata_h - atteso_h,
+                    )
                 atteso = data.loaded_leg_seconds(k)
-                # il tratto 'loaded' porta solo la traslazione orizzontale: le
-                # eventuali fasi verticali sono segmenti separati adiacenti
                 durata = _leg_duration(segs, i_seg)
                 if abs(durata - atteso) > time_tol:
                     add(
                         "segment_duration",
                         "error",
-                        f"la mossa dura {durata:.3f}s invece di {atteso:.3f}s",
+                        f"la mossa (presa + traslazione + rilascio) dura "
+                        f"{durata:.3f}s invece di {atteso:.3f}s",
                         hoists=(h,),
                         move=k,
                         t=s.t_start,

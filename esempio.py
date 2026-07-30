@@ -68,6 +68,19 @@ def main():
     safety_distance = 0.6  # [m] distanza minima aggiuntiva fra due carroponti
 
     # ---------------------------------------------------------------
+    # 4-bis) Movimentazione verticale del pezzo. Il carroponte non si
+    #    limita a traslare: deve calare il gancio, agganciare e tirare
+    #    su il telaio (con lo sgocciolamento sopra la vasca), e poi
+    #    immergerlo nella vasca successiva e sganciare. Sono tempi
+    #    tutt'altro che trascurabili in una linea reale.
+    #    NOTA: i tempi di permanenza dichiarati sopra restano il tempo
+    #    EFFETTIVO in bagno, misurato da fine immersione a inizio
+    #    emersione; le fasi verticali si sommano a parte.
+    # ---------------------------------------------------------------
+    pick_time = 6.0  # [s] discesa gancio + aggancio + emersione/sgocciolamento
+    release_time = 4.0  # [s] immersione + sgancio + risalita gancio a vuoto
+
+    # ---------------------------------------------------------------
     # 5) Numero di carroponti E zone: entrambi scelti automaticamente.
     #    zones=None -> le zone le sceglie solve_auto_zones (chiamata
     #    internamente da solve_auto_hoists per ogni numero di carroponti
@@ -85,6 +98,8 @@ def main():
         safety_distance=safety_distance,
         zones=None,  # <-- zone scelte automaticamente
         time_scale=100,  # risoluzione: centesimi di secondo
+        pick_time=pick_time,
+        release_time=release_time,
     )
 
     print(f"Stazioni: {data.n_stations}  |  Mosse: {data.n_moves}")

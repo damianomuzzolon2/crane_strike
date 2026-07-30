@@ -348,6 +348,128 @@ def test_capienza_vasca():
     check(len(kinds(r, "tank_capacity", "info")) >= 1, "riportato come nota informativa")
 
 
+def test_fasi_verticali():
+    print("\n[14] tempi di presa/rilascio (immersione verticale)")
+    data = make_data(
+        positions=[0.0, 5.0, 10.0, 15.0, 20.0],
+        dwells=[(0, 0), (30, 90), (30, 90), (30, 90), (0, 0)],
+        zones=[HoistZone(0, 1), HoistZone(2, 3)],
+        pick_time=6.0,
+        release_time=4.0,
+    )
+    check(
+        abs(data.loaded_leg_seconds(0) - (6.0 + data.horizontal_loaded_seconds(0) + 4.0))
+        < 1e-9,
+        "la durata della mossa comprende presa e rilascio",
+    )
+    check(
+        abs(data.empty_leg_seconds(0.0, 5.0) - data.empty_leg_seconds(5.0, 0.0)) < 1e-9
+        and abs(data.empty_leg_seconds(0.0, 0.0)) < 1e-9,
+        "lo spostamento a vuoto non paga tempo verticale",
+    )
+
+    T = 130.0
+    d0 = data.loaded_leg_seconds(0)
+    sol = build_solution(data, T, [{0: 0.0, 1: d0 + 40.0}, {2: 10.0, 3: 65.0}])
+    r = verify_solution(data, sol)
+    check(r.ok, "soluzione con fasi verticali verificata senza errori")
+
+    segs = sol.segments_per_hoist[0]
+    check(
+        any(s.kind == "pick" for s in segs) and any(s.kind == "release" for s in segs),
+        "vengono emessi segmenti 'pick' e 'release'",
+    )
+    for s in segs:
+        if s.kind in ("pick", "release"):
+            check(
+                s.x_start == s.x_end and s.kin is None,
+                f"il segmento '{s.kind}' e' fermo sopra la vasca",
+            )
+            break
+
+    # una fase verticale allungata a mano deve far scattare il controllo
+    rotto = dataclasses.replace(sol)
+    lista = list(segs)
+    i = next(i for i, s in enumerate(lista) if s.kind == "pick")
+    lista[i] = dataclasses.replace(lista[i], t_end=lista[i].t_end + 3.0)
+    lista[i + 1] = dataclasses.replace(lista[i + 1], t_start=lista[i + 1].t_start + 3.0)
+    rotto.segments_per_hoist = [lista, sol.segments_per_hoist[1]]
+    r = verify_solution(data, rotto)
+    check(
+        len(kinds(r, "segment_duration", "error")) >= 1,
+        "una presa piu' lunga del dichiarato viene vista",
+    )
+
+
+def test_zero_verticale_non_regressione():
+    print("\n[15] con tempi verticali nulli non cambia nulla")
+    data_zero = make_data(
+        positions=[0.0, 5.0, 10.0, 15.0, 20.0],
+        dwells=[(0, 0), (30, 90), (30, 90), (30, 90), (0, 0)],
+        zones=[HoistZone(0, 1), HoistZone(2, 3)],
+        pick_time=0.0,
+        release_time=0.0,
+    )
+    _, sol_rif = reference_case()
+    d0 = data_zero.loaded_leg_seconds(0)
+    sol_zero = build_solution(
+        data_zero, 100.0, [{0: 0.0, 1: d0 + 40.0}, {2: 10.0, 3: 55.0}]
+    )
+    uguali = all(
+        len(a) == len(b)
+        and all(
+            x.kind == y.kind
+            and abs(x.t_start - y.t_start) < 1e-12
+            and abs(x.t_end - y.t_end) < 1e-12
+            for x, y in zip(a, b)
+        )
+        for a, b in zip(sol_rif.segments_per_hoist, sol_zero.segments_per_hoist)
+    )
+    check(uguali, "segmenti identici al caso senza fasi verticali")
+    check(
+        not any(
+            s.kind in ("pick", "release")
+            for segs in sol_zero.segments_per_hoist
+            for s in segs
+        ),
+        "nessun segmento verticale di durata nulla viene emesso",
+    )
+
+
+def test_stazione_condivisa():
+    print("\n[16] due mosse consecutive che partono dalla stessa stazione")
+    # il carroponte consegna in V2 e riparte subito da V2: non c'e' nessuno
+    # spostamento a vuoto, e non deve comparire un segmento degenere
+    data = make_data(
+        positions=[0.0, 5.0, 10.0, 15.0],
+        dwells=[(0, 0), (30, 90), (0, 90), (0, 0)],
+        zones=[HoistZone(0, 0), HoistZone(1, 2)],
+        pick_time=2.0,
+        release_time=2.0,
+    )
+    T = 120.0
+    lp1 = 20.0
+    sol = build_solution(
+        data,
+        T,
+        [{0: 0.0}, {1: lp1, 2: lp1 + data.loaded_leg_seconds(1)}],
+    )
+    segs = sol.segments_per_hoist[1]
+    check(
+        not any(s.t_end - s.t_start < 1e-9 for s in segs),
+        "nessun segmento di durata nulla",
+    )
+    r = verify_solution(data, sol)
+    check(
+        not kinds(r, "continuity", "error"),
+        "traiettoria continua nonostante la stazione condivisa",
+    )
+    check(
+        not kinds(r, "segment_duration", "error"),
+        "durata della mossa riconosciuta correttamente",
+    )
+
+
 def test_input_malformato():
     print("\n[12] input malformato: eccezione, non report")
     data, sol = reference_case()
@@ -396,6 +518,9 @@ def main():
     test_layout_stretto()
     test_takt_fuori_banda()
     test_capienza_vasca()
+    test_fasi_verticali()
+    test_zero_verticale_non_regressione()
+    test_stazione_condivisa()
     test_input_malformato()
     test_senza_valori_risolti()
     print("\n" + "=" * 72)

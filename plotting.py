@@ -21,7 +21,13 @@ _STYLE = {
     "loaded": dict(color="#c0392b", linewidth=2.6, zorder=3),
     "empty": dict(color="#2980b9", linewidth=1.6, linestyle="--", zorder=2),
     "wait": dict(color="#7f8c8d", linewidth=1.6, zorder=1),
+    # fasi verticali: il carroponte e' fermo sopra la vasca
+    "pick": dict(color="#e67e22", linewidth=5.0, solid_capstyle="butt", zorder=4),
+    "release": dict(color="#8e44ad", linewidth=5.0, solid_capstyle="butt", zorder=4),
 }
+# Solo questi tratti vengono ricolorati col colore del carroponte: le fasi
+# verticali e le attese mantengono un colore proprio, altrimenti sparirebbero.
+_KINEMATIC_KINDS = {"loaded", "empty"}
 _HOIST_COLORS = ["#c0392b", "#2980b9", "#27ae60", "#8e44ad", "#d35400", "#16a085"]
 
 
@@ -88,7 +94,7 @@ def plot_cyclogram(
                 ts, xs = _sample_segment(seg)
                 ts = ts + offset
                 style = dict(_STYLE[seg.kind])
-                if seg.kind != "wait":
+                if seg.kind in _KINEMATIC_KINDS:
                     style["color"] = color
                 ax.plot(ts, xs, **style)
 
@@ -114,6 +120,19 @@ def plot_cyclogram(
         ),
         Line2D([0], [0], color="#7f8c8d", lw=1.6, label="in attesa"),
     ]
+    # le voci sulle fasi verticali compaiono solo se sono davvero in uso
+    if any(
+        seg.kind == "pick" for segs in solution.segments_per_hoist for seg in segs
+    ):
+        legend_elems.append(
+            Line2D([0], [0], color="#e67e22", lw=5.0, label="presa (emersione)")
+        )
+    if any(
+        seg.kind == "release" for segs in solution.segments_per_hoist for seg in segs
+    ):
+        legend_elems.append(
+            Line2D([0], [0], color="#8e44ad", lw=5.0, label="rilascio (immersione)")
+        )
     for h in range(data.n_hoists):
         legend_elems.append(
             Patch(

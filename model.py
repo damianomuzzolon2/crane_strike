@@ -40,11 +40,22 @@ APPROCCIO SCELTO E SUE ASSUNZIONI (importante leggere prima di usare il codice)
    zone adiacenti (l'unico punto fisico condiviso fra due carroponti).
    Il modello impone che le finestre temporali in cui i due carroponti
    occupano quella stazione (allargate di un margine di sicurezza legato
-   alla lunghezza del carroponte + distanza di sicurezza) non si
-   sovrappongano MAI, nemmeno considerando la periodicita' (ciclo T).
+   alla lunghezza del carroponte + distanza di sicurezza, e comprensive
+   delle fasi verticali di presa/rilascio) non si sovrappongano MAI,
+   nemmeno considerando la periodicita' (ciclo T).
+   ATTENZIONE: questa assunzione vale solo se ogni stazione adiacente a un
+   confine dista almeno hoist_length + safety_distance. Con vasche piu'
+   ravvicinate il modello ha una lacuna reale -- verify.py la segnala.
 
-5. Il modello e' CORRETTO (sound): ogni soluzione trovata e' un ciclogramma
-   fisicamente valido e privo di collisioni. Rispetto alla versione con
+5. Il moto orizzontale segue il profilo cinematico di kinematics.py; la
+   movimentazione VERTICALE del pezzo (discesa gancio, aggancio, emersione,
+   immersione, sgancio, risalita) e' modellata come due costanti,
+   `pick_time` e `release_time`, sommate a ogni mossa a carico. Lo
+   spostamento a vuoto non ne paga nessuna: sarebbe doppio conteggio.
+   I tempi di permanenza restano il tempo EFFETTIVO in bagno.
+
+6. Il modello e' CORRETTO (sound) entro le assunzioni sopra: ogni soluzione
+   trovata e' un ciclogramma fisicamente valido. Rispetto alla versione con
    ordine fisso, questa e' anche molto piu' COMPLETA (rappresenta la
    quasi totalita' degli schemi di funzionamento realistici per un
    carroponte in una zona), ma resta comunque una scelta di modellazione:
@@ -112,6 +123,16 @@ class ProblemData:
     # scegliere automaticamente con
     # solve_auto_zones(...)
     time_scale: int = 100  # tick al secondo (risoluzione temporale interna)
+    # -- tempi di movimentazione VERTICALE del pezzo (immersione/emersione) --
+    #
+    # Una mossa e': il carroponte arriva a vuoto sopra la vasca k, cala il
+    # gancio, aggancia e SOLLEVA il telaio fuori dal bagno (con l'eventuale
+    # sgocciolamento) -> `pick_time`; poi trasla orizzontalmente col pezzo;
+    # infine IMMERGE il telaio nella vasca k+1, sgancia e risale col gancio
+    # vuoto -> `release_time`. Lo spostamento a vuoto successivo NON paga
+    # nulla: la salita/discesa del gancio scarico e' gia' contata qui dentro.
+    pick_time: float = 0.0  # [s] discesa gancio + aggancio + emersione
+    release_time: float = 0.0  # [s] immersione + sgancio + risalita gancio
 
     def __post_init__(self):
         n_moves = len(self.route) - 1
@@ -133,6 +154,8 @@ class ProblemData:
                 raise ValueError(f"dwell_min > dwell_max per vasca '{s.tank_id}'")
         if self.takt_min > self.takt_max:
             raise ValueError("takt_min > takt_max")
+        if self.pick_time < 0 or self.release_time < 0:
+            raise ValueError("pick_time e release_time devono essere >= 0")
 
     # -- comodita' --------------------------------------------------------
     @property
@@ -178,12 +201,36 @@ class ProblemData:
     # modifica alla definizione di "durata di una mossa" si propaga ovunque
     # senza rischio di disallineamenti.
 
+    def pick_time_at(self, station_idx: int) -> float:
+        """Tempo di presa [s] alla stazione data. Passare sempre da qui (e non
+        dal campo `pick_time`) rende banale un eventuale override per singola
+        stazione, es. cesti profondi o vasche a lungo sgocciolamento."""
+        return self.pick_time
+
+    def release_time_at(self, station_idx: int) -> float:
+        """Tempo di rilascio [s] alla stazione data."""
+        return self.release_time
+
     def loaded_leg_seconds(self, k: int) -> float:
-        """Durata TOTALE [s] della mossa k, dal prelievo alla consegna."""
+        """Durata TOTALE [s] della mossa k: presa dalla vasca k, traslazione
+        orizzontale, rilascio nella vasca k+1."""
+        return (
+            self.pick_time_at(k)
+            + _travel_time_seconds(self.move_distance(k), self.kin_loaded)
+            + self.release_time_at(k + 1)
+        )
+
+    def horizontal_loaded_seconds(self, k: int) -> float:
+        """Sola traslazione orizzontale [s] della mossa k, senza le fasi
+        verticali. Serve a chi deve disegnare o campionare il moto."""
         return _travel_time_seconds(self.move_distance(k), self.kin_loaded)
 
     def empty_leg_seconds(self, pos_a: float, pos_b: float) -> float:
-        """Durata [s] di uno spostamento a vuoto fra due posizioni."""
+        """Durata [s] di uno spostamento a vuoto fra due posizioni.
+
+        NON comprende alcun tempo verticale: il gancio scarico e' gia' in alto
+        (lo ha portato su `release_time`) e ridiscendera' dentro `pick_time`
+        della mossa successiva. Sommarlo anche qui sarebbe doppio conteggio."""
         return _travel_time_seconds(abs(pos_b - pos_a), self.kin_empty)
 
 
@@ -492,11 +539,20 @@ def solve(
         z_left, z_right = zL["z"], zR["z"]
         assert z_left.hi + 1 == z_right.lo, "le zone devono essere contigue"
 
-        occ_left_start = zL["finish"][z_left.hi] - safety_buffer
+        # Le fasi verticali vanno incluse nella finestra di occupazione: il
+        # carroponte e' gia' FERMO sopra la stazione di confine mentre immerge
+        # il pezzo, e ci resta mentre lo ripesca. `finish` include gia' il
+        # rilascio, quindi l'occupazione a sinistra comincia release_time
+        # PRIMA; a destra il prelievo comincia con la presa, che occupa la
+        # stazione fino a local_pick + pick_time.
+        rel = T_(data.release_time_at(z_left.hi + 1))
+        pck = T_(data.pick_time_at(z_right.lo))
+
+        occ_left_start = zL["finish"][z_left.hi] - rel - safety_buffer
         occ_left_end = zL["dep_hi"] + safety_buffer
 
         occ_right_start = zR["arr_lo"] - safety_buffer
-        occ_right_end = zR["local_pick"][z_right.lo] + Tv + safety_buffer
+        occ_right_end = zR["local_pick"][z_right.lo] + Tv + pck + safety_buffer
 
         add_cyclic_no_overlap(
             occ_left_start,
@@ -616,8 +672,19 @@ def _build_zone_trajectory(
         x0 = data.station_position(k)
         x1 = data.station_position(k + 1)
         t0 = local_pick[k]
-        t1 = t0 + data.loaded_leg_seconds(k)
-        segs.append(Segment("loaded", t0, t1, x0, x1, data.kin_loaded))
+        # La mossa si scompone in tre fasi: presa (fermi sopra la vasca k),
+        # traslazione orizzontale col pezzo, rilascio (fermi sopra la vasca
+        # k+1). Le fasi verticali sono segmenti separati e non gonfiano il
+        # tratto 'loaded': altrimenti il profilo cinematico verrebbe disegnato
+        # e campionato nel posto sbagliato.
+        t_pick_end = t0 + data.pick_time_at(k)
+        t_arrive = t_pick_end + data.horizontal_loaded_seconds(k)
+        t1 = t_arrive + data.release_time_at(k + 1)
+        if t_pick_end > t0:
+            segs.append(Segment("pick", t0, t_pick_end, x0, x0, None))
+        segs.append(Segment("loaded", t_pick_end, t_arrive, x0, x1, data.kin_loaded))
+        if t1 > t_arrive:
+            segs.append(Segment("release", t_arrive, t1, x1, x1, None))
 
         is_last = i == n - 1
         nxt_k = order[0] if is_last else order[i + 1]
@@ -653,7 +720,17 @@ def _build_zone_trajectory(
             depart_t = t1  # scarto minuscolo di arrotondamento, non un errore reale
         if depart_t > t1 + EPS:
             segs.append(Segment("wait", t1, depart_t, x1, x1, None))
-        segs.append(Segment("empty", depart_t, arrive_t, x1, x1_next, data.kin_empty))
+        if abs(x1_next - x1) > 1e-9:
+            segs.append(
+                Segment("empty", depart_t, arrive_t, x1, x1_next, data.kin_empty)
+            )
+        elif arrive_t > depart_t + EPS:
+            # stessa stazione: non c'e' nessuno spostamento a vuoto, il
+            # carroponte resta fermo. Emettere un 'empty' di lunghezza nulla
+            # creerebbe un segmento degenere che, con lo scarto di
+            # arrotondamento sui tick, si ordina male rispetto ai vicini e
+            # spezza la traiettoria.
+            segs.append(Segment("wait", depart_t, arrive_t, x1, x1, None))
 
         target_pick = local_pick[nxt_k] + (T if nxt_k == zone.lo else 0)
         if target_pick < arrive_t - EPS:
@@ -876,5 +953,14 @@ def solve_auto_hoists(
 #    calcolare l'intervallo temporale esatto in cui il carroponte e'
 #    entro `safety_distance` dal confine, invece dell'intera sosta.
 #
-# 4. Tempo di presa/rilascio pezzo (immersione/emersione verticale) come
-#    costante aggiuntiva su ogni travel_loaded/travel_empty.
+# 4. Collisioni FUORI dalle stazioni di confine: oggi il modello assume che
+#    due carroponti possano avvicinarsi solo li'. L'assunzione regge finche'
+#    ogni stazione adiacente a un confine dista almeno
+#    hoist_length + safety_distance; con vasche piu' ravvicinate il modello
+#    ha una vera lacuna (il carroponte sosta dentro la zona di esclusione del
+#    vicino senza che nulla lo impedisca). verify.py lo segnala.
+#
+# GIA' IMPLEMENTATO (era il punto 4 di questo elenco): tempo di presa e
+# rilascio del pezzo, come `pick_time`/`release_time` in ProblemData. NON si
+# somma allo spostamento a vuoto: sarebbe doppio conteggio. Vedi il commento
+# su `empty_leg_seconds`.

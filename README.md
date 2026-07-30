@@ -67,6 +67,39 @@ salvato `ciclogramma.png` col grafico.
 6. **Sicurezza**: `hoist_length` (ingombro) e `safety_distance` (margine
    minimo aggiuntivo) vengono usati per allargare le finestre temporali di
    occupazione dei punti di confine fra zone adiacenti.
+7. **Movimentazione verticale**: `pick_time` e `release_time` (vedi sotto).
+
+### Tempo di presa e rilascio (immersione/emersione)
+
+Il carroponte non si limita a traslare: deve calare il gancio, agganciare e
+tirare su il telaio, e all'arrivo immergerlo, sganciare e risalire. Sono due
+costanti in `ProblemData`, entrambe con default `0.0`:
+
+- `pick_time` — discesa gancio + aggancio + emersione dal bagno con
+  l'eventuale sgocciolamento sopra la vasca;
+- `release_time` — immersione nella vasca di destinazione + sgancio +
+  risalita del gancio a vuoto.
+
+Ogni mossa dura quindi `pick_time + traslazione + release_time`. Lo
+spostamento **a vuoto non paga alcun tempo verticale**: dopo lo sgancio il
+gancio e' gia' in alto (lo ha portato su `release_time`) e ridiscendera'
+dentro `pick_time` della mossa successiva — contarlo di nuovo sarebbe doppio
+conteggio.
+
+Conseguenza importante per l'interpretazione dei dati di processo: i tempi di
+permanenza (`dwell_min`/`dwell_max`) restano il tempo **effettivo in bagno**,
+misurato da fine immersione a inizio emersione. Non vanno gonfiati a mano per
+tenere conto delle fasi verticali.
+
+Le due fasi compaiono nel ciclogramma come segmenti orizzontali dedicati
+(`Segment.kind` vale `"pick"` o `"release"`), in arancio e viola: il
+carroponte e' fermo sopra la vasca. Con entrambi i tempi a zero non viene
+emesso alcun segmento verticale e il risultato e' identico a prima.
+
+Attenzione al dimensionamento: i tempi verticali si sommano a **ogni** mossa e
+si fanno sentire in fretta. Nell'esempio fornito, `pick_time=6 s` e
+`release_time=4 s` su 6 mosse aggiungono 60 s di contenuto e fanno passare la
+linea da 1 a 2 carroponti — e' un risultato corretto, non una regressione.
 
 ### Scelta automatica del numero di carroponti e delle zone
 
@@ -222,8 +255,7 @@ fa scelte di modellazione precise, in particolare:
 
 Nella sezione finale di `model.py` ("Estensioni possibili") sono descritte
 le direzioni per superare le limitazioni residue (assegnazione non
-contigua fra zone, piu' ricette, collisione meno conservativa, tempi di
-presa/rilascio pezzo).
+contigua fra zone, piu' ricette, collisione meno conservativa).
 
 ## Nota sui test effettuati
 
@@ -234,17 +266,34 @@ python esempio.py        # risoluzione CP-SAT reale + verifica + grafico
 ```
 
 **La risoluzione CP-SAT e' ora eseguita e verificata end-to-end.** Sull'esempio
-fornito il solver trova `T = 110 s` con un solo carroponte e il verificatore
-indipendente conferma la soluzione senza errori. Sono stati provati anche i
-casi a 2 e 3 carroponti forzati (zone imposte a mano): separazione minima
-rispettivamente 3,50 m e 3,00 m contro 1,80 m richiesti.
+fornito (con i tempi verticali attivi) il solver trova `T = 110 s` con 2
+carroponti, separazione minima 3,50 m contro 1,80 m richiesti, e il
+verificatore indipendente conferma la soluzione senza errori.
 
-`test_verify.py` contiene 13 casi: uno corretto e dodici rotti di proposito
-(collisione statica, collisione visibile solo campionando dentro il
-movimento, permanenze fuori tolleranza, periodicita' incoerente, ciclo di
-durata sbagliata, discontinuita', tratta piu' veloce della cinematica, layout
-stretto, takt fuori banda, capienza vasca, input malformato, soluzione senza
-valori risolti). Tutti e 13 passano.
+`test_verify.py` contiene 16 casi (37 asserzioni): uno corretto, dodici rotti
+di proposito e tre di regressione sulle fasi verticali. Tutti passano.
+
+### Cosa ha gia' trovato il verificatore
+
+Non e' un esercizio teorico: da quando esiste ha intercettato tre problemi
+reali, tutti invisibili guardando solo lo stato `OPTIMAL` del solver.
+
+1. **Collisioni con vasche ravvicinate** — con spaziatura inferiore a
+   `hoist_length + safety_distance`, CP-SAT restituisce soluzioni `OPTIMAL`
+   con i carroponti a 1,24 m invece di 1,80 m. E' la lacuna descritta sopra:
+   il modello vincola solo la stazione di confine.
+2. **Finestre di occupazione da correggere per i tempi verticali** — l'aggiunta
+   di `pick_time`/`release_time` avrebbe introdotto una collisione vera se le
+   finestre ai confini non fossero state estese per coprire le fasi verticali
+   (il carroponte e' fermo sopra la vasca di confine anche mentre immerge o
+   ripesca il pezzo). Su uno sweep di 108 configurazioni, la versione priva di
+   quella correzione produce 58 soluzioni con collisioni — fino a 0,00 m di
+   separazione; con la correzione, zero errori.
+3. **Segmenti degeneri di durata nulla** — quando due mosse consecutive
+   condividono la stazione, la ricostruzione della traiettoria emetteva uno
+   spostamento a vuoto di lunghezza zero che, sommato allo scarto di
+   arrotondamento sui tick, si ordinava male rispetto ai vicini e spezzava la
+   traiettoria. Difetto preesistente, corretto.
 
 ### Storia precedente
 
