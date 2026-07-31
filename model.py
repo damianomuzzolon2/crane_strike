@@ -1100,6 +1100,128 @@ def solve(
 
 
 # --------------------------------------------------------------------------
+# Costruzione di un ciclogramma a partire dai suoi GRADI DI LIBERTA'
+# --------------------------------------------------------------------------
+
+
+def build_solution(
+    data: ProblemData,
+    T: float,
+    local_pick: dict[int, float],
+    extra_periods: Optional[dict[int, int]] = None,
+    status: str = "MANUALE",
+) -> Solution:
+    """Costruisce una Solution completa dai soli gradi di liberta' di un
+    ciclogramma: il takt time e l'istante di prelievo (fase, in [0,T)) di
+    ciascuna mossa. Tutto il resto -- ordine di visita, tempi assoluti,
+    traiettorie -- e' derivato.
+
+    Non risolve e non verifica nulla: serve a comporre un ciclogramma a mano,
+    o a rimetterne insieme uno modificato dall'utente, per poi passarlo al
+    verificatore esattamente come si fa con una soluzione del solutore.
+
+    Convenzioni (le stesse usate nella ricostruzione delle traiettorie):
+    - il carroponte visita le mosse della propria zona nell'ordine dei loro
+      istanti di prelievo;
+    - il pezzo viene prelevato al primo istante compatibile con la fase
+      scelta che rispetti la permanenza minima; `extra_periods[k]` aggiunge
+      altri periodi interi, allungando la permanenza nella vasca k;
+    - dal confine alto si riparte appena consegnato, e l'eventuale margine
+      diventa attesa all'arrivo.
+
+    Solleva ValueError se la disposizione non e' realizzabile (per esempio se
+    un carroponte dovrebbe essere in due posti insieme).
+    """
+    if data.zones is None:
+        raise ValueError("build_solution richiede data.zones valorizzato")
+    mancanti = [k for k in range(data.n_moves) if k not in local_pick]
+    if mancanti:
+        raise ValueError(f"manca l'istante di prelievo per le mosse {mancanti}")
+    if T <= 0:
+        raise ValueError("il takt time deve essere > 0")
+    extra_periods = extra_periods or {}
+
+    # -- tempi assoluti: catena di flusso del pezzo -------------------------
+    actual_time = [float(local_pick[k]) for k in range(data.n_moves)]
+    for k in range(1, data.n_moves):
+        arrivo = actual_time[k - 1] + data.loaded_leg_seconds(k - 1)
+        minimo = arrivo + data.route[k].dwell_min
+        # si sale di periodi interi: la FASE resta quella scelta dall'utente
+        n_giri = math.ceil((minimo - actual_time[k]) / T) if actual_time[k] < minimo else 0
+        actual_time[k] += (n_giri + extra_periods.get(k, 0)) * T
+
+    # -- per ciascuna zona: ordine di visita e traiettoria ------------------
+    segments_per_hoist = []
+    plans = []
+    for z in data.zones:
+        moves = list(range(z.lo, z.hi + 1))
+        order = sorted(moves, key=lambda k: local_pick[k])
+        i0 = order.index(z.lo)
+        order = order[i0:] + order[:i0]
+        lp = {k: float(local_pick[k]) for k in moves}
+        finish = {k: lp[k] + data.loaded_leg_seconds(k) for k in moves}
+        # "parte appena consegnato": la stessa convenzione che usa il modello
+        dep_hi = finish[z.hi]
+        prev = order[-1]
+        arr_lo = finish[prev] + data.empty_leg_seconds(
+            data.station_position(prev + 1), data.station_position(z.lo)
+        )
+        segments_per_hoist.append(
+            _build_zone_trajectory(data, z, order, lp, dep_hi, arr_lo, T)
+        )
+        plans.append(HoistPlan(z, order, lp, finish, dep_hi, arr_lo))
+
+    return Solution(
+        status=status,
+        T=float(T),
+        segments_per_hoist=segments_per_hoist,
+        raw={"origine": "costruita da build_solution"},
+        plans=plans,
+        actual_time=actual_time,
+    )
+
+
+def proposta_semplice(
+    data: ProblemData, T: Optional[float] = None
+) -> tuple[Solution, ProblemData]:
+    """Ciclogramma di partenza, banale ma sempre COSTRUIBILE: un carroponte
+    solo che percorre la linea da un capo all'altro, eseguendo le mosse una
+    dopo l'altra senza pause, e poi torna indietro a vuoto.
+
+    Il giro si compone dal punto di vista del CARROPONTE, non del pezzo: e'
+    l'unico modo per essere certi che la traiettoria esista. Le permanenze
+    vengono di conseguenza -- ogni vasca trattiene il pezzo per un numero
+    intero di periodi, il minimo che rispetti la permanenza minima -- e non e'
+    detto che rientrino nelle tolleranze di processo: se non ci rientrano, lo
+    dice il verificatore.
+
+    Serve come punto di partenza per comporre un ciclogramma a mano: meglio
+    partire da qualcosa di concreto e verificabile che da un foglio bianco.
+    Restituisce (soluzione, dati con la zona unica valorizzata).
+    """
+    d = dataclasses.replace(data, zones=[HoistZone(0, data.n_moves - 1)])
+
+    # il carroponte incatena le mosse: finita la k-1 e' gia' sulla stazione da
+    # cui parte la k, quindi non c'e' nessuno spostamento a vuoto nel mezzo
+    local_pick = {0: 0.0}
+    for k in range(1, d.n_moves):
+        local_pick[k] = local_pick[k - 1] + d.loaded_leg_seconds(k - 1)
+    fine_giro = local_pick[d.n_moves - 1] + d.loaded_leg_seconds(d.n_moves - 1)
+    rientro = d.empty_leg_seconds(
+        d.station_position(d.n_moves), d.station_position(0)
+    )
+    ciclo_minimo = fine_giro + rientro
+
+    if T is None:
+        # dentro la banda dichiarata se ci sta; altrimenti il minimo possibile,
+        # e sara' il verificatore a segnalare che il takt time non e' rispettato
+        T = min(max(ciclo_minimo, d.takt_min), d.takt_max)
+        if ciclo_minimo > d.takt_max:
+            T = ciclo_minimo
+    return build_solution(d, T, local_pick, status="PROPOSTA"), d
+
+
+# --------------------------------------------------------------------------
 # Costruzione della traiettoria (posizione nel tempo) a partire dai valori
 # risolti, per UNA zona/carroponte. Separata dalla risoluzione CP-SAT cosi'
 # da poter essere testata anche senza risolvere realmente un modello (es.

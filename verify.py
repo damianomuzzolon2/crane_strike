@@ -56,6 +56,8 @@ from model import HoistPlan, ProblemData, Segment, Solution, zone_layout_conflic
 _STATIONARY_KINDS = {"wait", "pick", "release"}
 # Tipi di segmento che descrivono una traslazione orizzontale vera.
 _MOVING_KINDS = {"loaded", "empty"}
+# Stati che dichiarano esplicitamente l'assenza di una soluzione.
+_STATI_SENZA_SOLUZIONE = {"INFEASIBLE", "MODEL_INVALID", "UNKNOWN", "NOT_SOLVED"}
 
 
 # --------------------------------------------------------------------------
@@ -258,10 +260,15 @@ def verify_solution(
     non definite, ecc.).
     """
     # -- validazione dell'input (qui si', si solleva) -----------------------
-    if solution.status not in ("OPTIMAL", "FEASIBLE"):
+    # Lo status non e' una lista chiusa: oltre a quelli del solutore ci sono i
+    # ciclogrammi composti a mano ("MANUALE", "PROPOSTA"). Si rifiuta solo cio'
+    # che dichiara di NON contenere una soluzione.
+    if solution.status in _STATI_SENZA_SOLUZIONE:
         raise ValueError(
             f"Non c'e' nulla da verificare (status={solution.status})"
         )
+    if not solution.segments_per_hoist:
+        raise ValueError("la soluzione non contiene nessuna traiettoria")
     if solution.T is None:
         raise ValueError("solution.T e' None: soluzione incompleta")
     if data.zones is None:

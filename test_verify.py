@@ -30,6 +30,7 @@ from model import (
     solve,
     zone_layout_conflicts,
 )
+from model import build_solution as costruisci
 from verify import verify_solution
 
 KIN_EMPTY = Kinematics(v_max=1.6, a_max=0.9)
@@ -94,54 +95,15 @@ def build_solution(
     local_picks: list[dict],
     extra_periods: dict[int, int] | None = None,
 ) -> Solution:
-    """Costruisce una Solution coerente a partire dalle sole fasi di prelievo,
-    lasciando che sia _build_zone_trajectory a generare i segmenti (la stessa
-    funzione usata dal solver, cosi' il test verifica il verificatore e non una
-    seconda implementazione).
-
-    extra_periods[k]: periodi in piu' da aggiungere al tempo assoluto della
-    mossa k. Non cambia la fase locale (quindi nemmeno le traiettorie), ma
-    allunga la permanenza nella vasca k di altrettanti takt: serve a costruire
-    i casi in cui piu' pezzi stanno nella stessa vasca."""
-    extra_periods = extra_periods or {}
-    segments_per_hoist = []
-    plans = []
-
-    # tempi assoluti: catena di flusso del pezzo, ricavata dalle fasi locali
-    # salendo al primo istante compatibile con l'arrivo del pezzo
-    actual_time = [0.0] * data.n_moves
+    """Comodita' per i test: accetta le fasi di prelievo raggruppate per
+    carroponte (com'e' naturale scriverle qui) e delega la costruzione vera a
+    model.build_solution, che e' la stessa funzione usata dall'interfaccia.
+    Una sola implementazione, cosi' i test non verificano una copia."""
+    unite: dict[int, float] = {}
     for lp in local_picks:
-        for k, v in lp.items():
-            actual_time[k] = v
-    for k in range(1, data.n_moves):
-        arrivo = actual_time[k - 1] + data.loaded_leg_seconds(k - 1)
-        while actual_time[k] < arrivo:
-            actual_time[k] += T
-        actual_time[k] += extra_periods.get(k, 0) * T
-
-    for z, lp in zip(data.zones, local_picks):
-        order = sorted(lp, key=lambda k: lp[k])
-        order = order[order.index(z.lo) :] + order[: order.index(z.lo)]
-        finish = {k: lp[k] + data.loaded_leg_seconds(k) for k in lp}
-        # convenzione "parte appena possibile": dal confine alto si riparte
-        # subito dopo la consegna, e si arriva al confine basso dopo il solo
-        # tempo di percorrenza (l'eventuale margine diventa un'attesa)
-        dep_hi = finish[z.hi]
-        prev = order[-1]
-        arr_lo = finish[prev] + data.empty_leg_seconds(
-            data.station_position(prev + 1), data.station_position(z.lo)
-        )
-        segs = _build_zone_trajectory(data, z, order, lp, dep_hi, arr_lo, T)
-        segments_per_hoist.append(segs)
-        plans.append(HoistPlan(z, order, lp, finish, dep_hi, arr_lo))
-
-    return Solution(
-        status="OPTIMAL",
-        T=T,
-        segments_per_hoist=segments_per_hoist,
-        raw={},
-        plans=plans,
-        actual_time=actual_time,
+        unite.update(lp)
+    return costruisci(
+        data, T, unite, extra_periods=extra_periods, status="OPTIMAL"
     )
 
 
@@ -461,32 +423,37 @@ def test_capienza_vasca():
     T = 100.0
 
     def caso(cap):
+        # finestre di permanenza larghe: qui si vuole isolare la CAPIENZA,
+        # non farsi disturbare da violazioni di processo
         data = make_data(
             positions=positions,
-            dwells=[(0, 0), (30, 90), (150, 300, cap), (30, 90), (0, 0)],
+            dwells=[(0, 0), (30, 200), (150, 500, cap), (30, 200), (0, 0)],
             zones=zones,
         )
         d0 = data.loaded_leg_seconds(0)
-        # +2 periodi sulla mossa 2: il pezzo resta in V2 per oltre due takt,
-        # quindi ce ne sono sempre 3 dentro contemporaneamente
+        # +2 periodi sulla mossa 2: il pezzo resta in V2 per piu' takt di
+        # seguito, quindi ce ne sono diversi dentro contemporaneamente
         sol = build_solution(
             data, T, [{0: 0.0, 1: d0 + 40.0}, {2: 10.0, 3: 55.0}], extra_periods={2: 2}
         )
         return data, verify_solution(data, sol)
 
     _, r1 = caso(1)
-    check(
-        r1.tank_occupancy.get("V2", 1) == 3,
-        f"conteggio posti richiesti in V2 = {r1.tank_occupancy.get('V2')} (atteso 3)",
-    )
+    n = r1.tank_occupancy.get("V2", 1)
+    check(n >= 3, f"in V2 servono {n} posti (permanenza su piu' takt)")
     check(
         len(kinds(r1, "tank_capacity", "error")) == 1 and not r1.ok,
         "con capacity=1 e' un ERRORE",
     )
-    _, r3 = caso(3)
+    _, rn = caso(n)
     check(
-        r3.ok and len(kinds(r3, "tank_capacity", "info")) == 1,
-        "con capacity=3 e' solo una nota informativa",
+        rn.ok and len(kinds(rn, "tank_capacity", "info")) == 1,
+        f"con capacity={n} e' solo una nota informativa",
+    )
+    _, rm = caso(n - 1)
+    check(
+        len(kinds(rm, "tank_capacity", "error")) == 1,
+        f"con capacity={n - 1}, cioe' uno in meno del necessario, e' un ERRORE",
     )
 
     # l'occupazione di un posto comprende anche le fasi verticali
@@ -543,13 +510,18 @@ def test_capienza_validazione():
     check(d.tank_capacity(1) == 2, "con capacity=2 la stessa linea e' accettata")
 
 
-def _linea_vasca_ripetuta(cap_lav: int, dwell=(20, 90)) -> ProblemData:
-    """Il pezzo torna DUE volte nella stessa vasca fisica LAV."""
+def _linea_vasca_ripetuta(cap_lav: int, dwell=(20, 200)) -> ProblemData:
+    """Il pezzo torna DUE volte nella stessa vasca fisica LAV.
+
+    Un carroponte solo: tornare indietro rende le posizioni non monotone lungo
+    la rotaia, e con due carroponti il caso si sporcherebbe di collisioni che
+    qui non c'entrano nulla. SEC ha posti in abbondanza per lo stesso motivo:
+    l'unica capienza sotto esame e' quella di LAV."""
     return ProblemData(
         tanks={
             "CAR": Tank("CAR", 0.0),
             "LAV": Tank("LAV", 5.0, capacity=cap_lav),
-            "SEC": Tank("SEC", 10.0),
+            "SEC": Tank("SEC", 10.0, capacity=20),
             "SCA": Tank("SCA", 15.0),
         },
         route=[
@@ -566,7 +538,7 @@ def _linea_vasca_ripetuta(cap_lav: int, dwell=(20, 90)) -> ProblemData:
         hoist_extent_pos=0.5,
         hoist_extent_neg=0.7,
         safety_distance=0.6,
-        zones=[HoistZone(0, 1), HoistZone(2, 3)],
+        zones=[HoistZone(0, 3)],
         time_scale=100,
     )
 
@@ -587,10 +559,13 @@ def test_vasca_ripetuta():
         n == 1,
         f"tappe sfasate: LAV richiede {n} posto/i (non la somma delle tappe)",
     )
-    check(not kinds(r, "tank_capacity", "error"), "con capacity=1 nessun errore")
+    check(
+        not kinds(r, "tank_capacity", "error"),
+        "con capacity=1 nessun errore di capienza",
+    )
 
     # (b) permanenze lunghe: i pezzi delle due tappe convivono davvero
-    data2 = _linea_vasca_ripetuta(cap_lav=1, dwell=(150, 300))
+    data2 = _linea_vasca_ripetuta(cap_lav=1, dwell=(150, 600))
     sol2 = build_solution(
         data2, T, [{0: 0.0, 1: 10.0}, {2: 40.0, 3: 70.0}], extra_periods={1: 1, 3: 1}
     )
