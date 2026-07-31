@@ -7,11 +7,16 @@ il ciclogramma, lo verifica e produce i risultati.
     python ciclogramma.py --modello linea.xlsx    crea il file da compilare
     python ciclogramma.py linea.xlsx              calcola il ciclogramma
 
+Produce, accanto al file di ingresso:
+    linea_risultati.xlsx   riepilogo, movimenti, flusso del pezzo, verifica
+    linea.png              il ciclogramma disegnato
+
 Opzioni utili:
-    --grafico FILE.png    dove salvare il ciclogramma (default: accanto
-                          all'input, stesso nome con estensione .png)
+    --risultati FILE.xlsx dove salvare i risultati
+    --grafico FILE.png    dove salvare il ciclogramma
     --cicli N             quanti periodi disegnare (default 2)
     --niente-grafico      salta il disegno
+    --niente-excel        salta il file dei risultati
     --log                 mostra i tentativi della ricerca automatica
 """
 
@@ -22,7 +27,7 @@ import dataclasses
 import os
 import sys
 
-from excel_io import leggi_problema, scrivi_modello
+from excel_io import leggi_problema, scrivi_modello, scrivi_risultati
 from model import solve, solve_auto_hoists
 from verify import verify_solution
 
@@ -39,12 +44,18 @@ def _argomenti(argv=None):
         action="store_true",
         help="invece di calcolare, scrive in FILE un modello da compilare",
     )
+    p.add_argument(
+        "--risultati", metavar="FILE.xlsx", help="dove salvare i risultati in Excel"
+    )
     p.add_argument("--grafico", metavar="FILE.png", help="dove salvare il ciclogramma")
     p.add_argument(
         "--cicli", type=int, default=2, help="periodi da disegnare (default 2)"
     )
     p.add_argument(
         "--niente-grafico", action="store_true", help="non disegnare il ciclogramma"
+    )
+    p.add_argument(
+        "--niente-excel", action="store_true", help="non scrivere il file dei risultati"
     )
     p.add_argument(
         "--log", action="store_true", help="mostra i tentativi della ricerca automatica"
@@ -126,6 +137,15 @@ def main(argv=None) -> int:
         print("Le violazioni elencate sopra vanno esaminate prima di usare")
         print("questo ciclogramma su un impianto reale.")
 
+    # -- risultati in Excel ------------------------------------------------
+    radice = os.path.splitext(args.file)[0]
+    if not args.niente_excel:
+        destinazione = args.risultati or (radice + "_risultati.xlsx")
+        scrivi_risultati(
+            destinazione, data_finale, solution, report, sorgente=args.file
+        )
+        print(f"Risultati salvati in {destinazione}")
+
     # -- grafico -----------------------------------------------------------
     if not args.niente_grafico:
         import matplotlib
@@ -133,7 +153,7 @@ def main(argv=None) -> int:
         matplotlib.use("Agg")
         from plotting import plot_cyclogram
 
-        destinazione = args.grafico or (os.path.splitext(args.file)[0] + ".png")
+        destinazione = args.grafico or (radice + ".png")
         plot_cyclogram(
             data_finale,
             solution,

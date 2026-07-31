@@ -280,9 +280,203 @@ def test_dati_incoerenti():
         os.unlink(p)
 
 
+# --------------------------------------------------------------------------
+# Scrittura dei risultati
+# --------------------------------------------------------------------------
+
+
+def _risultati_su_file():
+    """Scrive i risultati di una soluzione costruita a mano (nessun CP-SAT) e
+    restituisce (percorso, data, solution, report, workbook)."""
+    from openpyxl import load_workbook
+
+    # riusa il caso di riferimento gia' costruito per i test del verificatore
+    from test_verify import reference_case
+    from verify import verify_solution
+
+    from excel_io import scrivi_risultati
+
+    data, solution = reference_case()
+    report = verify_solution(data, solution)
+    fd, percorso = tempfile.mkstemp(suffix=".xlsx")
+    os.close(fd)
+    scrivi_risultati(percorso, data, solution, report, sorgente="prova.xlsx")
+    return percorso, data, solution, report, load_workbook(percorso)
+
+
+def test_risultati_struttura():
+    print("\n[13] il file dei risultati ha i fogli attesi")
+    percorso, data, solution, report, wb = _risultati_su_file()
+    try:
+        check(
+            wb.sheetnames == ["Riepilogo", "Movimenti", "FlussoPezzo", "Verifica"],
+            f"fogli: {wb.sheetnames}",
+        )
+        testo = "\n".join(
+            str(wb["Riepilogo"].cell(r, c).value)
+            for r in range(1, wb["Riepilogo"].max_row + 1)
+            for c in (1, 2, 3)
+        )
+        check("prova.xlsx" in testo, "il riepilogo cita il file di origine")
+        check("SUPERATA" in testo, "riporta l'esito della verifica")
+        ws = wb["Riepilogo"]
+        valori = {
+            ws.cell(r, 1).value: ws.cell(r, 2).value for r in range(1, ws.max_row + 1)
+        }
+        check(
+            abs(float(valori.get("Takt time", 0)) - solution.T) < 0.01,
+            f"riporta il takt time ({valori.get('Takt time')} s)",
+        )
+        check(
+            abs(float(valori.get("Produttivita'", 0)) - 3600.0 / solution.T) < 0.1,
+            "riporta la produttivita' in pezzi/ora",
+        )
+        check(valori.get("Numero di carroponti") == len(data.zones), "numero di carroponti")
+    finally:
+        os.unlink(percorso)
+
+
+def test_risultati_utilizzo():
+    print("\n[17] utilizzo dei carroponti nel riepilogo")
+    percorso, data, solution, report, wb = _risultati_su_file()
+    try:
+        ws = wb["Riepilogo"]
+        riga_int = next(
+            r
+            for r in range(1, ws.max_row + 1)
+            if ws.cell(r, 1).value == "carroponte"
+        )
+        utilizzi = []
+        for r in range(riga_int + 1, ws.max_row + 1):
+            if not isinstance(ws.cell(r, 1).value, int):
+                break
+            utilizzi.append(ws.cell(r, 6).value)
+        check(
+            len(utilizzi) == len(data.zones),
+            f"una riga per carroponte ({len(utilizzi)})",
+        )
+        check(
+            all(0.0 < u < 1.0 for u in utilizzi),
+            f"utilizzi plausibili: {[round(u, 3) for u in utilizzi]}",
+        )
+    finally:
+        os.unlink(percorso)
+
+
+def test_risultati_movimenti():
+    print("\n[14] foglio Movimenti: una riga per tratto, con le vasche giuste")
+    percorso, data, solution, report, wb = _risultati_su_file()
+    try:
+        ws = wb["Movimenti"]
+        attese = sum(len(s) for s in solution.segments_per_hoist)
+        righe = [
+            [ws.cell(r, c).value for c in range(1, 10)]
+            for r in range(2, ws.max_row + 1)
+            if isinstance(ws.cell(r, 1).value, int)
+        ]
+        check(len(righe) == attese, f"{len(righe)} righe per {attese} tratti")
+
+        # ogni tratto a carico deve andare da una vasca alla successiva del
+        # percorso, e la somma delle durate di un carroponte deve fare T
+        carichi = [r for r in righe if r[1].startswith("trasporto")]
+        check(
+            len(carichi) == data.n_moves,
+            f"{len(carichi)} trasporti a carico per {data.n_moves} mosse",
+        )
+        ok_vasche = all(
+            r[2] != r[3] and abs(r[8] - r[7]) > 0 for r in carichi
+        )
+        check(ok_vasche, "ogni trasporto collega due vasche diverse")
+
+        for h in (1, 2):
+            durata = sum(r[6] for r in righe if r[0] == h)
+            check(
+                abs(durata - solution.T) < 0.05,
+                f"carroponte {h}: le durate sommano a {durata:.2f} s (T={solution.T})",
+            )
+    finally:
+        os.unlink(percorso)
+
+
+def test_risultati_flusso_pezzo():
+    print("\n[15] foglio FlussoPezzo: una riga per stazione, permanenze coerenti")
+    percorso, data, solution, report, wb = _risultati_su_file()
+    try:
+        ws = wb["FlussoPezzo"]
+        righe = [
+            [ws.cell(r, c).value for c in range(1, 13)]
+            for r in range(2, ws.max_row + 1)
+            if isinstance(ws.cell(r, 1).value, int)
+        ]
+        check(
+            len(righe) == data.n_stations,
+            f"{len(righe)} righe per {data.n_stations} stazioni",
+        )
+        for r in righe[1:-1]:
+            _, vasca, _, ingresso, uscita, permanenza = r[:6]
+            if abs((uscita - ingresso) - permanenza) > 0.01:
+                check(False, f"{vasca}: uscita - ingresso != permanenza")
+                break
+            spec = next(s for s in data.route if s.tank_id == vasca)
+            if not (spec.dwell_min - 0.01 <= permanenza <= spec.dwell_max + 0.01):
+                check(False, f"{vasca}: permanenza {permanenza} fuori tolleranza")
+                break
+        else:
+            check(True, "permanenze coerenti e dentro la tolleranza dichiarata")
+    finally:
+        os.unlink(percorso)
+
+
+def test_risultati_verifica():
+    print("\n[16] foglio Verifica: elenca i rilievi del verificatore")
+    from verify import verify_solution
+
+    from excel_io import scrivi_risultati
+    from test_verify import reference_case
+
+    import dataclasses
+
+    from openpyxl import load_workbook
+
+    data, solution = reference_case()
+    # rompo la soluzione: il secondo carroponte finisce addosso al primo
+    rotto = dataclasses.replace(solution)
+    rotto.segments_per_hoist = [
+        solution.segments_per_hoist[0],
+        [
+            dataclasses.replace(s, x_start=s.x_start - 10.0, x_end=s.x_end - 10.0)
+            for s in solution.segments_per_hoist[1]
+        ],
+    ]
+    report = verify_solution(data, rotto)
+    fd, percorso = tempfile.mkstemp(suffix=".xlsx")
+    os.close(fd)
+    try:
+        scrivi_risultati(percorso, data, rotto, report)
+        wb = load_workbook(percorso)
+        ws = wb["Verifica"]
+        righe = [
+            [ws.cell(r, c).value for c in range(1, 11)]
+            for r in range(2, ws.max_row + 1)
+        ]
+        check(len(righe) == len(report.violations), "una riga per rilievo")
+        check(
+            any(r[0] == "ERRORE" and r[1] == "collision" for r in righe),
+            "la collisione compare come ERRORE",
+        )
+        testo = "\n".join(
+            str(wb["Riepilogo"].cell(r, c).value)
+            for r in range(1, wb["Riepilogo"].max_row + 1)
+            for c in (1, 2)
+        )
+        check("NON SUPERATA" in testo, "il riepilogo dice che la verifica fallisce")
+    finally:
+        os.unlink(percorso)
+
+
 def main():
     print("=" * 72)
-    print("TEST DELLA LETTURA DA EXCEL (richiede openpyxl, non OR-Tools)")
+    print("TEST DI LETTURA E SCRITTURA EXCEL (richiede openpyxl, non OR-Tools)")
     print("=" * 72)
     test_andata_e_ritorno()
     test_valori_mancanti_e_sbagliati()
@@ -296,6 +490,11 @@ def main():
     test_errori_multipli()
     test_foglio_mancante()
     test_dati_incoerenti()
+    test_risultati_struttura()
+    test_risultati_utilizzo()
+    test_risultati_movimenti()
+    test_risultati_flusso_pezzo()
+    test_risultati_verifica()
     print("\n" + "=" * 72)
     print(f"RISULTATO: {_n_pass} ok, {_n_fail} falliti")
     print("=" * 72)

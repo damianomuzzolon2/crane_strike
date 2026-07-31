@@ -1,8 +1,8 @@
 """
 excel_io.py
 -----------
-Lettura della definizione di una linea da un file Excel, e generazione del
-file modello da cui partire.
+Lettura della definizione di una linea da un file Excel, generazione del file
+modello da cui partire, e scrittura dei risultati in un secondo file Excel.
 
 Il file ha quattro fogli:
 
@@ -584,6 +584,372 @@ def scrivi_modello(percorso_file: str) -> str:
         "(consigliato). Vedi il foglio Istruzioni."
     )
     ws.cell(2, 4).font = nota
+
+    wb.save(percorso_file)
+    return percorso_file
+
+
+# --------------------------------------------------------------------------
+# Scrittura dei risultati
+# --------------------------------------------------------------------------
+
+# etichette leggibili per i tipi di segmento
+_FASI = {
+    "pick": "presa (emersione)",
+    "loaded": "trasporto con pezzo",
+    "release": "rilascio (immersione)",
+    "empty": "spostamento a vuoto",
+    "wait": "attesa",
+}
+_FASI_IN_MOVIMENTO = {"loaded", "empty"}
+
+_SEVERITA = {"error": "ERRORE", "warning": "avviso", "info": "nota"}
+
+
+def _mosse_dei_segmenti(segs: list) -> list[int]:
+    """Per ogni segmento, l'indice (dentro l'ordine di visita) della mossa a
+    cui appartiene. Un segmento di presa appartiene alla mossa che sta per
+    iniziare; tutti gli altri all'ultima mossa cominciata."""
+    indici_loaded = [j for j, s in enumerate(segs) if s.kind == "loaded"]
+    out = []
+    i = -1
+    prossimo = 0
+    for j, s in enumerate(segs):
+        if s.kind == "loaded":
+            i += 1
+            prossimo = i + 1
+            out.append(i)
+        elif s.kind == "pick":
+            out.append(min(prossimo, len(indici_loaded) - 1))
+        else:
+            out.append(max(i, 0))
+    return out
+
+
+def _righe_movimenti(data: ProblemData, solution) -> list[list]:
+    """Tabella degli spostamenti: una riga per tratto, per carroponte."""
+    righe = []
+    for h, (plan, segs) in enumerate(
+        zip(solution.plans, solution.segments_per_hoist)
+    ):
+        ordine = plan.order
+        n = len(ordine)
+        appartenenza = _mosse_dei_segmenti(segs)
+        for j, seg in enumerate(segs):
+            i = appartenenza[j]
+            k = ordine[i]
+            if seg.kind == "pick":
+                st_da = st_a = k
+            elif seg.kind == "loaded":
+                st_da, st_a = k, k + 1
+            elif seg.kind == "release":
+                st_da = st_a = k + 1
+            elif seg.kind == "empty":
+                st_da, st_a = k + 1, ordine[(i + 1) % n]
+            else:  # attesa: fermo su una stazione, o prima o dopo il rientro
+                candidate = (k + 1, ordine[(i + 1) % n])
+                st_da = st_a = next(
+                    (
+                        c
+                        for c in candidate
+                        if abs(data.station_position(c) - seg.x_start) < 1e-6
+                    ),
+                    candidate[0],
+                )
+            righe.append(
+                [
+                    h + 1,
+                    _FASI.get(seg.kind, seg.kind),
+                    data.route[st_da].tank_id,
+                    data.route[st_a].tank_id,
+                    round(seg.t_start, 2),
+                    round(seg.t_end, 2),
+                    round(seg.t_end - seg.t_start, 2),
+                    round(seg.x_start, 3),
+                    round(seg.x_end, 3),
+                ]
+            )
+    return righe
+
+
+def _utilizzo_carroponti(solution, T: float) -> list[float]:
+    """Frazione del ciclo in cui ciascun carroponte e' effettivamente in
+    movimento (il resto e' attesa o movimentazione verticale)."""
+    out = []
+    for segs in solution.segments_per_hoist:
+        moto = sum(
+            s.t_end - s.t_start for s in segs if s.kind in _FASI_IN_MOVIMENTO
+        )
+        out.append(moto / T if T else 0.0)
+    return out
+
+
+def scrivi_risultati(
+    percorso_file: str,
+    data: ProblemData,
+    solution,
+    report,
+    sorgente: Optional[str] = None,
+) -> str:
+    """Scrive i risultati del calcolo in un file Excel a quattro fogli:
+    Riepilogo, Movimenti, FlussoPezzo, Verifica. Restituisce il percorso."""
+    from datetime import datetime
+
+    from openpyxl import Workbook
+    from openpyxl.styles import Alignment, Font, PatternFill
+    from openpyxl.utils import get_column_letter
+
+    intestazione = Font(bold=True, color="FFFFFF")
+    sfondo = PatternFill("solid", fgColor="4F6228")
+    grassetto = Font(bold=True)
+    rosso = PatternFill("solid", fgColor="F4CCCC")
+    arancio = PatternFill("solid", fgColor="FCE5CD")
+    grigio = PatternFill("solid", fgColor="EFEFEF")
+
+    T = solution.T
+    wb = Workbook()
+
+    def tabella(ws, titoli, larghezze, righe, formati=None):
+        ws.append(titoli)
+        for col, larghezza in enumerate(larghezze, start=1):
+            cella = ws.cell(1, col)
+            cella.font = intestazione
+            cella.fill = sfondo
+            cella.alignment = Alignment(horizontal="center")
+            ws.column_dimensions[get_column_letter(col)].width = larghezza
+        for riga in righe:
+            ws.append(riga)
+        if formati:
+            for col, fmt in formati.items():
+                for r in range(2, ws.max_row + 1):
+                    ws.cell(r, col).number_format = fmt
+        ws.freeze_panes = "A2"
+
+    # -- Riepilogo -------------------------------------------------------
+    ws = wb.active
+    ws.title = "Riepilogo"
+    ws.column_dimensions["A"].width = 34
+    ws.column_dimensions["B"].width = 26
+    ws.column_dimensions["C"].width = 46
+
+    def voce(etichetta, valore, nota="", formato=None):
+        ws.append([etichetta, valore, nota])
+        if formato:
+            ws.cell(ws.max_row, 2).number_format = formato
+        elif isinstance(valore, float):
+            ws.cell(ws.max_row, 2).number_format = "0.00"
+
+    def sezione(titolo):
+        ws.append([])
+        ws.append([titolo])
+        ws.cell(ws.max_row, 1).font = grassetto
+
+    ws.append(["Ciclogramma carroponti - risultati"])
+    ws.cell(1, 1).font = Font(bold=True, size=13)
+    ws.append([])
+    voce("File di origine", sorgente or "-")
+    voce("Calcolato il", datetime.now().strftime("%d/%m/%Y %H:%M"))
+    voce("Stato della risoluzione", solution.status)
+
+    sezione("Produzione")
+    voce("Takt time", round(T, 2), "s fra un pezzo e il successivo")
+    voce("Produttivita'", round(3600.0 / T, 1) if T else "-", "pezzi/ora", "0.0")
+    voce("Numero di carroponti", len(data.zones))
+
+    sezione("Sicurezza")
+    voce(
+        "Distanza minima fra carroponti",
+        round(report.min_separation, 3) if report.min_separation != float("inf") else "-",
+        "m, misurata campionando le posizioni reali",
+        "0.000",
+    )
+    voce("Distanza richiesta", round(report.required_separation, 3), "m", "0.000")
+    if report.min_separation != float("inf"):
+        voce(
+            "Margine residuo",
+            round(report.min_separation - report.required_separation, 3),
+            f"m, all'istante {report.min_separation_t:.2f} s",
+            "0.000",
+        )
+
+    sezione("Verifica indipendente")
+    voce("Esito", "SUPERATA" if report.ok else "NON SUPERATA")
+    voce("Errori", len(report.errors))
+    voce("Avvisi", len(report.warnings))
+    voce("Note", len(report.infos))
+
+    sezione("Carroponti")
+    ws.append(
+        ["carroponte", "mosse servite", "da vasca", "a vasca", "tratto rotaia [m]", "utilizzo"]
+    )
+    for col in range(1, 7):
+        ws.cell(ws.max_row, col).font = grassetto
+    ws.column_dimensions["D"].width = 22
+    ws.column_dimensions["E"].width = 20
+    ws.column_dimensions["F"].width = 12
+    utilizzo = _utilizzo_carroponti(solution, T)
+    for h, z in enumerate(data.zones):
+        xs = [data.station_position(i) for i in range(z.lo, z.hi + 2)]
+        ws.append(
+            [
+                h + 1,
+                f"{z.lo}-{z.hi}",
+                data.route[z.lo].tank_id,
+                data.route[z.hi + 1].tank_id,
+                f"{min(xs):.2f} - {max(xs):.2f}",
+                round(utilizzo[h], 3),
+            ]
+        )
+        ws.cell(ws.max_row, 6).number_format = "0.0%"
+
+    # -- Movimenti -------------------------------------------------------
+    ws = wb.create_sheet("Movimenti")
+    tabella(
+        ws,
+        [
+            "carroponte",
+            "fase",
+            "da vasca",
+            "a vasca",
+            "inizio [s]",
+            "fine [s]",
+            "durata [s]",
+            "da [m]",
+            "a [m]",
+        ],
+        [12, 24, 20, 20, 12, 12, 12, 10, 10],
+        _righe_movimenti(data, solution),
+        formati={5: "0.00", 6: "0.00", 7: "0.00", 8: "0.000", 9: "0.000"},
+    )
+    ws.append([])
+    ws.append(
+        [
+            f"Tempi in secondi dall'origine del ciclo. Il ciclo si ripete "
+            f"identico ogni {T:.2f} s."
+        ]
+    )
+    ws.cell(ws.max_row, 1).font = Font(italic=True, color="808080")
+
+    # -- Flusso del pezzo ------------------------------------------------
+    ws = wb.create_sheet("FlussoPezzo")
+    righe = []
+    at = solution.actual_time
+    for s in range(data.n_stations):
+        spec = data.route[s]
+        cap = data.tanks[spec.tank_id].capacity
+        if s == 0:
+            arrivo, partenza, permanenza = 0.0, at[0] if at else 0.0, 0.0
+        elif s < data.n_moves:
+            arrivo = at[s - 1] + data.loaded_leg_seconds(s - 1)
+            partenza = at[s]
+            permanenza = partenza - arrivo
+        else:
+            arrivo = at[s - 1] + data.loaded_leg_seconds(s - 1) if at else 0.0
+            partenza = arrivo
+            permanenza = 0.0
+        righe.append(
+            [
+                s,
+                spec.tank_id,
+                round(data.station_position(s), 3),
+                round(arrivo, 2),
+                round(partenza, 2),
+                round(permanenza, 2),
+                spec.dwell_min,
+                spec.dwell_max,
+                round(permanenza - spec.dwell_min, 2) if 0 < s < data.n_moves else "",
+                round(spec.dwell_max - permanenza, 2) if 0 < s < data.n_moves else "",
+                report.tank_occupancy.get(spec.tank_id, 1),
+                cap,
+            ]
+        )
+    tabella(
+        ws,
+        [
+            "n",
+            "vasca",
+            "posizione [m]",
+            "ingresso [s]",
+            "uscita [s]",
+            "permanenza [s]",
+            "min [s]",
+            "max [s]",
+            "margine sul min [s]",
+            "margine sul max [s]",
+            "posti usati",
+            "posti disponibili",
+        ],
+        [5, 20, 14, 13, 12, 15, 10, 10, 19, 19, 12, 17],
+        righe,
+        formati={4: "0.00", 5: "0.00", 6: "0.00"},
+    )
+    ws.append([])
+    ws.append(
+        [
+            "Tempi assoluti di UN pezzo lungo tutta la linea: possono superare il "
+            "takt time, perche' piu' pezzi sono in lavorazione insieme. La "
+            "permanenza e' il tempo effettivo in bagno."
+        ]
+    )
+    ws.cell(ws.max_row, 1).font = Font(italic=True, color="808080")
+
+    # -- Verifica --------------------------------------------------------
+    ws = wb.create_sheet("Verifica")
+    righe = []
+    for v in report.violations:
+        righe.append(
+            [
+                _SEVERITA.get(v.severity, v.severity),
+                v.kind,
+                "/".join(str(h + 1) for h in v.hoists) if v.hoists else "",
+                "" if v.move is None else v.move,
+                "" if v.station is None else v.station,
+                "" if v.t is None else round(v.t, 2),
+                "" if v.value is None else round(v.value, 3),
+                "" if v.bound is None else round(v.bound, 3),
+                "" if v.slack is None else round(v.slack, 3),
+                v.message,
+            ]
+        )
+    tabella(
+        ws,
+        [
+            "severita'",
+            "tipo",
+            "carroponti",
+            "mossa",
+            "stazione",
+            "istante [s]",
+            "valore",
+            "limite",
+            "margine",
+            "descrizione",
+        ],
+        [12, 18, 12, 8, 10, 12, 10, 10, 10, 100],
+        righe,
+    )
+    for r in range(2, ws.max_row + 1):
+        sev = ws.cell(r, 1).value
+        colore = {"ERRORE": rosso, "avviso": arancio, "nota": grigio}.get(sev)
+        if colore:
+            for c in range(1, 11):
+                ws.cell(r, c).fill = colore
+    if not righe:
+        ws.append(["", "", "", "", "", "", "", "", "", "Nessun rilievo."])
+
+    # -- dettagli tecnici in coda al riepilogo ---------------------------
+    ws = wb["Riepilogo"]
+    sezione("Dettagli del calcolo")
+    voce("Campionamento della verifica", f"{report.sampling_dt * 1000:.0f}", "ms")
+    voce("Istanti verificati", report.n_samples)
+    voce(
+        "Errore max del campionamento",
+        round(report.sampling_error_bound * 1000, 4),
+        "mm (limite rigoroso)",
+    )
+    voce("Tempo di calcolo", round(solution.raw.get("wall_time", 0.0), 2), "s")
+    voce("Passi fascia di sicurezza", data.clearance_steps)
+    voce("Risoluzione temporale", data.time_scale, "tick al secondo")
 
     wb.save(percorso_file)
     return percorso_file

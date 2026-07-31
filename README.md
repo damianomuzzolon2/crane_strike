@@ -28,8 +28,8 @@ periodici. È una scelta valida: il codice qui sotto la usa.
 - `plotting.py` — disegna il ciclogramma (posizione vs tempo).
 - `verify.py` — **verificatore indipendente**: ricontrolla in Python puro
   (senza CP-SAT) che la soluzione trovata sia davvero valida.
-- `excel_io.py` — lettura della linea da file Excel e generazione del modello
-  da compilare.
+- `excel_io.py` — lettura della linea da file Excel, generazione del modello da
+  compilare, scrittura dei risultati in Excel.
 - `ciclogramma.py` — **comando principale**: Excel in ingresso, ciclogramma
   verificato in uscita.
 - `test_verify.py` — test del verificatore, non richiede OR-Tools.
@@ -64,9 +64,24 @@ fogli:
 | `Parametri` | takt time, cinematiche, ingombri, tempi verticali, opzioni |
 | `Zone` | facoltativo: suddivisione manuale delle mosse fra i carroponti. **Lasciandolo vuoto** numero di carroponti e zone vengono scelti automaticamente |
 
-Il comando stampa il takt time trovato, il report della verifica indipendente e
-salva il grafico (`linea.png` accanto all'input, o dove indicato con
-`--grafico`). Altre opzioni: `--cicli N`, `--niente-grafico`, `--log`.
+### Cosa produce
+
+Accanto al file di ingresso:
+
+- **`linea_risultati.xlsx`** — quattro fogli:
+
+  | foglio | contenuto |
+  | --- | --- |
+  | `Riepilogo` | takt time, **produttivita' in pezzi/ora**, numero di carroponti, zone e tratto di rotaia servito, **utilizzo di ciascun carroponte**, distanza minima raggiunta contro quella richiesta, esito della verifica |
+  | `Movimenti` | una riga per tratto: carroponte, fase (presa, trasporto, rilascio, spostamento a vuoto, attesa), vasca di partenza e arrivo, istanti di inizio e fine, durata, posizioni. E' la tabella da passare a chi programma il PLC |
+  | `FlussoPezzo` | il percorso di **un** pezzo lungo tutta la linea: ingresso e uscita da ogni vasca, permanenza effettiva, margine rispetto ai limiti di processo, posti occupati |
+  | `Verifica` | l'elenco dei rilievi del verificatore indipendente, colorati per gravita' |
+
+- **`linea.png`** — il ciclogramma disegnato.
+
+Il comando stampa anche a video il takt time e il report della verifica.
+Altre opzioni: `--risultati FILE.xlsx`, `--grafico FILE.png`, `--cicli N`,
+`--niente-grafico`, `--niente-excel`, `--log`.
 
 Gli errori di compilazione vengono raccolti **tutti insieme**, con foglio e
 cella, cosi' si corregge il file in una volta sola:
@@ -454,10 +469,12 @@ I due file di test rispondono a domande opposte e si completano:
   mano.
 - `test_model.py` — 8 casi, 20 asserzioni. *Il modello produce soluzioni
   fisicamente valide?* Risolve davvero e passa ogni risultato al verificatore.
-- `test_excel_io.py` — 12 casi, 30 asserzioni. *Un file compilato male viene
-  respinto con un messaggio utile?* Quasi tutti i casi sono errori di
-  compilazione: valori mancanti o non numerici, vasche inesistenti o duplicate,
-  righe riordinate, parametri sbagliati, zone incomplete.
+- `test_excel_io.py` — 17 casi, 48 asserzioni. *Un file compilato male viene
+  respinto con un messaggio utile, e i risultati escono corretti?* In ingresso:
+  valori mancanti o non numerici, vasche inesistenti o duplicate, righe
+  riordinate, parametri sbagliati, zone incomplete. In uscita: struttura dei
+  fogli, corrispondenza fra tratti e vasche, somma delle durate pari al takt
+  time, permanenze entro tolleranza, rilievi riportati.
 
 In piu', il vincolo di non collisione e' stato validato su uno **sweep di 288
 configurazioni** (numero di mosse, spaziatura da 1,0 a 3,0 m, tempi verticali,
