@@ -26,6 +26,8 @@ from model import (
     StationSpec,
     Tank,
     _build_zone_trajectory,
+    solve,
+    zone_layout_conflicts,
 )
 from verify import verify_solution
 
@@ -302,24 +304,87 @@ def test_durata_tratta_sbagliata():
 
 
 def test_layout_stretto():
-    print("\n[9] layout: stazione troppo vicina al confine fra due zone")
+    print("\n[9] vasche ravvicinate: gestite, non rifiutate")
+    # 10.0 e 11.0 distano 1.0 m, meno di hoist_length + safety_distance = 1.8:
+    # una geometria che il vecchio modello non sapeva rappresentare e che ora
+    # e' coperta dal vincolo a fascia
     data = make_data(
-        positions=[0.0, 5.0, 10.0, 11.0, 20.0],  # 10.0 e 11.0 distano 1.0 < 1.8
+        positions=[0.0, 5.0, 10.0, 11.0, 20.0],
         dwells=[(0, 0), (30, 90), (30, 90), (30, 90), (0, 0)],
         zones=[HoistZone(0, 1), HoistZone(2, 3)],
+    )
+    check(
+        zone_layout_conflicts(data, data.zones) == [],
+        "la geometria non viene piu' segnalata come irrappresentabile",
     )
     T = 100.0
     d0 = data.loaded_leg_seconds(0)
     sol = build_solution(data, T, [{0: 0.0, 1: d0 + 40.0}, {2: 10.0, 3: 55.0}])
     r = verify_solution(data, sol)
     check(
-        len(kinds(r, "layout", "warning")) >= 1,
-        "la vicinanza non vincolata dal modello viene segnalata",
+        not kinds(r, "layout", "warning"),
+        "nessun avviso di layout sulla sola vicinanza",
+    )
+    # questa soluzione, costruita a mano, e' comunque insicura: la collisione
+    # deve essere trovata dal controllo che conta davvero
+    check(
+        len(kinds(r, "collision", "error")) >= 1,
+        f"la collisione reale viene trovata (sep_min={r.min_separation:.3f} m)",
+    )
+
+
+def test_layout_patologico():
+    print("\n[10] geometrie che restano irrappresentabili")
+    # zone adiacenti che NON stanno su lati opposti del confine: le posizioni
+    # delle vasche non seguono l'ordine del percorso
+    data_lati = make_data(
+        positions=[0.0, 10.0, 5.0, 15.0, 20.0],
+        dwells=[(0, 0), (30, 90), (30, 90), (30, 90), (0, 0)],
+        zones=[HoistZone(0, 1), HoistZone(2, 3)],
+    )
+    problemi = zone_layout_conflicts(data_lati, data_lati.zones)
+    check(
+        any("lati opposti" in p for p in problemi),
+        "zone a cavallo del proprio confine: individuate",
+    )
+    try:
+        solve(data_lati, time_limit_s=1.0)
+        check(False, "solve() doveva rifiutare la geometria")
+    except ValueError as e:
+        check(
+            "non e' rappresentabile in modo sicuro" in str(e),
+            "solve() la rifiuta con un messaggio esplicito",
+        )
+
+    # zone NON adiacenti che si sovrappongono nello spazio: il vincolo a
+    # fascia e' costruito per coppie adiacenti, quindi non le copre
+    data_nm = make_data(
+        positions=[0.0, 6.0, 12.0, 1.0, 7.0, 13.0],
+        dwells=[(0, 0)] + [(30, 90)] * 4 + [(0, 0)],
+        zones=[HoistZone(0, 0), HoistZone(1, 2), HoistZone(3, 4)],
+    )
+    check(
+        any(
+            "non sono adiacenti" in p
+            for p in zone_layout_conflicts(data_nm, data_nm.zones)
+        ),
+        "sovrapposizione fra zone non adiacenti individuata",
+    )
+
+    # una linea ordinata e ravvicinata non deve dare falsi allarmi
+    data_ok = make_data(
+        positions=[i * 1.0 for i in range(5)],
+        dwells=[(0, 0), (30, 90), (30, 90), (30, 90), (0, 0)],
+        zones=[HoistZone(0, 1), HoistZone(2, 3)],
+    )
+    check(
+        zone_layout_conflicts(data_ok, data_ok.zones) == [],
+        "linea ordinata a 1 m di passo: nessun problema di geometria",
     )
 
 
 def test_takt_fuori_banda():
-    print("\n[10] takt time fuori dalla banda dichiarata")
+    print("\n[11] takt time fuori dalla banda dichiarata")
     data, sol = reference_case()
     stretto = dataclasses.replace(data, takt_min=110.0, takt_max=150.0)
     r = verify_solution(stretto, sol)
@@ -327,7 +392,7 @@ def test_takt_fuori_banda():
 
 
 def test_capienza_vasca():
-    print("\n[11] capienza della vasca (posti simultanei)")
+    print("\n[12] capienza della vasca (posti simultanei)")
     positions = [0.0, 5.0, 10.0, 15.0, 20.0]
     zones = [HoistZone(0, 1), HoistZone(2, 3)]
     T = 100.0
@@ -376,7 +441,7 @@ def test_capienza_vasca():
 
 
 def test_capienza_validazione():
-    print("\n[12] validazione della capienza in ProblemData")
+    print("\n[13] validazione della capienza in ProblemData")
     base = dict(
         positions=[0.0, 5.0, 10.0],
         zones=[HoistZone(0, 1)],
@@ -412,7 +477,7 @@ def test_capienza_validazione():
 
 
 def test_vasca_ripetuta():
-    print("\n[13] stessa vasca fisica usata in piu' tappe del percorso")
+    print("\n[14] stessa vasca fisica usata in piu' tappe del percorso")
     tanks = {
         "CAR": Tank("CAR", 0.0),
         "LAV": Tank("LAV", 5.0),
@@ -447,7 +512,7 @@ def test_vasca_ripetuta():
 
 
 def test_fasi_verticali():
-    print("\n[14] tempi di presa/rilascio (immersione verticale)")
+    print("\n[15] tempi di presa/rilascio (immersione verticale)")
     data = make_data(
         positions=[0.0, 5.0, 10.0, 15.0, 20.0],
         dwells=[(0, 0), (30, 90), (30, 90), (30, 90), (0, 0)],
@@ -500,7 +565,7 @@ def test_fasi_verticali():
 
 
 def test_zero_verticale_non_regressione():
-    print("\n[15] con tempi verticali nulli non cambia nulla")
+    print("\n[16] con tempi verticali nulli non cambia nulla")
     data_zero = make_data(
         positions=[0.0, 5.0, 10.0, 15.0, 20.0],
         dwells=[(0, 0), (30, 90), (30, 90), (30, 90), (0, 0)],
@@ -535,7 +600,7 @@ def test_zero_verticale_non_regressione():
 
 
 def test_stazione_condivisa():
-    print("\n[16] due mosse consecutive che partono dalla stessa stazione")
+    print("\n[17] due mosse consecutive che partono dalla stessa stazione")
     # il carroponte consegna in V2 e riparte subito da V2: non c'e' nessuno
     # spostamento a vuoto, e non deve comparire un segmento degenere
     data = make_data(
@@ -569,7 +634,7 @@ def test_stazione_condivisa():
 
 
 def test_input_malformato():
-    print("\n[17] input malformato: eccezione, non report")
+    print("\n[18] input malformato: eccezione, non report")
     data, sol = reference_case()
     for descr, arg_data, arg_sol in [
         ("status infattibile", data, dataclasses.replace(sol, status="INFEASIBLE")),
@@ -584,7 +649,7 @@ def test_input_malformato():
 
 
 def test_senza_valori_risolti():
-    print("\n[18] degrado gentile senza solution.plans")
+    print("\n[19] degrado gentile senza solution.plans")
     data, sol = reference_case()
     ridotta = Solution(
         status=sol.status, T=sol.T, segments_per_hoist=sol.segments_per_hoist
@@ -614,6 +679,7 @@ def main():
     test_discontinuita()
     test_durata_tratta_sbagliata()
     test_layout_stretto()
+    test_layout_patologico()
     test_takt_fuori_banda()
     test_capienza_vasca()
     test_capienza_validazione()

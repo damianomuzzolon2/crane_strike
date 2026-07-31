@@ -29,6 +29,7 @@ periodici. È una scelta valida: il codice qui sotto la usa.
 - `verify.py` — **verificatore indipendente**: ricontrolla in Python puro
   (senza CP-SAT) che la soluzione trovata sia davvero valida.
 - `test_verify.py` — test del verificatore, non richiede OR-Tools.
+- `test_model.py` — test end-to-end del modello, richiede OR-Tools.
 - `esempio.py` — esempio completo end-to-end, eseguibile da riga di comando.
 
 ## Installazione ed esecuzione
@@ -226,29 +227,103 @@ e' un polinomio di grado ≤ 2, quindi l'errore del minimo cosi' trovato e'
 limitato in modo rigoroso da `(a_i + a_j)·dt²/8` — circa 0,02 mm con i valori
 di default. Il valore e' riportato in `report.sampling_error_bound`.
 
-### Il verificatore e' piu' severo del modello (di proposito)
+### Verificatore e modello si controllano a vicenda
 
-Il modello riserva l'intera finestra di sosta alla stazione di **confine** fra
-due zone, gonfiata di un buffer temporale ricavato da **mezzo** ingombro
-(`hoist_length/2 + safety_distance`). Il verificatore invece pretende
-`hoist_length + safety_distance` fra i due carroponti **ovunque e sempre**.
+Il verificatore pretende `hoist_length + safety_distance` fra i due carroponti
+**ovunque e sempre**, campionando la posizione reale. Il modello impone la
+stessa cosa, ma per una via completamente diversa (vincoli lineari su
+intervalli temporali, vedi sotto). Due strade indipendenti verso lo stesso
+requisito: e' quello che rende la verifica utile invece che tautologica.
 
-Sul confine i due criteri sono compatibili: la non sovrapposizione delle
-finestre separa partenza e arrivo di due buffer, e poiche' lo spazio percorso
-da fermo cresce in modo convesso, nell'istante peggiore entrambi i carroponti
-sono ad almeno mezzo ingombro dal confine, su lati opposti. La separazione
-garantita e' quindi `hoist_length + 2·safety_distance`, piu' del richiesto.
+Storicamente il modello riservava l'intera finestra di sosta alla sola
+stazione di **confine**, gonfiata di un buffer ricavato da *mezzo* ingombro.
+Sul confine il criterio reggeva — la non sovrapposizione delle finestre separa
+partenza e arrivo di due buffer, e poiche' lo spazio percorso da fermo cresce
+in modo convesso, nell'istante peggiore entrambi i carroponti sono ad almeno
+mezzo ingombro dal confine, su lati opposti.
 
-**La garanzia cade in un caso preciso**: se la stazione *adiacente* a una
-stazione di confine dista meno di `hoist_length + safety_distance`, il
-carroponte ci sosta dentro la zona di esclusione del vicino, e il modello non
-ha alcun vincolo che lo impedisca. Il controllo 2 segnala questa condizione in
-anticipo, come avviso; il controllo 8 la trova poi come errore se si traduce
-in una collisione vera. E' una **lacuna nota del modello**, non un falso
-positivo del verificatore: con vasche molto ravvicinate CP-SAT restituisce
-soluzioni `OPTIMAL` che il verificatore respinge, ed ha ragione lui.
-Nell'esempio fornito le vasche distano almeno 2,5 m contro 1,8 m richiesti,
-quindi la condizione e' rispettata e la verifica passa pulita.
+**La garanzia cadeva in un caso preciso**: se un'altra stazione delle due zone
+distava meno di `hoist_length + safety_distance` dal confine, il carroponte ci
+sostava dentro la zona di esclusione del vicino, e nessun vincolo lo impediva.
+Il modello ora non ragiona piu' in termini di "occupazione della stazione di
+confine" ma di posizione reale nel tempo: vedi la sezione seguente.
+
+## Non collisione: la fascia di esclusione
+
+Attorno alla stazione di confine `b` fra due zone adiacenti, siano `a(t)` la
+distanza del carroponte di sinistra da `b` e `c(t)` quella del carroponte di
+destra. Poiche' le due zone stanno su lati opposti, la distanza fra i due
+carroponti e' esattamente `a(t) + c(t)`, e serve
+
+```text
+a(t) + c(t) >= D          con D = hoist_length + safety_distance
+```
+
+Non e' esprimibile direttamente in CP-SAT, ma per ogni soglia `r` vale una
+condizione **locale e lineare** che ne e' un'implicazione:
+
+```text
+mai contemporaneamente   a(t) < r   e   c(t) <= D - r
+```
+
+Vieta solo configurazioni con `a + c < D`, quindi non taglia mai nulla di
+sicuro. Imponendola su una griglia di soglie abbastanza fitta si copre l'intera
+condizione: se `a + c < D` basta una soglia nell'intervallo `(a, D - c]`, che e'
+lungo piu' del passo della griglia. Usando passo `δ = D / clearance_steps` e
+portando il bersaglio a `D + δ`, **la distanza garantita torna esattamente D**.
+
+"`a(t) < r`" e' un'unione di intervalli temporali calcolabile dal modello: il
+carroponte e' dentro la fascia mentre sosta su una stazione a distanza `< r`,
+e per i tratti di percorso che ci entrano — con un margine costante, perche'
+le vasche sono in posizioni fisse e quindi tutti i tempi di percorrenza lo
+sono. La traiettoria di un periodo viene partizionata in blocchi (una mossa;
+un trasferimento a vuoto) e dentro ogni blocco la distanza dal confine e'
+monotona, il che rende il calcolo esatto.
+
+Conseguenze pratiche:
+
+- **le vasche possono stare vicine quanto si vuole.** Con passo 1,0 m e
+  `D = 1,80 m` il modello trova soluzioni in cui i due carroponti sostano uno
+  alla stazione precedente e uno alla successiva del confine: 2,0 m di
+  separazione, sicuri. E' proprio la configurazione che il modello precedente
+  non sapeva rappresentare;
+- **se davvero non ci stanno, esce INFEASIBLE**, non una soluzione sbagliata.
+  Con passo 0,80 m, mentre un carroponte e' sul confine l'altro non ha nessuna
+  stazione abbastanza lontana in cui sostare: corretto;
+- il vincolo e' anche **meno cautelativo del precedente**, che garantiva
+  `hoist_length + 2·safety_distance` invece dei richiesti
+  `hoist_length + safety_distance`.
+
+### Il parametro `clearance_steps`
+
+Regola la finezza della griglia di soglie (default 6). La distanza garantita
+e' sempre quella richiesta: alzarlo riduce la **conservativita'**, cioe'
+permette takt time piu' bassi, al prezzo di un modello piu' grande. Misurato
+su una linea a 4 mosse con passo 1,5 m:
+
+| `clearance_steps` | takt time | separazione reale |
+| ---: | ---: | ---: |
+| 2 | 18,86 s | 3,000 m |
+| 4 | 14,39 s | 2,985 m |
+| 8 | 13,45 s | 2,545 m |
+
+Sotto i 4 passi la conservativita' si vede, sopra i 12 il modello cresce senza
+gran guadagno.
+
+**Attenzione alla larghezza della banda di takt time.** Il numero di copie
+traslate da generare e' calcolato sul caso peggiore `T = takt_min`, quindi una
+banda molto larga (`takt_max` molte volte `takt_min`) fa crescere parecchio il
+modello. Se la risoluzione diventa lenta, stringere la tolleranza sul takt time
+e' la prima cosa da provare.
+
+### Cosa resta non rappresentabile
+
+Solo la geometria patologica: vasche non ordinate lungo la rotaia, con zone
+adiacenti che si scavalcano o zone lontane che si sovrappongono nello spazio.
+`model.zone_layout_conflicts(data, zones)` la rileva, `solve()` la rifiuta con
+un messaggio esplicito, e `solve_auto_zones` la usa come pre-filtro accanto a
+quello sul takt time — cosi' la scelta automatica delle zone trova da sola una
+suddivisione valida quando esiste.
 
 ## Assunzioni e limitazioni importanti (leggere prima di fidarsi dei risultati)
 
@@ -278,15 +353,16 @@ fa scelte di modellazione precise, in particolare:
   trasferimenti a vuoto necessari (esclusi i tempi di attesa nelle vasche)
   stia entro il takt time: se anche questo viene superato, nessun ordine
   di visita puo' risolvere il problema.
-- **Collisioni modellate solo ai confini di zona**: e' l'unico punto in cui
-  due carroponti condividono fisicamente lo spazio in questa formulazione.
-  Le finestre di occupazione usate sono conservative (tutto l'intervallo fra
-  arrivo e partenza), quindi il modello non rifiuta mai una soluzione
-  davvero sicura, ma potrebbe scartarne alcune "al limite" che in pratica
-  sarebbero fattibili con un margine di sicurezza piu' fine.
-  **Attenzione**: questo vale solo se le stazioni adiacenti a un confine
-  distano almeno `hoist_length + safety_distance`; altrimenti il modello ha
-  una vera lacuna — vedi "Il verificatore e' piu' severo del modello".
+- **Collisioni vincolate attorno ai confini di zona**: e' l'unica regione in
+  cui due carroponti possono avvicinarsi in questa formulazione (zone
+  contigue). Il vincolo tiene conto della posizione reale nel tempo e funziona
+  con qualunque spaziatura fra le vasche, ma resta leggermente conservativo:
+  puo' scartare soluzioni "al limite" che in pratica sarebbero fattibili.
+  Quanto, lo regola `clearance_steps` (vedi "Non collisione").
+- **Posizione di attesa non scelta dal solver**: per convenzione un carroponte
+  che ha consegnato riparte subito e attende alla stazione della mossa
+  successiva. Poterlo far attendere altrove gli darebbe piu' modo di
+  allontanarsi dal vicino.
 - **Capienza delle vasche**: vincolata tramite `StationSpec.capacity`, ma solo
   per le stazioni intermedie e **per tappa del percorso**, non per vasca
   fisica (vedi la sezione dedicata sopra).
@@ -302,17 +378,31 @@ contigua fra zone, piu' ricette, collisione meno conservativa).
 ```bash
 python kinematics.py     # autotest della cinematica
 python test_verify.py    # test del verificatore (non richiede OR-Tools)
+python test_model.py     # test end-to-end del modello (richiede OR-Tools)
 python esempio.py        # risoluzione CP-SAT reale + verifica + grafico
 ```
 
-**La risoluzione CP-SAT e' ora eseguita e verificata end-to-end.** Sull'esempio
+**La risoluzione CP-SAT e' eseguita e verificata end-to-end.** Sull'esempio
 fornito (con i tempi verticali attivi) il solver trova `T = 110 s` con 2
 carroponti, separazione minima 3,50 m contro 1,80 m richiesti, e il
 verificatore indipendente conferma la soluzione senza errori.
 
-`test_verify.py` contiene 18 casi (43 asserzioni): uno corretto, dodici rotti
-di proposito, tre di regressione sulle fasi verticali e due sulla capienza.
-Tutti passano.
+I due file di test rispondono a domande opposte e si completano:
+
+- `test_verify.py` — 19 casi, 49 asserzioni. *Il verificatore trova davvero
+  quello che deve trovare?* Uno solo dei casi e' corretto, gli altri sono rotti
+  di proposito (collisioni, permanenze, periodicita', fasi verticali, capienza,
+  geometrie patologiche). Non richiede OR-Tools: le soluzioni sono costruite a
+  mano.
+- `test_model.py` — 7 casi, 16 asserzioni. *Il modello produce soluzioni
+  fisicamente valide?* Risolve davvero e passa ogni risultato al verificatore.
+
+In piu', il vincolo di non collisione e' stato validato su uno **sweep di 288
+configurazioni** (numero di mosse, spaziatura da 1,0 a 3,0 m, tempi verticali,
+`clearance_steps`, punto di taglio delle zone): 146 risolte e verificate,
+**zero errori**. Come controllo di sensibilita', lo stesso sweep con il vincolo
+disattivato produce 159 soluzioni con collisioni reali — se ci fosse un buco
+nella formulazione, lo sweep lo avrebbe visto.
 
 ### Cosa ha gia' trovato il verificatore
 
@@ -320,9 +410,11 @@ Non e' un esercizio teorico: da quando esiste ha intercettato tre problemi
 reali, tutti invisibili guardando solo lo stato `OPTIMAL` del solver.
 
 1. **Collisioni con vasche ravvicinate** — con spaziatura inferiore a
-   `hoist_length + safety_distance`, CP-SAT restituisce soluzioni `OPTIMAL`
-   con i carroponti a 1,24 m invece di 1,80 m. E' la lacuna descritta sopra:
-   il modello vincola solo la stazione di confine.
+   `hoist_length + safety_distance`, CP-SAT restituiva soluzioni `OPTIMAL`
+   con i carroponti a 1,24 m invece di 1,80 m, perche' il vincolo copriva solo
+   la stazione di confine. **Corretto** riformulando la non collisione sulla
+   fascia di esclusione (vedi sopra): ora quelle geometrie si risolvono, e
+   correttamente.
 2. **Finestre di occupazione da correggere per i tempi verticali** — l'aggiunta
    di `pick_time`/`release_time` avrebbe introdotto una collisione vera se le
    finestre ai confini non fossero state estese per coprire le fasi verticali

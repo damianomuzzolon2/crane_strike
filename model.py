@@ -36,16 +36,17 @@ APPROCCIO SCELTO E SUE ASSUNZIONI (importante leggere prima di usare il codice)
    abbondantemente il takt time -- cosa che il vecchio schema sequenziale
    non riusciva a rappresentare.
 
-4. Le collisioni possono avvenire SOLO nelle stazioni di confine fra due
-   zone adiacenti (l'unico punto fisico condiviso fra due carroponti).
-   Il modello impone che le finestre temporali in cui i due carroponti
-   occupano quella stazione (allargate di un margine di sicurezza legato
-   alla lunghezza del carroponte + distanza di sicurezza, e comprensive
-   delle fasi verticali di presa/rilascio) non si sovrappongano MAI,
-   nemmeno considerando la periodicita' (ciclo T).
-   ATTENZIONE: questa assunzione vale solo se ogni stazione adiacente a un
-   confine dista almeno hoist_length + safety_distance. Con vasche piu'
-   ravvicinate il modello ha una lacuna reale -- verify.py la segnala.
+4. Non collisione: attorno a ogni stazione di confine fra due zone adiacenti
+   il modello impone che i due carroponti restino sempre ad almeno
+   hoist_length + safety_distance l'uno dall'altro, tenendo conto della
+   posizione REALE nel tempo -- soste comprese, non solo sulla stazione di
+   confine ma su qualunque stazione cada abbastanza vicino. Funziona quindi
+   anche con vasche molto ravvicinate. Il vincolo e' costruito su una
+   griglia di soglie (`clearance_steps`): la distanza garantita e' sempre
+   quella richiesta, mentre alzare il numero di passi rende il vincolo meno
+   cautelativo. L'unica geometria non rappresentabile e' quella patologica
+   (vasche non ordinate lungo la rotaia, zone che si scavalcano): la rileva
+   zone_layout_conflicts() e la rifiuta solve().
 
 4-bis. Ogni vasca ha un numero dichiarato di POSTI (`StationSpec.capacity`,
    default 1). Poiche' i pezzi entrano ogni T secondi e ciascuno occupa un
@@ -149,6 +150,13 @@ class ProblemData:
     # nulla: la salita/discesa del gancio scarico e' gia' contata qui dentro.
     pick_time: float = 0.0  # [s] discesa gancio + aggancio + emersione
     release_time: float = 0.0  # [s] immersione + sgancio + risalita gancio
+    # Finezza con cui viene discretizzata la "fascia di esclusione" attorno a
+    # ogni confine fra zone (vedi il vincolo di non collisione in solve()).
+    # Il modello garantisce sempre la distanza minima richiesta; alzare questo
+    # numero rende il vincolo meno cautelativo (permette takt time piu' bassi)
+    # al prezzo di un modello piu' grande. Sotto i 4 passi la conservativita'
+    # diventa evidente, sopra i 12 il modello cresce senza gran guadagno.
+    clearance_steps: int = 6
 
     def __post_init__(self):
         n_moves = len(self.route) - 1
@@ -172,6 +180,8 @@ class ProblemData:
             raise ValueError("takt_min > takt_max")
         if self.pick_time < 0 or self.release_time < 0:
             raise ValueError("pick_time e release_time devono essere >= 0")
+        if self.clearance_steps < 1:
+            raise ValueError("clearance_steps deve essere >= 1")
         for i, s in enumerate(self.route):
             if s.capacity < 1:
                 raise ValueError(
@@ -357,14 +367,99 @@ class Solution:
 #    (identico nello spirito alla v1).
 
 
+def zone_layout_conflicts(
+    data: ProblemData, zones: list[HoistZone]
+) -> list[str]:
+    """Verifica che la GEOMETRIA delle zone sia compatibile con l'unico
+    meccanismo di non-collisione che il modello possiede. Restituisce la lista
+    (vuota se tutto a posto) dei problemi trovati, gia' in forma leggibile.
+
+    PERCHE' SERVE
+    Il vincolo di non collisione (vedi solve()) e' costruito attorno a ogni
+    stazione di CONFINE, assumendo che la zona di sinistra stia interamente
+    da un lato e quella di destra dall'altro. Su questa base sa gestire
+    qualunque spaziatura fra le vasche, anche compatta. Quello che NON sa
+    gestire e' la geometria patologica: nulla obbliga le posizioni delle
+    vasche a essere monotone lungo la rotaia (move_distance usa abs()),
+    quindi una zona potrebbe scavalcare il proprio confine, o due zone
+    lontane nell'ordine delle mosse potrebbero sovrapporsi nello spazio.
+    """
+    required = data.hoist_length + data.safety_distance
+    problemi: list[str] = []
+
+    for h in range(len(zones) - 1):
+        b = zones[h].hi + 1  # stazione di confine fra la zona h e la h+1
+        x_b = data.station_position(b)
+        # la zona di sinistra deve stare tutta da una parte del confine e
+        # quella di destra tutta dall'altra, altrimenti "sinistra"/"destra"
+        # non hanno piu' senso e il vincolo di fascia non e' applicabile
+        xs_l = [data.station_position(s) for s in range(zones[h].lo, zones[h].hi + 2)]
+        xs_r = [
+            data.station_position(s) for s in range(zones[h + 1].lo, zones[h + 1].hi + 2)
+        ]
+        lato = 1 if max(xs_r) >= x_b else -1
+        if any(lato * (x - x_b) > 1e-9 for x in xs_l) or any(
+            lato * (x - x_b) < -1e-9 for x in xs_r
+        ):
+            problemi.append(
+                f"attorno alla stazione di confine {b} "
+                f"('{data.route[b].tank_id}', a {x_b:.2f} m) le due zone non "
+                f"stanno su lati opposti: la zona {h + 1} occupa "
+                f"[{min(xs_l):.2f},{max(xs_l):.2f}] e la zona {h + 2} occupa "
+                f"[{min(xs_r):.2f},{max(xs_r):.2f}]. Serve che le posizioni "
+                f"delle vasche siano ordinate lungo la rotaia."
+            )
+
+    spans = []
+    for z in zones:
+        xs = [data.station_position(i) for i in range(z.lo, z.hi + 2)]
+        spans.append((min(xs), max(xs)))
+    for i in range(len(spans)):
+        for j in range(i + 2, len(spans)):
+            lo_i, hi_i = spans[i]
+            lo_j, hi_j = spans[j]
+            gap = max(0.0, max(lo_i, lo_j) - min(hi_i, hi_j))
+            if gap < required:
+                problemi.append(
+                    f"le zone {i + 1} e {j + 1} non sono adiacenti ma i loro "
+                    f"tratti di rotaia [{lo_i:.2f},{hi_i:.2f}] e "
+                    f"[{lo_j:.2f},{hi_j:.2f}] distano solo {gap:.2f} m "
+                    f"(servono {required:.2f} m): il modello non le vincola "
+                    f"fra loro"
+                )
+    return problemi
+
+
 def solve(
-    data: ProblemData, time_limit_s: float = 20.0, log_search: bool = False
+    data: ProblemData,
+    time_limit_s: float = 20.0,
+    log_search: bool = False,
+    allow_unsafe_layout: bool = False,
 ) -> Solution:
+    """allow_unsafe_layout: se True salta il controllo di geometria delle zone.
+    Serve solo per studio/debug: le soluzioni prodotte possono contenere
+    collisioni reali che il modello non e' in grado di vedere (verify.py le
+    segnala)."""
     if data.zones is None:
         raise ValueError(
             "data.zones e' None: specifica le zone esplicitamente oppure usa "
             "solve_auto_zones(data, n_hoists=...) per farle scegliere automaticamente."
         )
+
+    if not allow_unsafe_layout:
+        problemi = zone_layout_conflicts(data, data.zones)
+        if problemi:
+            raise ValueError(
+                "Questa suddivisione in zone non e' rappresentabile in modo sicuro "
+                "dal modello:\n  - "
+                + "\n  - ".join(problemi)
+                + "\nIl vincolo di non collisione assume che le zone adiacenti "
+                "stiano su lati opposti del proprio confine e che zone lontane "
+                "non si sovrappongano nello spazio.\n"
+                "Cosa fare: ordina le vasche lungo la rotaia in modo coerente con "
+                "la sequenza del percorso, oppure sposta il confine fra le zone "
+                "(solve_auto_zones scarta da solo le suddivisioni non valide)."
+            )
 
     # Import posticipato: cosi' il resto del modulo (dataclass, cinematica,
     # extraction, plotting) resta utilizzabile/testabile anche senza ortools
@@ -384,16 +479,27 @@ def solve(
     def travel_empty_ticks(pos_a: float, pos_b: float) -> int:
         return T_(data.empty_leg_seconds(pos_a, pos_b))
 
-    # Margine di sicurezza temporale da applicare alle finestre di occupazione
-    # dei punti di confine, per tenere conto dell'ingombro fisico del
-    # carroponte oltre alla sola posizione del suo punto di riferimento.
-    half_extent = data.hoist_length / 2 + data.safety_distance
-    safety_buffer = T_(
-        max(
-            _travel_time_seconds(half_extent, data.kin_loaded),
-            _travel_time_seconds(half_extent, data.kin_empty),
+    # Distanza minima che deve sempre separare due carroponti, misurata fra i
+    # loro punti di riferimento: l'ingombro pieno piu' il margine di sicurezza.
+    required_sep = data.hoist_length + data.safety_distance
+
+    def escape_ticks(x: float) -> int:
+        """Limite SUPERIORE al tempo che serve a un carroponte per coprire i
+        primi (o gli ultimi) `x` metri di uno spostamento che parte da fermo a
+        una stazione. Il caso peggiore e' uno spostamento lungo esattamente x,
+        che deve anche decelerare: piu' lento di un tratto iniziale di uno
+        spostamento piu' lungo, dove il carroponte accelera e basta. Si prende
+        la piu' lenta fra le due cinematiche."""
+        if x <= 0:
+            return 0
+        return T_(
+            max(
+                _travel_time_seconds(x, data.kin_loaded),
+                _travel_time_seconds(x, data.kin_empty),
+            )
         )
-    )
+
+    max_escape = escape_ticks(required_sep * 2)
 
     # -- Variabili di takt time --------------------------------------------
     T_min, T_max = T_(data.takt_min), T_(data.takt_max)
@@ -408,6 +514,12 @@ def solve(
     )
     BIG = 10**7
     n_shifts = math.ceil(horizon / T_min) + 2
+    # dep_hi/arr_lo sono comunque limitati dai vincoli del modello
+    # (arr_lo <= local_pick + T e dep_hi + t_emp <= local_pick + T, con
+    # local_pick < T <= T_max, quindi entrambi <= 2*T_max). Dichiararlo nel
+    # dominio invece di lasciarli a BIG serve a tenere piccolo il numero di
+    # traslazioni da generare nel vincolo di non collisione.
+    DEP_MAX = 2 * T_max + max(travel_loaded)
 
     def _as_intvar(expr, name):
         """Materializza un'espressione lineare in un vero IntVar, legato
@@ -476,9 +588,9 @@ def solve(
             # Caso degenere: una sola mossa nella zona. Il "circuito" e'
             # semplicemente andata (mossa) + ritorno a vuoto, come in v1.
             k0 = moves[0]
-            dep_hi = model.NewIntVar(0, BIG, f"dep_hi_{h}")
+            dep_hi = model.NewIntVar(0, DEP_MAX, f"dep_hi_{h}")
             model.Add(dep_hi >= finish[k0])
-            arr_lo = model.NewIntVar(0, BIG, f"arr_lo_{h}")
+            arr_lo = model.NewIntVar(0, DEP_MAX, f"arr_lo_{h}")
             t_ret = travel_empty_ticks(
                 data.station_position(hi_h + 1), data.station_position(lo_h)
             )
@@ -494,6 +606,18 @@ def solve(
                     dep_hi=dep_hi,
                     arr_lo=arr_lo,
                     arc_lits=None,
+                    # unico "arco": andata (gia' nella mossa) + rientro a vuoto
+                    arcs=[
+                        dict(
+                            k1=k0,
+                            k2=k0,
+                            lit=None,
+                            span_start=finish[k0],
+                            depart=dep_hi,
+                            arrive=arr_lo,
+                            span_end=local_pick[k0] + Tv,
+                        )
+                    ],
                 )
             )
             continue
@@ -523,7 +647,7 @@ def solve(
             model.Add(finish[k1] + t_emp <= bound).OnlyEnforceIf(lit)
 
         # -- variabili libere di confine (per traiettoria e non-collisione) --
-        dep_hi = model.NewIntVar(0, BIG, f"dep_hi_{h}")
+        dep_hi = model.NewIntVar(0, DEP_MAX, f"dep_hi_{h}")
         model.Add(dep_hi >= finish[hi_h])
         for k2 in moves:
             if k2 == hi_h:
@@ -534,7 +658,7 @@ def solve(
             bound = local_pick[k2] + (Tv if k2 == lo_h else 0)
             model.Add(dep_hi + t_emp <= bound).OnlyEnforceIf(arc_lits[(hi_h, k2)])
 
-        arr_lo = model.NewIntVar(0, BIG, f"arr_lo_{h}")
+        arr_lo = model.NewIntVar(0, DEP_MAX, f"arr_lo_{h}")
         for k1 in moves:
             if k1 == lo_h:
                 continue
@@ -555,6 +679,34 @@ def solve(
                 arc_lits[(hi_h, lo_h)]
             )
 
+        # Istanti di partenza/arrivo di ciascun trasferimento a vuoto, usati
+        # dal vincolo di non collisione. Le convenzioni devono essere IDENTICHE
+        # a quelle di _build_zone_trajectory, altrimenti il vincolo
+        # proteggerebbe una traiettoria diversa da quella poi disegnata.
+        arcs = []
+        for (k1, k2), lit in arc_lits.items():
+            t_emp = travel_empty_ticks(
+                data.station_position(k1 + 1), data.station_position(k2)
+            )
+            if k1 == hi_h:
+                depart = dep_hi
+            elif k2 == lo_h:
+                depart = arr_lo - t_emp
+            else:
+                depart = finish[k1]  # convenzione: riparte appena consegnato
+            arrive = arr_lo if k2 == lo_h else depart + t_emp
+            arcs.append(
+                dict(
+                    k1=k1,
+                    k2=k2,
+                    lit=lit,
+                    span_start=finish[k1],
+                    depart=depart,
+                    arrive=arrive,
+                    span_end=local_pick[k2] + (Tv if k2 == lo_h else 0),
+                )
+            )
+
         zone_data.append(
             dict(
                 h=h,
@@ -565,62 +717,160 @@ def solve(
                 dep_hi=dep_hi,
                 arr_lo=arr_lo,
                 arc_lits=arc_lits,
+                arcs=arcs,
             )
         )
 
-    # -- 3) Vincoli di non collisione alle stazioni di confine fra zone
-    #    adiacenti (uniche stazioni fisicamente condivise). -----------------
-    # NOTA: due eventi periodici di periodo T possono essere sfasati anche
-    # di PIU' di un ciclo (vasche con tempo di processo lungo rispetto al
-    # takt time): generiamo un numero di copie traslate sufficiente a
-    # coprire l'intero orizzonte del modello.
-    def add_cyclic_no_overlap(start_a, end_a, start_b, end_b, name):
-        """Impone che [start_a,end_a] non si sovrapponga MAI a [start_b,end_b]
-        ne' ad alcuna sua traslazione di un multiplo intero di T (positivo o
-        negativo)."""
-        sa = _as_intvar(start_a, name + "_sA")
-        ea = _as_intvar(end_a, name + "_eA")
-        size_a = model.NewIntVar(0, horizon, name + "_szA")
-        model.Add(size_a == ea - sa)
-        interval_a = model.NewIntervalVar(sa, size_a, ea, name + "_A")
+    # -- 3) Non collisione: fascia di esclusione attorno a ogni confine -----
+    #
+    # IDEA. Attorno alla stazione di confine b fra due zone adiacenti, siano
+    # a(t) la distanza del carroponte di sinistra da b e c(t) quella del
+    # carroponte di destra. Poiche' le due zone stanno su lati opposti, la
+    # distanza fra i due carroponti vale esattamente a(t) + c(t), e serve
+    #
+    #     a(t) + c(t) >= D          con D = hoist_length + safety_distance
+    #
+    # Per ogni soglia r si puo' imporre una condizione LOCALE e lineare:
+    #
+    #     "mai contemporaneamente a(t) < r e c(t) <= D - r"
+    #
+    # che vieta solo configurazioni con a + c < D, quindi non taglia mai
+    # nulla di sicuro. Imponendola su una griglia di soglie fitta abbastanza
+    # si copre tutta la condizione: se a + c < D basta una soglia
+    # nell'intervallo (a, D - c], lungo piu' del passo della griglia. Usando
+    # passo delta = D/clearance_steps e portando il bersaglio a D + delta, la
+    # distanza garantita torna esattamente D.
+    #
+    # "a(t) < r" e' un'unione di intervalli temporali calcolabile: il
+    # carroponte e' entro r da b mentre sosta su una stazione a distanza < r,
+    # e per i tratti di percorso che entrano nella fascia -- con un margine
+    # costante escape_ticks() perche' i tempi di percorrenza sono costanti
+    # (le vasche sono in posizioni fisse).
+    #
+    # Questo generalizza (e sostituisce) il vecchio vincolo, che riservava
+    # l'intera sosta sulla SOLA stazione di confine: quello era sano solo se
+    # nessun'altra stazione cadeva entro D dal confine, ed e' anche piu'
+    # cautelativo di quanto serva.
 
-        intervals = [interval_a]
-        for shift in range(-n_shifts, n_shifts + 1):
-            sb = _as_intvar(start_b + shift * Tv, f"{name}_sB_{shift}")
-            eb = _as_intvar(end_b + shift * Tv, f"{name}_eB_{shift}")
-            size_b = model.NewIntVar(0, 2 * horizon, f"{name}_szB_{shift}")
-            model.Add(size_b == eb - sb)
-            interval_b = model.NewIntervalVar(sb, size_b, eb, f"{name}_B_{shift}")
-            intervals.append(interval_b)
-        model.AddNoOverlap(intervals)
+    def _make_interval(start, end, lit, name):
+        """Intervallo CP-SAT, opzionale se `lit` non e' None. Con lit falso
+        start/end restano liberi: le espressioni che li definiscono hanno
+        senso solo se l'arco corrispondente e' effettivamente scelto."""
+        s = model.NewIntVar(-BIG, BIG, name + "_s")
+        e = model.NewIntVar(-BIG, BIG, name + "_e")
+        sz = model.NewIntVar(0, 4 * horizon, name + "_sz")
+        if lit is None:
+            model.Add(s == start)
+            model.Add(e == end)
+            return model.NewIntervalVar(s, sz, e, name)
+        model.Add(s == start).OnlyEnforceIf(lit)
+        model.Add(e == end).OnlyEnforceIf(lit)
+        return model.NewOptionalIntervalVar(s, sz, e, lit, name)
 
+    def near_boundary(zd, x_b: float, radius: float):
+        """Intervalli (start, end, lit) in cui il carroponte della zona `zd`
+        puo' trovarsi a meno di `radius` metri dalla stazione in x_b.
+
+        La traiettoria di un periodo e' partizionata in blocchi: una mossa
+        (sosta di presa, traslazione a carico, sosta di rilascio) e un
+        trasferimento a vuoto (sosta, traslazione, sosta). Dentro un blocco il
+        carroponte va da una stazione u a una stazione v senza inversioni,
+        quindi la distanza da b e' monotona fra d(u) e d(v)."""
+        lp, fin = zd["local_pick"], zd["finish"]
+        out = []
+
+        def dist(station_idx: int) -> float:
+            return abs(data.station_position(station_idx) - x_b)
+
+        def blocco(u, v, span_start, leave_u, reach_v, span_end, lit):
+            du, dv = dist(u), dist(v)
+            if du < radius and dv < radius:
+                # tutto il blocco e' dentro la fascia
+                out.append((span_start, span_end, lit))
+            elif du < radius:
+                # si esce dalla fascia durante la traslazione
+                out.append((span_start, leave_u + escape_ticks(radius - du), lit))
+            elif dv < radius:
+                # si entra nella fascia durante la traslazione
+                out.append((reach_v - escape_ticks(radius - dv), span_end, lit))
+            # se entrambe le stazioni sono fuori, il tratto non entra mai
+            # nella fascia (la distanza da b e' monotona lungo il blocco)
+
+        for k in zd["moves"]:
+            blocco(
+                u=k,
+                v=k + 1,
+                span_start=lp[k],
+                leave_u=lp[k] + T_(data.pick_time_at(k)),
+                reach_v=fin[k] - T_(data.release_time_at(k + 1)),
+                span_end=fin[k],
+                lit=None,
+            )
+        for arc in zd["arcs"]:
+            blocco(
+                u=arc["k1"] + 1,
+                v=arc["k2"],
+                span_start=arc["span_start"],
+                leave_u=arc["depart"],
+                reach_v=arc["arrive"],
+                span_end=arc["span_end"],
+                lit=arc["lit"],
+            )
+        return out
+
+    # Quante traslazioni di T servono perche' due blocchi possano incontrarsi.
+    # Tutti gli istanti in gioco (local_pick, finish, dep_hi, arr_lo, span_end,
+    # piu' i margini di ingresso/uscita dalla fascia) stanno in questa
+    # finestra; oltre, le copie traslate non possono piu' sovrapporsi.
+    # NOTA: il conto e' fatto sul caso peggiore T = takt_min. Una banda di
+    # takt time molto larga (takt_max >> takt_min) fa quindi crescere parecchio
+    # il numero di vincoli generati: se il modello diventa lento, stringere la
+    # tolleranza sul takt time e' la prima cosa da provare.
+    span_tot = 2 * T_max + max(travel_loaded) + 2 * max_escape
+    n_shifts_sep = math.ceil(span_tot / T_min) + 1
+
+    n_sep_constraints = 0
     for h in range(data.n_hoists - 1):
         zL, zR = zone_data[h], zone_data[h + 1]
         z_left, z_right = zL["z"], zR["z"]
         assert z_left.hi + 1 == z_right.lo, "le zone devono essere contigue"
+        x_b = data.station_position(z_right.lo)
 
-        # Le fasi verticali vanno incluse nella finestra di occupazione: il
-        # carroponte e' gia' FERMO sopra la stazione di confine mentre immerge
-        # il pezzo, e ci resta mentre lo ripesca. `finish` include gia' il
-        # rilascio, quindi l'occupazione a sinistra comincia release_time
-        # PRIMA; a destra il prelievo comincia con la presa, che occupa la
-        # stazione fino a local_pick + pick_time.
-        rel = T_(data.release_time_at(z_left.hi + 1))
-        pck = T_(data.pick_time_at(z_right.lo))
-
-        occ_left_start = zL["finish"][z_left.hi] - rel - safety_buffer
-        occ_left_end = zL["dep_hi"] + safety_buffer
-
-        occ_right_start = zR["arr_lo"] - safety_buffer
-        occ_right_end = zR["local_pick"][z_right.lo] + Tv + pck + safety_buffer
-
-        add_cyclic_no_overlap(
-            occ_left_start,
-            occ_left_end,
-            occ_right_start,
-            occ_right_end,
-            name=f"boundary_{h}_{h+1}",
-        )
+        delta = required_sep / data.clearance_steps
+        target = required_sep + delta  # cosi' la garanzia netta torna a D
+        for i in range(1, data.clearance_steps + 2):
+            r_left = i * delta
+            r_right = target - r_left
+            if r_right < 0:
+                continue
+            A = near_boundary(zL, x_b, r_left)
+            # a destra la condizione e' "<= r_right": un epsilon di un tick
+            # basta a trasformarla in un confronto stretto
+            B = near_boundary(zR, x_b, r_right + 1e-9)
+            if not A or not B:
+                continue
+            nome = f"sep_{h}_{i}"
+            a_ivs = [
+                _make_interval(s, e, lit, f"{nome}_a{j}")
+                for j, (s, e, lit) in enumerate(A)
+            ]
+            b_ivs = []
+            for sh in range(-n_shifts_sep, n_shifts_sep + 1):
+                for j, (s, e, lit) in enumerate(B):
+                    b_ivs.append(
+                        _make_interval(
+                            s + sh * Tv, e + sh * Tv, lit, f"{nome}_b{j}_{sh}"
+                        )
+                    )
+            # a coppie, e non tutti in un unico AddNoOverlap: gli intervalli
+            # di uno stesso carroponte POSSONO sovrapporsi fra loro (i margini
+            # di ingresso/uscita dalla fascia sconfinano nel blocco vicino), e
+            # metterli insieme li renderebbe mutuamente esclusivi, rendendo il
+            # modello infattibile per un motivo inesistente.
+            for a_iv in a_ivs:
+                for b_iv in b_ivs:
+                    model.AddNoOverlap([a_iv, b_iv])
+                    n_sep_constraints += 1
 
     # -- Obiettivo: minimizzare il takt time entro la tolleranza data -------
     model.Minimize(Tv)
@@ -680,8 +930,10 @@ def solve(
     raw = {
         "objective": solver.ObjectiveValue(),
         "wall_time": solver.WallTime(),
-        "safety_buffer_s": data.to_seconds(safety_buffer),
         "T_ticks": solver.Value(Tv),
+        "required_separation_m": required_sep,
+        "clearance_steps": data.clearance_steps,
+        "n_separation_constraints": n_sep_constraints,
     }
     return Solution(
         status=status_name,
@@ -879,12 +1131,13 @@ def solve_auto_zones(
     best_zones: Optional[list[HoistZone]] = None
     n_tried = 0
     n_skipped = 0
+    n_skipped_layout = 0
+    esempio_layout: Optional[str] = None
 
     for zones in _enumerate_contiguous_partitions(n_moves, n_hoists):
-        # pre-filtro economico: una zona il cui solo trasporto-a-carico
-        # (senza nemmeno contare trasferimenti a vuoto) gia' supera il
-        # takt time massimo e' certamente infattibile, qualunque sia
-        # l'ordine di visita.
+        # pre-filtro 1: una zona il cui solo trasporto-a-carico (senza
+        # nemmeno contare trasferimenti a vuoto) gia' supera il takt time
+        # massimo e' certamente infattibile, qualunque sia l'ordine di visita.
         content_ok = all(
             sum(travel_loaded_seconds[k] for k in range(z.lo, z.hi + 1))
             <= data.takt_max
@@ -892,6 +1145,20 @@ def solve_auto_zones(
         )
         if not content_ok:
             n_skipped += 1
+            continue
+
+        # pre-filtro 2: geometria patologica (vasche non ordinate lungo la
+        # rotaia, zone che si scavalcano). Scartarla qui, invece di lasciar
+        # fallire solve(), fa si' che la scelta automatica delle zone trovi da
+        # sola una suddivisione valida quando esiste.
+        problemi = zone_layout_conflicts(data, zones)
+        if problemi:
+            n_skipped_layout += 1
+            if esempio_layout is None:
+                esempio_layout = problemi[0]
+            if log_progress:
+                zone_str = ", ".join(f"[{z.lo}-{z.hi}]" for z in zones)
+                print(f"  zone {zone_str}: scartata (geometria irrappresentabile)")
             continue
 
         candidate_data = dataclasses.replace(data, zones=zones)
@@ -911,13 +1178,20 @@ def solve_auto_zones(
             Solution(
                 status="INFEASIBLE",
                 T=None,
-                raw={"n_tried": n_tried, "n_skipped": n_skipped},
+                raw={
+                    "n_tried": n_tried,
+                    "n_skipped": n_skipped,
+                    "n_skipped_layout": n_skipped_layout,
+                    "layout_example": esempio_layout,
+                },
             ),
             None,
         )
 
     best_solution.raw["n_tried"] = n_tried
     best_solution.raw["n_skipped"] = n_skipped
+    best_solution.raw["n_skipped_layout"] = n_skipped_layout
+    best_solution.raw["layout_example"] = esempio_layout
     best_solution.raw["zones"] = best_zones
     return best_solution, best_zones
 
@@ -984,7 +1258,18 @@ def solve_auto_hoists(
                 print(f"  saltato: {e}")
             continue
 
-        sweep.append({"n_hoists": n_hoists, "status": sol.status, "T": sol.T})
+        voce = {"n_hoists": n_hoists, "status": sol.status, "T": sol.T}
+        n_layout = sol.raw.get("n_skipped_layout", 0)
+        if n_layout:
+            voce["n_skipped_layout"] = n_layout
+            voce["layout_example"] = sol.raw.get("layout_example")
+            if log_progress and sol.status not in ("OPTIMAL", "FEASIBLE"):
+                print(
+                    f"  {n_layout} suddivisioni scartate perche' il modello non "
+                    f"sa garantire la distanza di sicurezza con questa "
+                    f"geometria. Esempio: {sol.raw.get('layout_example')}"
+                )
+        sweep.append(voce)
         if sol.status in ("OPTIMAL", "FEASIBLE"):
             sol.raw["hoist_sweep"] = sweep
             sol.raw["n_hoists"] = n_hoists
@@ -1013,14 +1298,22 @@ def solve_auto_hoists(
 #    calcolare l'intervallo temporale esatto in cui il carroponte e'
 #    entro `safety_distance` dal confine, invece dell'intera sosta.
 #
-# 4. Collisioni FUORI dalle stazioni di confine: oggi il modello assume che
-#    due carroponti possano avvicinarsi solo li'. L'assunzione regge finche'
-#    ogni stazione adiacente a un confine dista almeno
-#    hoist_length + safety_distance; con vasche piu' ravvicinate il modello
-#    ha una vera lacuna (il carroponte sosta dentro la zona di esclusione del
-#    vicino senza che nulla lo impedisca). verify.py lo segnala.
+# 4. Vasche non ordinate lungo la rotaia (percorso che torna indietro nello
+#    spazio): il vincolo di non collisione assume che le zone adiacenti
+#    stiano su lati opposti del proprio confine. Toglierlo richiederebbe di
+#    confrontare le posizioni di TUTTE le coppie di carroponti su tutto il
+#    percorso, non solo attorno ai confini.
 #
-# GIA' IMPLEMENTATO (era il punto 4 di questo elenco): tempo di presa e
-# rilascio del pezzo, come `pick_time`/`release_time` in ProblemData. NON si
-# somma allo spostamento a vuoto: sarebbe doppio conteggio. Vedi il commento
-# su `empty_leg_seconds`.
+# 5. Posizione di parcheggio scelta dal solver: oggi, per convenzione, un
+#    carroponte che ha consegnato riparte subito e attende alla stazione
+#    della mossa successiva. Poterlo far attendere altrove darebbe piu'
+#    liberta' per allontanarsi dal vicino, a parita' di tutto il resto.
+#
+# GIA' IMPLEMENTATI (erano punti di questo elenco):
+# - tempo di presa e rilascio del pezzo (`pick_time`/`release_time`): NON si
+#   somma allo spostamento a vuoto, sarebbe doppio conteggio -- vedi il
+#   commento su `empty_leg_seconds`;
+# - capienza delle vasche (`StationSpec.capacity`);
+# - collisione basata sulla posizione reale nel tempo invece che sulla sola
+#   finestra di occupazione della stazione di confine;
+# - verifica indipendente della soluzione (verify.py).

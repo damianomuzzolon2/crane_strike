@@ -48,7 +48,7 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 from kinematics import position_profile, profile_breakpoints
-from model import HoistPlan, ProblemData, Segment, Solution
+from model import HoistPlan, ProblemData, Segment, Solution, zone_layout_conflicts
 
 # Tipi di segmento in cui il carroponte e' fermo orizzontalmente. Tenuto come
 # insieme (e non come confronto == "wait") perche' in seguito si aggiungeranno
@@ -425,59 +425,19 @@ def _check_structure(data, solution, T, time_tol, add):
 def _check_layout(data, required, add):
     """2) Layout: individua le vicinanze che il modello NON vincola.
 
-    Il modello impedisce la sovrapposizione solo sulla stazione di confine fra
-    due zone. La garanzia di separazione regge finche' il carroponte, mentre
-    il vicino lavora sul confine, si trova a una stazione abbastanza lontana.
-    Se una stazione dell'altra zona cade entro `required` dal confine, il
-    carroponte puo' sostarci dentro la zona di esclusione senza che nessun
-    vincolo lo impedisca."""
-    zones = data.zones
-    for h in range(len(zones) - 1):
-        b = zones[h].hi + 1  # stazione di confine fra la zona h e la h+1
-        x_b = data.station_position(b)
-        # stazioni raggiunte dal carroponte di sinistra (zona h): lo..hi+1
-        left = range(zones[h].lo, zones[h].hi + 2)
-        # stazioni raggiunte dal carroponte di destra (zona h+1)
-        right = range(zones[h + 1].lo, zones[h + 1].hi + 2)
-        for group, other in ((left, h), (right, h + 1)):
-            for s in group:
-                if s == b:
-                    continue
-                d = abs(data.station_position(s) - x_b)
-                if d < required:
-                    add(
-                        "layout",
-                        "warning",
-                        f"la stazione {s} dista {d:.2f} m dalla stazione di "
-                        f"confine {b} (< {required:.2f} m richiesti): il modello "
-                        f"non vincola questa vicinanza",
-                        hoists=(other,),
-                        station=s,
-                        value=d,
-                        bound=required,
-                        slack=d - required,
-                    )
-
-    # zone non adiacenti con intervalli spaziali sovrapposti: l'assunzione
-    # "le collisioni possono avvenire solo ai confini" non regge piu'
-    spans = []
-    for z in zones:
-        xs = [data.station_position(i) for i in range(z.lo, z.hi + 2)]
-        spans.append((min(xs), max(xs)))
-    for i in range(len(spans)):
-        for j in range(i + 2, len(spans)):
-            lo_i, hi_i = spans[i]
-            lo_j, hi_j = spans[j]
-            if min(hi_i, hi_j) - max(lo_i, lo_j) > -required:
-                add(
-                    "layout",
-                    "warning",
-                    f"le zone {i + 1} e {j + 1} non sono adiacenti ma i loro "
-                    f"intervalli spaziali [{lo_i:.1f},{hi_i:.1f}] e "
-                    f"[{lo_j:.1f},{hi_j:.1f}] si avvicinano a meno di "
-                    f"{required:.2f} m: il modello non le vincola fra loro",
-                    hoists=(i, j),
-                )
+    Usa la stessa funzione con cui `solve()` rifiuta le suddivisioni non
+    rappresentabili (model.zone_layout_conflicts), cosi' le due analisi non
+    possono divergere. Qui pero' e' solo un avviso: una soluzione costruita a
+    mano, o prodotta con allow_unsafe_layout=True, va comunque verificata --
+    ed e' il controllo 8 (collisioni) a dire se il rischio si e' davvero
+    concretizzato."""
+    for problema in zone_layout_conflicts(data, data.zones):
+        add(
+            "layout",
+            "warning",
+            problema + " -- il modello non vincola questa vicinanza",
+            bound=required,
+        )
 
 
 def _check_per_hoist(data, solution, plans, T, time_tol, add) -> list[_Trajectory]:
