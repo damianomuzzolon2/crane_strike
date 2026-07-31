@@ -71,19 +71,24 @@ def plot_cyclogram(
     if own_fig:
         fig, ax = plt.subplots(figsize=(13, 7))
 
-    # -- linee guida orizzontali per ciascuna vasca -------------------------
+    # -- linee guida orizzontali, e nomi delle vasche sull'asse -------------
+    # I nomi vanno messi COME etichette dell'asse, non come testo accanto:
+    # scritti a mano finirebbero sopra i valori numerici, e su una finestra
+    # stretta diventano illeggibili. Chi legge un ciclogramma cerca la vasca,
+    # non la quota in metri.
+    etichette: dict[float, list[str]] = {}
     for st in data.route:
         y = data.tanks[st.tank_id].position
+        etichette.setdefault(y, [])
+        if st.tank_id not in etichette[y]:
+            etichette[y].append(st.tank_id)
+    for y in etichette:
         ax.axhline(y, color="#dddddd", linewidth=1, zorder=0)
-        ax.text(
-            -0.015 * n_cycles * T,
-            y,
-            st.tank_id,
-            va="center",
-            ha="right",
-            fontsize=9,
-            color="#555555",
-        )
+    quote = sorted(etichette)
+    ax.set_yticks(quote)
+    ax.set_yticklabels(
+        [f"{' / '.join(etichette[y])}\n{y:.2f} m" for y in quote], fontsize=8
+    )
 
     # -- traiettorie di ciascun carroponte, ripetute su n_cycles periodi ----
     for h, segs in enumerate(solution.segments_per_hoist):
@@ -103,9 +108,9 @@ def plot_cyclogram(
         ax.axvline(cycle * T, color="#999999", linewidth=1, linestyle=":", zorder=0)
 
     ax.set_xlabel("tempo [s]")
-    ax.set_ylabel("posizione lungo la rotaia [m]")
+    ax.set_ylabel("posizione lungo la rotaia")
     ax.set_title(f"{title}  —  takt time T = {T:.2f} s")
-    ax.set_xlim(-0.02 * n_cycles * T, n_cycles * T * 1.01)
+    ax.set_xlim(0.0, n_cycles * T * 1.01)
 
     # -- legenda --------------------------------------------------------
     legend_elems = [
