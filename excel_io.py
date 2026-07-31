@@ -42,7 +42,18 @@ _PARAMETRI = {
     "a_max_vuoto_m_s2": ("m/s^2", True, None, "accelerazione max del carroponte scarico"),
     "v_max_carico_m_s": ("m/s", True, None, "velocita' max del carroponte col pezzo"),
     "a_max_carico_m_s2": ("m/s^2", True, None, "accelerazione max col pezzo"),
-    "ingombro_carroponte_m": ("m", True, None, "lunghezza del carrello lungo la rotaia"),
+    "ingombro_lato_positivo_m": (
+        "m",
+        True,
+        None,
+        "quanto sporge il carrello dal gancio verso le posizioni crescenti",
+    ),
+    "ingombro_lato_negativo_m": (
+        "m",
+        True,
+        None,
+        "quanto sporge il carrello dal gancio verso le posizioni decrescenti",
+    ),
     "distanza_sicurezza_m": (
         "m",
         True,
@@ -208,7 +219,8 @@ def leggi_problema(percorso_file: str) -> Configurazione:
             kin_loaded=Kinematics(
                 v_max=par["v_max_carico_m_s"], a_max=par["a_max_carico_m_s2"]
             ),
-            hoist_length=par["ingombro_carroponte_m"],
+            hoist_extent_pos=par["ingombro_lato_positivo_m"],
+            hoist_extent_neg=par["ingombro_lato_negativo_m"],
             safety_distance=par["distanza_sicurezza_m"],
             zones=zone,
             time_scale=par["risoluzione_tick_per_s"],
@@ -562,7 +574,8 @@ def scrivi_modello(percorso_file: str) -> str:
         "a_max_vuoto_m_s2": 0.9,
         "v_max_carico_m_s": 1.0,
         "a_max_carico_m_s2": 0.4,
-        "ingombro_carroponte_m": 1.2,
+        "ingombro_lato_positivo_m": 0.5,
+        "ingombro_lato_negativo_m": 0.7,
         "distanza_sicurezza_m": 0.6,
         "tempo_presa_s": 6,
         "tempo_rilascio_s": 4,

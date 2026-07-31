@@ -132,7 +132,13 @@ class ProblemData:
     takt_max: float  # [s] limite superiore tolleranza takt time
     kin_empty: Kinematics  # cinematica carroponte SENZA pezzo
     kin_loaded: Kinematics  # cinematica carroponte CON pezzo
-    hoist_length: float  # [m] ingombro del carroponte
+    # Ingombro del carroponte lungo la rotaia, misurato dal PUNTO DI
+    # RIFERIMENTO (il gancio, che deve stare sopra la vasca). Il carrello non
+    # e' detto sia simmetrico rispetto al gancio, quindi i due lati si
+    # dichiarano separatamente: `pos` verso le posizioni crescenti, `neg`
+    # verso quelle decrescenti.
+    hoist_extent_pos: float  # [m]
+    hoist_extent_neg: float  # [m]
     safety_distance: float  # [m] distanza di sicurezza minima fra due carroponti
     zones: Optional[list[HoistZone]] = None  # una per carroponte; None = da
     # scegliere automaticamente con
@@ -180,6 +186,12 @@ class ProblemData:
             raise ValueError("pick_time e release_time devono essere >= 0")
         if self.clearance_steps < 1:
             raise ValueError("clearance_steps deve essere >= 1")
+        if self.hoist_extent_pos < 0 or self.hoist_extent_neg < 0:
+            raise ValueError(
+                "hoist_extent_pos e hoist_extent_neg devono essere >= 0"
+            )
+        if self.safety_distance < 0:
+            raise ValueError("safety_distance deve essere >= 0")
         for t in self.tanks.values():
             if t.capacity < 1:
                 raise ValueError(
@@ -206,6 +218,18 @@ class ProblemData:
                 )
 
     # -- comodita' --------------------------------------------------------
+    @property
+    def hoist_length(self) -> float:
+        """Ingombro totale del carroponte lungo la rotaia.
+
+        E' l'unica combinazione dei due ingombri che conta per la distanza fra
+        due carroponti: se quello di sinistra ha il gancio in p e quello di
+        destra in q, il bordo destro del primo e' in p + pos e il bordo
+        sinistro del secondo in q - neg, quindi lo spazio libero fra i due vale
+        q - p - (pos + neg). Dove sia il gancio dentro il carrello non cambia
+        nulla: conta solo la somma."""
+        return self.hoist_extent_pos + self.hoist_extent_neg
+
     @property
     def n_stations(self) -> int:
         return len(self.route)

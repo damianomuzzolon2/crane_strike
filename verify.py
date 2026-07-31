@@ -930,8 +930,8 @@ def _check_collisions(
                 "collision",
                 "error",
                 f"distanza minima {sep:.3f}m < {required:.3f}m richiesti "
-                f"(ingombro {data.hoist_length:.2f} + sicurezza "
-                f"{data.safety_distance:.2f})",
+                f"(ingombro {data.hoist_extent_neg:.2f}+{data.hoist_extent_pos:.2f}"
+                f" + sicurezza {data.safety_distance:.2f})",
                 hoists=(i, j),
                 t=t,
                 value=sep,

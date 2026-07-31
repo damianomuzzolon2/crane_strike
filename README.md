@@ -129,10 +129,37 @@ python esempio.py
    - **tutto manuale**: specifica `zones` (lista di `HoistZone`) e usa
      `solve(data)` direttamente, se hai gia' un'idea precisa di come
      dividere la linea.
-6. **Sicurezza**: `hoist_length` (ingombro) e `safety_distance` (margine
-   minimo aggiuntivo) vengono usati per allargare le finestre temporali di
-   occupazione dei punti di confine fra zone adiacenti.
+6. **Sicurezza**: `hoist_extent_pos`, `hoist_extent_neg` (ingombro del
+   carrello, vedi sotto) e `safety_distance` (margine minimo aggiuntivo).
 7. **Movimentazione verticale**: `pick_time` e `release_time` (vedi sotto).
+
+### Ingombro del carroponte
+
+La posizione di un carroponte e' quella del suo **gancio**, che deve stare
+sopra la vasca. Il carrello attorno al gancio non e' detto sia simmetrico, per
+cui i due lati si dichiarano separatamente:
+
+- `hoist_extent_pos` — quanto sporge verso le posizioni **crescenti**;
+- `hoist_extent_neg` — quanto sporge verso le posizioni **decrescenti**.
+
+La distanza minima richiesta fra i ganci di due carroponti e'
+
+```text
+D = hoist_extent_pos + hoist_extent_neg + safety_distance
+```
+
+Vale la pena capire **perche' compare solo la somma**. Se il carroponte di
+sinistra ha il gancio in `p` e quello di destra in `q`, il bordo destro del
+primo sta in `p + pos` e il bordo sinistro del secondo in `q - neg`: lo spazio
+libero fra i due vale `q - p - (pos + neg)`. Dove sia il gancio *dentro* il
+carrello non entra nel conto — a parita' di lunghezza totale, spostarlo avanti
+o indietro non cambia nulla, perche' quello che si guadagna da un lato lo si
+perde dall'altro.
+
+Dichiararli separati resta comunque utile: rende esplicito che le posizioni
+delle vasche sono riferite al gancio e non al centro del carrello, ed e' il
+dato giusto da avere se un giorno servisse vincolare il carroponte rispetto a
+strutture fisse o usare carroponti di modelli diversi sulla stessa rotaia.
 
 ### Capienza delle vasche (`capacity`)
 

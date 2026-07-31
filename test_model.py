@@ -70,7 +70,8 @@ def linea(
         takt_max=takt_max,
         kin_empty=KIN_EMPTY,
         kin_loaded=KIN_LOADED,
-        hoist_length=1.2,
+        hoist_extent_pos=0.5,
+        hoist_extent_neg=0.7,
         safety_distance=0.6,
         zones=zones,
         time_scale=100,
@@ -79,9 +80,13 @@ def linea(
     return ProblemData(**params)
 
 
-def risolvi_e_verifica(data, etichetta, time_limit=20.0):
+def risolvi_e_verifica(data, etichetta, time_limit=60.0):
     """Risolve e restituisce (solution, report). Fallisce il test se la
-    soluzione non supera la verifica indipendente."""
+    soluzione non supera la verifica indipendente.
+
+    I limiti di tempo sono volutamente larghi: un test che fallisce solo
+    perche' la macchina era occupata non dice nulla di utile e fa perdere
+    fiducia in tutto il resto."""
     sol = solve(data, time_limit_s=time_limit)
     if sol.status not in ("OPTIMAL", "FEASIBLE"):
         return sol, None
@@ -93,6 +98,14 @@ def risolvi_e_verifica(data, etichetta, time_limit=20.0):
         global _n_fail
         _n_fail += 1
     return sol, r
+
+
+def _esito(sol, r, atteso: str) -> str:
+    """Descrizione leggibile per i check che possono fallire sia per un errore
+    vero sia per un semplice scadere del tempo: la differenza va vista."""
+    if r is None:
+        return f"{atteso} -- ma il solutore ha restituito {sol.status}"
+    return atteso
 
 
 # --------------------------------------------------------------------------
@@ -132,7 +145,7 @@ def test_un_carroponte():
     print("\n[3] un solo carroponte: nessun confine, nessun vincolo di coppia")
     data = linea(4, 1.0, [HoistZone(0, 3)], takt_max=120.0)
     sol, r = risolvi_e_verifica(data, "carroponte singolo")
-    check(r is not None and r.ok, f"soluzione valida (T={sol.T:.2f}s)")
+    check(r is not None and r.ok, _esito(sol, r, "soluzione valida"))
     check(
         sol.raw.get("n_separation_constraints", -1) == 0,
         "nessun vincolo di separazione generato",
@@ -141,10 +154,16 @@ def test_un_carroponte():
 
 def test_tre_carroponti():
     print("\n[4] tre carroponti, due confini")
-    data = linea(6, 1.5, [HoistZone(0, 1), HoistZone(2, 3), HoistZone(4, 5)],
-                 takt_min=10.0, takt_max=60.0)
-    sol, r = risolvi_e_verifica(data, "tre carroponti", time_limit=40.0)
-    check(r is not None and r.ok, "soluzione valida")
+    data = linea(
+        6,
+        1.5,
+        [HoistZone(0, 1), HoistZone(2, 3), HoistZone(4, 5)],
+        takt_min=10.0,
+        takt_max=60.0,
+        clearance_steps=4,  # due confini: si tiene il modello di dimensioni sane
+    )
+    sol, r = risolvi_e_verifica(data, "tre carroponti", time_limit=120.0)
+    check(r is not None and r.ok, _esito(sol, r, "soluzione valida"))
     if r is not None:
         check(
             r.min_separation >= r.required_separation - 1e-3,
@@ -166,8 +185,8 @@ def test_fasi_verticali_e_capienza():
         takt_min=25.0,
         takt_max=90.0,
     )
-    sol, r = risolvi_e_verifica(data, "verticali+capienza", time_limit=30.0)
-    check(r is not None and r.ok, "soluzione valida")
+    sol, r = risolvi_e_verifica(data, "verticali+capienza", time_limit=60.0)
+    check(r is not None and r.ok, _esito(sol, r, "soluzione valida"))
     if r is not None:
         occ_ok = all(n <= 2 for n in r.tank_occupancy.values())
         check(occ_ok, f"capienza rispettata: {r.tank_occupancy}")
@@ -184,7 +203,7 @@ def test_clearance_steps():
             takt_max=40.0,
             clearance_steps=steps,
         )
-        sol, r = risolvi_e_verifica(data, f"passi={steps}", time_limit=30.0)
+        sol, r = risolvi_e_verifica(data, f"passi={steps}", time_limit=60.0)
         if r is None:
             risultati[steps] = None
             continue
@@ -246,7 +265,8 @@ def test_vasca_ripetuta():
             takt_max=200.0,
             kin_empty=KIN_EMPTY,
             kin_loaded=KIN_LOADED,
-            hoist_length=1.2,
+            hoist_extent_pos=0.5,
+        hoist_extent_neg=0.7,
             safety_distance=0.6,
             zones=[HoistZone(0, 3)],
             time_scale=100,
@@ -255,12 +275,10 @@ def test_vasca_ripetuta():
     # (a) permanenze brevi: le due tappe si possono sfasare, un posto basta.
     #     Se il modello sommasse i massimi delle due tappe direbbe INFEASIBLE.
     data = linea_lav(cap=1, dwell=(10, 60))
-    sol, r = risolvi_e_verifica(data, "vasca ripetuta, 1 posto", time_limit=30.0)
+    sol, r = risolvi_e_verifica(data, "vasca ripetuta, 1 posto", time_limit=60.0)
     check(
         r is not None and r.ok,
-        f"con 1 posto e' fattibile: T={sol.T:.2f}s"
-        if r
-        else f"con 1 posto: {sol.status} (atteso fattibile)",
+        _esito(sol, r, f"con 1 posto e' fattibile: T={sol.T:.2f}s" if r else "con 1 posto e' fattibile"),
     )
     if r is not None:
         check(
@@ -270,7 +288,7 @@ def test_vasca_ripetuta():
 
     # (b) permanenze lunghe rispetto al takt: un posto non puo' bastare
     data2 = linea_lav(cap=1, dwell=(150, 200))
-    sol2 = solve(data2, time_limit_s=30.0)
+    sol2 = solve(data2, time_limit_s=60.0)
     if sol2.status in ("OPTIMAL", "FEASIBLE"):
         r2 = verify_solution(data2, sol2)
         check(
@@ -282,7 +300,7 @@ def test_vasca_ripetuta():
 
     # (c) con 3 posti la stessa linea deve tornare fattibile
     data3 = linea_lav(cap=3, dwell=(150, 200))
-    sol3, r3 = risolvi_e_verifica(data3, "vasca ripetuta, 3 posti", time_limit=30.0)
+    sol3, r3 = risolvi_e_verifica(data3, "vasca ripetuta, 3 posti", time_limit=60.0)
     check(
         r3 is not None and r3.ok,
         f"con 3 posti e' fattibile: T={sol3.T:.2f}s, LAV usa "

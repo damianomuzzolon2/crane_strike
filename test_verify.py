@@ -75,7 +75,8 @@ def make_data(positions, dwells, zones, **kw) -> ProblemData:
         takt_max=200.0,
         kin_empty=KIN_EMPTY,
         kin_loaded=KIN_LOADED,
-        hoist_length=1.2,
+        hoist_extent_pos=0.5,
+        hoist_extent_neg=0.7,
         safety_distance=0.6,
         zones=zones,
         time_scale=100,
@@ -385,8 +386,65 @@ def test_layout_patologico():
     )
 
 
+def test_ingombro_asimmetrico():
+    print("\n[11] ingombro asimmetrico: conta solo la somma dei due lati")
+    posizioni = [0.0, 5.0, 10.0, 15.0, 20.0]
+    dwells = [(0, 0), (30, 90), (30, 90), (30, 90), (0, 0)]
+    zone = [HoistZone(0, 1), HoistZone(2, 3)]
+
+    def richiesta(pos, neg):
+        d = make_data(
+            positions=posizioni,
+            dwells=dwells,
+            zones=zone,
+            hoist_extent_pos=pos,
+            hoist_extent_neg=neg,
+        )
+        d0 = d.loaded_leg_seconds(0)
+        sol = build_solution(d, 100.0, [{0: 0.0, 1: d0 + 40.0}, {2: 10.0, 3: 55.0}])
+        return d.hoist_length, verify_solution(d, sol).required_separation
+
+    # il bordo destro del carroponte di sinistra sta in p+pos, il bordo
+    # sinistro di quello di destra in q-neg: lo spazio libero vale
+    # q-p-(pos+neg), quindi dove sta il gancio dentro il carrello non conta
+    valori = [richiesta(0.6, 0.6), richiesta(0.2, 1.0), richiesta(1.1, 0.1)]
+    check(
+        all(abs(v[0] - 1.2) < 1e-9 for v in valori),
+        "ingombro totale sempre 1.20 m, comunque ripartito",
+    )
+    check(
+        len({round(v[1], 9) for v in valori}) == 1,
+        f"distanza richiesta identica nei tre casi: {valori[0][1]:.3f} m",
+    )
+    check(
+        abs(valori[0][1] - (1.2 + 0.6)) < 1e-9,
+        "distanza richiesta = ingombro totale + distanza di sicurezza",
+    )
+
+    d = make_data(
+        positions=posizioni,
+        dwells=dwells,
+        zones=zone,
+        hoist_extent_pos=0.0,
+        hoist_extent_neg=0.0,
+    )
+    check(d.hoist_length == 0.0, "ingombro nullo ammesso (carroponte puntiforme)")
+    for pos, neg in ((-0.1, 0.5), (0.5, -0.1)):
+        try:
+            make_data(
+                positions=posizioni,
+                dwells=dwells,
+                zones=zone,
+                hoist_extent_pos=pos,
+                hoist_extent_neg=neg,
+            )
+            check(False, f"ingombro negativo ({pos}, {neg}) doveva essere respinto")
+        except ValueError:
+            check(True, f"ingombro negativo ({pos}, {neg}) respinto")
+
+
 def test_takt_fuori_banda():
-    print("\n[11] takt time fuori dalla banda dichiarata")
+    print("\n[12] takt time fuori dalla banda dichiarata")
     data, sol = reference_case()
     stretto = dataclasses.replace(data, takt_min=110.0, takt_max=150.0)
     r = verify_solution(stretto, sol)
@@ -394,7 +452,7 @@ def test_takt_fuori_banda():
 
 
 def test_capienza_vasca():
-    print("\n[12] capienza della vasca (posti simultanei)")
+    print("\n[13] capienza della vasca (posti simultanei)")
     positions = [0.0, 5.0, 10.0, 15.0, 20.0]
     zones = [HoistZone(0, 1), HoistZone(2, 3)]
     T = 100.0
@@ -443,7 +501,7 @@ def test_capienza_vasca():
 
 
 def test_capienza_validazione():
-    print("\n[13] validazione della capienza in ProblemData")
+    print("\n[14] validazione della capienza in ProblemData")
     base = dict(
         positions=[0.0, 5.0, 10.0],
         zones=[HoistZone(0, 1)],
@@ -498,7 +556,8 @@ def _linea_vasca_ripetuta(cap_lav: int, dwell=(20, 90)) -> ProblemData:
         takt_max=200.0,
         kin_empty=KIN_EMPTY,
         kin_loaded=KIN_LOADED,
-        hoist_length=1.2,
+        hoist_extent_pos=0.5,
+        hoist_extent_neg=0.7,
         safety_distance=0.6,
         zones=[HoistZone(0, 1), HoistZone(2, 3)],
         time_scale=100,
@@ -506,7 +565,7 @@ def _linea_vasca_ripetuta(cap_lav: int, dwell=(20, 90)) -> ProblemData:
 
 
 def test_vasca_ripetuta():
-    print("\n[14] stessa vasca fisica usata in piu' tappe del percorso")
+    print("\n[15] stessa vasca fisica usata in piu' tappe del percorso")
     T = 100.0
 
     # (a) le due permanenze in LAV sono SFASATE fra loro: un posto solo basta,
@@ -538,7 +597,7 @@ def test_vasca_ripetuta():
 
 
 def test_fasi_verticali():
-    print("\n[15] tempi di presa/rilascio (immersione verticale)")
+    print("\n[16] tempi di presa/rilascio (immersione verticale)")
     data = make_data(
         positions=[0.0, 5.0, 10.0, 15.0, 20.0],
         dwells=[(0, 0), (30, 90), (30, 90), (30, 90), (0, 0)],
@@ -591,7 +650,7 @@ def test_fasi_verticali():
 
 
 def test_zero_verticale_non_regressione():
-    print("\n[16] con tempi verticali nulli non cambia nulla")
+    print("\n[17] con tempi verticali nulli non cambia nulla")
     data_zero = make_data(
         positions=[0.0, 5.0, 10.0, 15.0, 20.0],
         dwells=[(0, 0), (30, 90), (30, 90), (30, 90), (0, 0)],
@@ -626,7 +685,7 @@ def test_zero_verticale_non_regressione():
 
 
 def test_stazione_condivisa():
-    print("\n[17] due mosse consecutive che partono dalla stessa stazione")
+    print("\n[18] due mosse consecutive che partono dalla stessa stazione")
     # il carroponte consegna in V2 e riparte subito da V2: non c'e' nessuno
     # spostamento a vuoto, e non deve comparire un segmento degenere
     data = make_data(
@@ -660,7 +719,7 @@ def test_stazione_condivisa():
 
 
 def test_input_malformato():
-    print("\n[18] input malformato: eccezione, non report")
+    print("\n[19] input malformato: eccezione, non report")
     data, sol = reference_case()
     for descr, arg_data, arg_sol in [
         ("status infattibile", data, dataclasses.replace(sol, status="INFEASIBLE")),
@@ -675,7 +734,7 @@ def test_input_malformato():
 
 
 def test_senza_valori_risolti():
-    print("\n[19] degrado gentile senza solution.plans")
+    print("\n[20] degrado gentile senza solution.plans")
     data, sol = reference_case()
     ridotta = Solution(
         status=sol.status, T=sol.T, segments_per_hoist=sol.segments_per_hoist
@@ -706,6 +765,7 @@ def main():
     test_durata_tratta_sbagliata()
     test_layout_stretto()
     test_layout_patologico()
+    test_ingombro_asimmetrico()
     test_takt_fuori_banda()
     test_capienza_vasca()
     test_capienza_validazione()

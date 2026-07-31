@@ -69,7 +69,11 @@ def main():
     takt_nominale = 130.0  # [s]
     takt_tolleranza = 20.0  # [s]  -> range ammesso [110, 150] s
 
-    hoist_length = 1.2  # [m] ingombro del carrello lungo la rotaia
+    # Ingombro del carrello lungo la rotaia, misurato dal gancio: i due lati
+    # si dichiarano separatamente perche' il carrello non e' detto sia
+    # simmetrico. Qui il gancio e' spostato verso le posizioni decrescenti.
+    hoist_extent_pos = 0.5  # [m] verso le posizioni crescenti
+    hoist_extent_neg = 0.7  # [m] verso le posizioni decrescenti
     safety_distance = 0.6  # [m] distanza minima aggiuntiva fra due carroponti
 
     # ---------------------------------------------------------------
@@ -99,7 +103,8 @@ def main():
         takt_max=takt_nominale + takt_tolleranza,
         kin_empty=kin_empty,
         kin_loaded=kin_loaded,
-        hoist_length=hoist_length,
+        hoist_extent_pos=hoist_extent_pos,
+        hoist_extent_neg=hoist_extent_neg,
         safety_distance=safety_distance,
         zones=None,  # <-- zone scelte automaticamente
         time_scale=100,  # risoluzione: centesimi di secondo
