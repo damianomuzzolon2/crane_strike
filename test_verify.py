@@ -17,6 +17,7 @@ from __future__ import annotations
 import dataclasses
 
 from kinematics import Kinematics
+from kinematics import travel_time as kinematics_travel_time
 from model import (
     HoistPlan,
     HoistZone,
@@ -33,6 +34,8 @@ from verify import verify_solution
 
 KIN_EMPTY = Kinematics(v_max=1.6, a_max=0.9)
 KIN_LOADED = Kinematics(v_max=1.0, a_max=0.4)
+KIN_LIFT_EMPTY = Kinematics(v_max=0.5, a_max=0.8)
+KIN_LIFT_LOADED = Kinematics(v_max=0.3, a_max=0.5)
 
 _n_pass = 0
 _n_fail = 0
@@ -491,12 +494,16 @@ def test_capienza_vasca():
         positions=positions,
         dwells=[(0, 0), (30, 90), (30, 90), (30, 90), (0, 0)],
         zones=zones,
-        pick_time=6.0,
-        release_time=4.0,
+        lift_height=0.8,
+        kin_lift_empty=KIN_LIFT_EMPTY,
+        kin_lift_loaded=KIN_LIFT_LOADED,
+        engage_time=2.0,
+        disengage_time=1.0,
     )
+    atteso = 50.0 + data_v.pick_time_at(2) + data_v.release_time_at(2)
     check(
-        abs(data_v.slot_occupancy_seconds(2, 50.0) - 60.0) < 1e-9,
-        "occupazione posto = rilascio + bagno + presa",
+        abs(data_v.slot_occupancy_seconds(2, 50.0) - atteso) < 1e-9,
+        f"occupazione posto = rilascio + bagno + presa ({atteso:.2f} s)",
     )
 
 
@@ -602,11 +609,41 @@ def test_fasi_verticali():
         positions=[0.0, 5.0, 10.0, 15.0, 20.0],
         dwells=[(0, 0), (30, 90), (30, 90), (30, 90), (0, 0)],
         zones=[HoistZone(0, 1), HoistZone(2, 3)],
-        pick_time=6.0,
-        release_time=4.0,
+        lift_height=0.8,
+        kin_lift_empty=KIN_LIFT_EMPTY,
+        kin_lift_loaded=KIN_LIFT_LOADED,
+        engage_time=2.0,
+        disengage_time=1.0,
+        drain_time=4.0,
+    )
+    # i tempi verticali non sono dichiarati: si ricavano dalla corsa e dalle
+    # cinematiche di sollevamento (una tratta a vuoto + una a carico)
+    t_vuoto = kinematics_travel_time(0.8, KIN_LIFT_EMPTY)
+    t_carico = kinematics_travel_time(0.8, KIN_LIFT_LOADED)
+    check(
+        abs(data.pick_time_at(0) - (t_vuoto + 2.0 + t_carico + 4.0)) < 1e-9,
+        f"presa = discesa a vuoto + aggancio + risalita a carico + "
+        f"sgocciolamento ({data.pick_time_at(0):.2f} s)",
     )
     check(
-        abs(data.loaded_leg_seconds(0) - (6.0 + data.horizontal_loaded_seconds(0) + 4.0))
+        abs(data.release_time_at(1) - (t_carico + 1.0 + t_vuoto)) < 1e-9,
+        f"rilascio = discesa a carico + sgancio + risalita a vuoto "
+        f"({data.release_time_at(1):.2f} s) -- nessuno sgocciolamento",
+    )
+    check(
+        abs((data.pick_time_at(0) - data.release_time_at(0)) - (2.0 + 4.0 - 1.0))
+        < 1e-9,
+        "presa e rilascio differiscono solo per i tempi morti",
+    )
+    check(
+        abs(
+            data.loaded_leg_seconds(0)
+            - (
+                data.pick_time_at(0)
+                + data.horizontal_loaded_seconds(0)
+                + data.release_time_at(1)
+            )
+        )
         < 1e-9,
         "la durata della mossa comprende presa e rilascio",
     )
@@ -616,9 +653,44 @@ def test_fasi_verticali():
         "lo spostamento a vuoto non paga tempo verticale",
     )
 
+    # corsa piu' lunga -> tempi piu' lunghi, ma solo per quella vasca
+    profonda = dataclasses.replace(
+        data,
+        tanks={
+            k: (dataclasses.replace(v, lift_height=1.6) if k == "V2" else v)
+            for k, v in data.tanks.items()
+        },
+    )
+    check(
+        profonda.pick_time_at(2) > profonda.pick_time_at(1)
+        and profonda.pick_time_at(1) == data.pick_time_at(1),
+        f"corsa per vasca: V2 {profonda.pick_time_at(2):.2f} s contro "
+        f"{profonda.pick_time_at(1):.2f} s delle altre",
+    )
+
+    # lo sgocciolamento dipende dal bagno: si dichiara per vasca
+    lenta = dataclasses.replace(
+        data,
+        tanks={
+            k: (dataclasses.replace(v, drain_time=20.0) if k == "V2" else v)
+            for k, v in data.tanks.items()
+        },
+    )
+    check(
+        abs((lenta.pick_time_at(2) - data.pick_time_at(2)) - (20.0 - 4.0)) < 1e-9,
+        f"sgocciolamento per vasca: V2 sale a {lenta.pick_time_at(2):.2f} s",
+    )
+    check(
+        lenta.release_time_at(2) == data.release_time_at(2),
+        "lo sgocciolamento non tocca il rilascio: si scola in uscita, non in entrata",
+    )
+
     T = 130.0
     d0 = data.loaded_leg_seconds(0)
-    sol = build_solution(data, T, [{0: 0.0, 1: d0 + 40.0}, {2: 10.0, 3: 65.0}])
+    d2 = data.loaded_leg_seconds(2)
+    sol = build_solution(
+        data, T, [{0: 0.0, 1: d0 + 40.0}, {2: 10.0, 3: 10.0 + d2 + 35.0}]
+    )
     r = verify_solution(data, sol)
     check(r.ok, "soluzione con fasi verticali verificata senza errori")
 
@@ -655,8 +727,6 @@ def test_zero_verticale_non_regressione():
         positions=[0.0, 5.0, 10.0, 15.0, 20.0],
         dwells=[(0, 0), (30, 90), (30, 90), (30, 90), (0, 0)],
         zones=[HoistZone(0, 1), HoistZone(2, 3)],
-        pick_time=0.0,
-        release_time=0.0,
     )
     _, sol_rif = reference_case()
     d0 = data_zero.loaded_leg_seconds(0)
@@ -692,8 +762,9 @@ def test_stazione_condivisa():
         positions=[0.0, 5.0, 10.0, 15.0],
         dwells=[(0, 0), (30, 90), (0, 90), (0, 0)],
         zones=[HoistZone(0, 0), HoistZone(1, 2)],
-        pick_time=2.0,
-        release_time=2.0,
+        lift_height=0.4,
+        kin_lift_empty=KIN_LIFT_EMPTY,
+        kin_lift_loaded=KIN_LIFT_LOADED,
     )
     T = 120.0
     lp1 = 20.0

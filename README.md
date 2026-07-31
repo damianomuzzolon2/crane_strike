@@ -59,7 +59,7 @@ fogli:
 | foglio | contenuto |
 | --- | --- |
 | `Istruzioni` | come compilare gli altri fogli |
-| `Vasche` | id, posizione lungo la rotaia, numero di posti |
+| `Vasche` | id, posizione lungo la rotaia, numero di posti, corsa verticale, sgocciolamento |
 | `Percorso` | sequenza di vasche attraversate, con le permanenze |
 | `Parametri` | takt time, cinematiche, ingombri, tempi verticali, opzioni |
 | `Zone` | facoltativo: suddivisione manuale delle mosse fra i carroponti. **Lasciandolo vuoto** numero di carroponti e zone vengono scelti automaticamente |
@@ -106,8 +106,9 @@ python esempio.py
 
 ## Come modellare il tuo caso
 
-1. **Vasche** (`Tank`): id, posizione `[m]` lungo la rotaia e numero di posti
-   simultanei (`capacity`, default 1 — vedi sotto).
+1. **Vasche** (`Tank`): id, posizione `[m]` lungo la rotaia, numero di posti
+   simultanei (`capacity`, default 1) e, facoltativi, corsa verticale
+   (`lift_height`) e sgocciolamento (`drain_time`) propri di quella vasca.
 2. **Percorso** (`route`, lista di `StationSpec`): sequenza di vasche che il
    pezzo attraversa, con tempo di permanenza `[min,max]` in secondi. La stessa
    vasca puo' comparire piu' volte.
@@ -131,7 +132,9 @@ python esempio.py
      dividere la linea.
 6. **Sicurezza**: `hoist_extent_pos`, `hoist_extent_neg` (ingombro del
    carrello, vedi sotto) e `safety_distance` (margine minimo aggiuntivo).
-7. **Movimentazione verticale**: `pick_time` e `release_time` (vedi sotto).
+7. **Movimentazione verticale**: `lift_height`, `kin_lift_empty`,
+   `kin_lift_loaded`, `engage_time`, `disengage_time`, `drain_time`
+   (vedi sotto).
 
 ### Ingombro del carroponte
 
@@ -210,22 +213,55 @@ subito con un messaggio esplicito, invece di lasciar restituire un
 Un limite da conoscere: la prima e l'ultima stazione (carico/scarico) sono
 fuori dalla catena delle permanenze e quindi **non** hanno vincolo di capienza.
 
-### Tempo di presa e rilascio (immersione/emersione)
+### Movimentazione verticale (presa e rilascio)
 
-Il carroponte non si limita a traslare: deve calare il gancio, agganciare e
-tirare su il telaio, e all'arrivo immergerlo, sganciare e risalire. Sono due
-costanti in `ProblemData`, entrambe con default `0.0`:
+Il carroponte non si limita a traslare: cala il gancio, aggancia e tira su il
+telaio, e all'arrivo lo immerge, sgancia e risale. I tempi **non si
+dichiarano**: si ricavano dalla corsa verticale e dalle cinematiche di
+sollevamento, con lo stesso profilo trapezoidale usato per il moto
+orizzontale.
 
-- `pick_time` — discesa gancio + aggancio + emersione dal bagno con
-  l'eventuale sgocciolamento sopra la vasca;
-- `release_time` — immersione nella vasca di destinazione + sgancio +
-  risalita del gancio a vuoto.
+- `lift_height` — corsa fra quota di trasporto e quota di immersione;
+- `kin_lift_empty`, `kin_lift_loaded` — velocita' e accelerazione massime di
+  sollevamento, a gancio scarico e col telaio;
+- `engage_time` — aggancio del telaio, prima del sollevamento (tempo morto);
+- `disengage_time` — sgancio, dopo l'immersione (tempo morto);
+- `drain_time` — **sgocciolamento**: quanto il telaio resta sospeso sopra la
+  vasca a lasciar scolare il bagno, dopo l'emersione.
 
-Ogni mossa dura quindi `pick_time + traslazione + release_time`. Lo
-spostamento **a vuoto non paga alcun tempo verticale**: dopo lo sgancio il
-gancio e' gia' in alto (lo ha portato su `release_time`) e ridiscendera'
-dentro `pick_time` della mossa successiva — contarlo di nuovo sarebbe doppio
-conteggio.
+Da cui:
+
+```text
+presa    = discesa a vuoto  + aggancio + risalita a carico + sgocciolamento
+rilascio = discesa a carico + sgancio  + risalita a vuoto
+```
+
+Lo sgocciolamento sta **solo** nella presa: si scola uscendo dalla vasca, non
+entrandoci.
+
+Ne segue una cosa che vale la pena notare: **presa e rilascio percorrono le
+stesse due tratte** (una a vuoto e una a carico), solo in ordine invertito, e
+quindi differiscono unicamente per i tempi morti.
+
+Due grandezze si dichiarano **per vasca**, perche' non dipendono dal
+carroponte:
+
+- `Tank.lift_height` — le vasche piu' profonde hanno corse piu' lunghe;
+- `Tank.drain_time` — lo sgocciolamento dipende dalla chimica del bagno e dalla
+  geometria del pezzo: sulla zincatura e' lungo, su un risciacquo quasi nullo.
+
+Lasciandole vuote si usa il valore generale. Nell'esempio ZINCATURA ha corsa
+1,1 m contro 0,8 m e sgocciolamento 8 s contro 2 s: la sua presa vale 17,09 s
+contro i 9,49 s delle altre vasche.
+
+Con `lift_height = 0` le cinematiche di sollevamento non servono e restano solo
+i tempi morti: e' la via da usare se si hanno tempi gia' misurati sul campo
+invece della meccanica.
+
+Ogni mossa dura quindi `presa + traslazione + rilascio`. Lo spostamento **a
+vuoto non paga alcun tempo verticale**: dopo lo sgancio il gancio e' gia' in
+alto (ce lo ha portato il rilascio) e ridiscendera' dentro la presa della mossa
+successiva — contarlo di nuovo sarebbe doppio conteggio.
 
 Conseguenza importante per l'interpretazione dei dati di processo: i tempi di
 permanenza (`dwell_min`/`dwell_max`) restano il tempo **effettivo in bagno**,
@@ -234,13 +270,17 @@ tenere conto delle fasi verticali.
 
 Le due fasi compaiono nel ciclogramma come segmenti orizzontali dedicati
 (`Segment.kind` vale `"pick"` o `"release"`), in arancio e viola: il
-carroponte e' fermo sopra la vasca. Con entrambi i tempi a zero non viene
-emesso alcun segmento verticale e il risultato e' identico a prima.
+carroponte e' fermo sopra la vasca. Con tempi verticali nulli non viene emesso
+alcun segmento e il risultato torna quello di una linea senza sollevamento.
 
 Attenzione al dimensionamento: i tempi verticali si sommano a **ogni** mossa e
-si fanno sentire in fretta. Nell'esempio fornito, `pick_time=6 s` e
-`release_time=4 s` su 6 mosse aggiungono 60 s di contenuto e fanno passare la
-linea da 1 a 2 carroponti — e' un risultato corretto, non una regressione.
+si fanno sentire in fretta. Nell'esempio fornito valgono da 16 a 25 s per mossa,
+cioe' oltre 100 s di contenuto su 6 mosse: abbastanza da far passare la linea da
+1 a 2 carroponti e da alzare il takt time da 110 a 132 s. E' un risultato
+corretto, non una regressione — e' esattamente la ragione per cui vale la pena
+modellarli invece di stimarli a occhio. Lo sgocciolamento, in particolare, e' il
+contributo che si tende a dimenticare: portarlo da 2 a 15 s sulla sola zincatura
+fa passare l'esempio a 3 carroponti.
 
 ### Scelta automatica del numero di carroponti e delle zone
 
@@ -489,14 +529,14 @@ verificatore indipendente conferma la soluzione senza errori.
 
 I due file di test rispondono a domande opposte e si completano:
 
-- `test_verify.py` — 19 casi, 49 asserzioni. *Il verificatore trova davvero
+- `test_verify.py` — 20 casi, 64 asserzioni. *Il verificatore trova davvero
   quello che deve trovare?* Uno solo dei casi e' corretto, gli altri sono rotti
   di proposito (collisioni, permanenze, periodicita', fasi verticali, capienza,
   geometrie patologiche). Non richiede OR-Tools: le soluzioni sono costruite a
   mano.
 - `test_model.py` — 8 casi, 20 asserzioni. *Il modello produce soluzioni
   fisicamente valide?* Risolve davvero e passa ogni risultato al verificatore.
-- `test_excel_io.py` — 17 casi, 48 asserzioni. *Un file compilato male viene
+- `test_excel_io.py` — 18 casi, 54 asserzioni. *Un file compilato male viene
   respinto con un messaggio utile, e i risultati escono corretti?* In ingresso:
   valori mancanti o non numerici, vasche inesistenti o duplicate, righe
   riordinate, parametri sbagliati, zone incomplete. In uscita: struttura dei

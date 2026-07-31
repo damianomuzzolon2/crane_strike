@@ -58,11 +58,11 @@ APPROCCIO SCELTO E SUE ASSUNZIONI (importante leggere prima di usare il codice)
    che le tappe possono essere sfasate fra loro). Vale solo per le stazioni
    intermedie: carico e scarico sono fuori dalla catena delle permanenze.
 
-5. Il moto orizzontale segue il profilo cinematico di kinematics.py; la
-   movimentazione VERTICALE del pezzo (discesa gancio, aggancio, emersione,
-   immersione, sgancio, risalita) e' modellata come due costanti,
-   `pick_time` e `release_time`, sommate a ogni mossa a carico. Lo
-   spostamento a vuoto non ne paga nessuna: sarebbe doppio conteggio.
+5. Anche la movimentazione VERTICALE del pezzo segue il profilo cinematico di
+   kinematics.py: presa e rilascio si CALCOLANO dalla corsa (`lift_height`,
+   con eventuale valore per vasca) e dalle cinematiche di sollevamento a
+   gancio scarico e col telaio, piu' i tempi morti di aggancio e sgancio.
+   Lo spostamento a vuoto non paga nulla: sarebbe doppio conteggio.
    I tempi di permanenza restano il tempo EFFETTIVO in bagno.
 
 6. Il modello e' CORRETTO (sound) entro le assunzioni sopra: ogni soluzione
@@ -101,6 +101,15 @@ class Tank:
     # della singola tappa del percorso: se la ricetta passa due volte dalla
     # stessa vasca, i pezzi delle due tappe si contendono gli stessi posti.
     capacity: int = 1
+    # Corsa verticale [m] fra la quota di trasporto e quella di immersione.
+    # None = si usa il valore generale di ProblemData.lift_height: si valorizza
+    # solo per le vasche piu' profonde (o piu' basse) della media.
+    lift_height: Optional[float] = None
+    # Sgocciolamento [s]: quanto il telaio resta sospeso SOPRA questa vasca,
+    # dopo l'emersione, a lasciar scolare il bagno prima di traslare. Dipende
+    # dalla chimica e dalla geometria del pezzo, non dalla meccanica del
+    # carroponte, quindi cambia da vasca a vasca. None = valore generale.
+    drain_time: Optional[float] = None
 
 
 @dataclass(frozen=True)
@@ -144,16 +153,24 @@ class ProblemData:
     # scegliere automaticamente con
     # solve_auto_zones(...)
     time_scale: int = 100  # tick al secondo (risoluzione temporale interna)
-    # -- tempi di movimentazione VERTICALE del pezzo (immersione/emersione) --
+    # -- movimentazione VERTICALE del pezzo (immersione/emersione) ----------
     #
-    # Una mossa e': il carroponte arriva a vuoto sopra la vasca k, cala il
-    # gancio, aggancia e SOLLEVA il telaio fuori dal bagno (con l'eventuale
-    # sgocciolamento) -> `pick_time`; poi trasla orizzontalmente col pezzo;
-    # infine IMMERGE il telaio nella vasca k+1, sgancia e risale col gancio
-    # vuoto -> `release_time`. Lo spostamento a vuoto successivo NON paga
-    # nulla: la salita/discesa del gancio scarico e' gia' contata qui dentro.
-    pick_time: float = 0.0  # [s] discesa gancio + aggancio + emersione
-    release_time: float = 0.0  # [s] immersione + sgancio + risalita gancio
+    # Una mossa e': il carroponte arriva a vuoto sopra la vasca k, CALA il
+    # gancio scarico, aggancia, SOLLEVA il telaio fuori dal bagno e lo lascia
+    # SGOCCIOLARE sopra la vasca -> tempo di PRESA; poi trasla orizzontalmente
+    # col pezzo; infine CALA il telaio nella vasca k+1, sgancia e RISALE col
+    # gancio scarico -> tempo di RILASCIO. Lo spostamento a vuoto successivo
+    # non paga nulla: la corsa del gancio scarico e' gia' contata qui dentro.
+    #
+    # I tempi non si dichiarano: si ricavano dalla corsa verticale e dalle
+    # cinematiche di sollevamento, con lo stesso profilo trapezoidale usato
+    # per il moto orizzontale.
+    lift_height: float = 0.0  # [m] corsa verticale, valore generale
+    kin_lift_empty: Optional[Kinematics] = None  # sollevamento a gancio scarico
+    kin_lift_loaded: Optional[Kinematics] = None  # sollevamento col telaio
+    engage_time: float = 0.0  # [s] aggancio del telaio, prima del sollevamento
+    disengage_time: float = 0.0  # [s] sgancio, dopo l'immersione
+    drain_time: float = 0.0  # [s] sgocciolamento sopra la vasca, valore generale
     # Finezza con cui viene discretizzata la "fascia di esclusione" attorno a
     # ogni confine fra zone (vedi il vincolo di non collisione in solve()).
     # Il modello garantisce sempre la distanza minima richiesta; alzare questo
@@ -182,8 +199,32 @@ class ProblemData:
                 raise ValueError(f"dwell_min > dwell_max per vasca '{s.tank_id}'")
         if self.takt_min > self.takt_max:
             raise ValueError("takt_min > takt_max")
-        if self.pick_time < 0 or self.release_time < 0:
-            raise ValueError("pick_time e release_time devono essere >= 0")
+        if self.engage_time < 0 or self.disengage_time < 0 or self.drain_time < 0:
+            raise ValueError(
+                "engage_time, disengage_time e drain_time devono essere >= 0"
+            )
+        if self.lift_height < 0:
+            raise ValueError("lift_height deve essere >= 0")
+        for t in self.tanks.values():
+            if t.lift_height is not None and t.lift_height < 0:
+                raise ValueError(
+                    f"lift_height della vasca '{t.id}' deve essere >= 0"
+                )
+            if t.drain_time is not None and t.drain_time < 0:
+                raise ValueError(
+                    f"drain_time della vasca '{t.id}' deve essere >= 0"
+                )
+        serve_cinematica = self.lift_height > 0 or any(
+            t.lift_height for t in self.tanks.values()
+        )
+        if serve_cinematica and (
+            self.kin_lift_empty is None or self.kin_lift_loaded is None
+        ):
+            raise ValueError(
+                "e' stata indicata una corsa verticale (lift_height) ma non le "
+                "cinematiche di sollevamento: servono sia kin_lift_empty sia "
+                "kin_lift_loaded per calcolare i tempi di presa e rilascio."
+            )
         if self.clearance_steps < 1:
             raise ValueError("clearance_steps deve essere >= 1")
         if self.hoist_extent_pos < 0 or self.hoist_extent_neg < 0:
@@ -286,15 +327,47 @@ class ProblemData:
     # modifica alla definizione di "durata di una mossa" si propaga ovunque
     # senza rischio di disallineamenti.
 
+    def lift_height_at(self, station_idx: int) -> float:
+        """Corsa verticale [m] alla stazione data: quella dichiarata sulla
+        vasca, se c'e', altrimenti il valore generale della linea."""
+        h = self.tanks[self.route[station_idx].tank_id].lift_height
+        return self.lift_height if h is None else h
+
+    def _lift_seconds(self, height: float, kin: Optional[Kinematics]) -> float:
+        if height <= 0 or kin is None:
+            return 0.0
+        return _travel_time_seconds(height, kin)
+
+    def drain_time_at(self, station_idx: int) -> float:
+        """Sgocciolamento [s] sopra la vasca della tappa data."""
+        d = self.tanks[self.route[station_idx].tank_id].drain_time
+        return self.drain_time if d is None else d
+
     def pick_time_at(self, station_idx: int) -> float:
-        """Tempo di presa [s] alla stazione data. Passare sempre da qui (e non
-        dal campo `pick_time`) rende banale un eventuale override per singola
-        stazione, es. cesti profondi o vasche a lungo sgocciolamento."""
-        return self.pick_time
+        """Tempo di PRESA [s] alla stazione data: discesa del gancio scarico,
+        aggancio, risalita col telaio, sgocciolamento sopra la vasca."""
+        h = self.lift_height_at(station_idx)
+        return (
+            self._lift_seconds(h, self.kin_lift_empty)
+            + self.engage_time
+            + self._lift_seconds(h, self.kin_lift_loaded)
+            + self.drain_time_at(station_idx)
+        )
 
     def release_time_at(self, station_idx: int) -> float:
-        """Tempo di rilascio [s] alla stazione data."""
-        return self.release_time
+        """Tempo di RILASCIO [s] alla stazione data: discesa col telaio,
+        sgancio, risalita del gancio scarico.
+
+        Nota: a parita' di corsa, presa e rilascio percorrono le stesse due
+        tratte (una a vuoto e una a carico) in ordine invertito, quindi
+        differiscono solo per i tempi morti -- aggancio e sgocciolamento da una
+        parte, sgancio dall'altra."""
+        h = self.lift_height_at(station_idx)
+        return (
+            self._lift_seconds(h, self.kin_lift_loaded)
+            + self.disengage_time
+            + self._lift_seconds(h, self.kin_lift_empty)
+        )
 
     def slot_occupancy_seconds(self, station_idx: int, dwell: float) -> float:
         """Per quanto tempo [s] un pezzo tiene occupato un POSTO nella vasca

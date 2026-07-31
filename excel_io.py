@@ -60,17 +60,55 @@ _PARAMETRI = {
         None,
         "margine minimo aggiuntivo fra due carroponti",
     ),
-    "tempo_presa_s": (
-        "s",
-        False,
-        0.0,
-        "discesa gancio + aggancio + emersione/sgocciolamento",
+    "altezza_sollevamento_m": (
+        "m",
+        True,
+        None,
+        "corsa verticale fra quota di trasporto e quota di immersione "
+        "(0 per ignorare la movimentazione verticale)",
     ),
-    "tempo_rilascio_s": (
+    "v_max_sollevamento_vuoto_m_s": (
+        "m/s",
+        False,
+        None,
+        "velocita' max di sollevamento a gancio scarico",
+    ),
+    "a_max_sollevamento_vuoto_m_s2": (
+        "m/s^2",
+        False,
+        None,
+        "accelerazione max di sollevamento a gancio scarico",
+    ),
+    "v_max_sollevamento_carico_m_s": (
+        "m/s",
+        False,
+        None,
+        "velocita' max di sollevamento col telaio",
+    ),
+    "a_max_sollevamento_carico_m_s2": (
+        "m/s^2",
+        False,
+        None,
+        "accelerazione max di sollevamento col telaio",
+    ),
+    "tempo_aggancio_s": (
         "s",
         False,
         0.0,
-        "immersione + sgancio + risalita del gancio a vuoto",
+        "aggancio del telaio, prima del sollevamento (si somma alla presa)",
+    ),
+    "tempo_sgancio_s": (
+        "s",
+        False,
+        0.0,
+        "sgancio, dopo l'immersione (si somma al rilascio)",
+    ),
+    "tempo_sgocciolamento_s": (
+        "s",
+        False,
+        0.0,
+        "quanto il telaio resta sospeso sopra la vasca a scolare, dopo "
+        "l'emersione; valore generale, si puo' sovrascrivere per vasca",
     ),
     "risoluzione_tick_per_s": (
         "tick/s",
@@ -207,6 +245,13 @@ def leggi_problema(percorso_file: str) -> Configurazione:
     )
     errori.solleva_se_presenti()
 
+    def _kin_sollevamento(prefisso: str) -> Optional[Kinematics]:
+        v = par.get(f"v_max_sollevamento_{prefisso}_m_s")
+        a = par.get(f"a_max_sollevamento_{prefisso}_m_s2")
+        if v is None or a is None:
+            return None
+        return Kinematics(v_max=v, a_max=a)
+
     try:
         data = ProblemData(
             tanks=tanks,
@@ -224,8 +269,12 @@ def leggi_problema(percorso_file: str) -> Configurazione:
             safety_distance=par["distanza_sicurezza_m"],
             zones=zone,
             time_scale=par["risoluzione_tick_per_s"],
-            pick_time=par["tempo_presa_s"],
-            release_time=par["tempo_rilascio_s"],
+            lift_height=par["altezza_sollevamento_m"],
+            kin_lift_empty=_kin_sollevamento("vuoto"),
+            kin_lift_loaded=_kin_sollevamento("carico"),
+            engage_time=par["tempo_aggancio_s"],
+            disengage_time=par["tempo_sgancio_s"],
+            drain_time=par["tempo_sgocciolamento_s"],
             clearance_steps=par["passi_fascia_sicurezza"],
         )
     except ValueError as e:
@@ -263,9 +312,24 @@ def _leggi_vasche(ws, errori: _Errori) -> dict[str, Tank]:
             posti = _numero(
                 posti_cella, FOGLIO_VASCHE, f"C{riga}", "posti", errori, intero=True
             )
+        def _facoltativo(col: int, lettera: str, nome: str):
+            """None se la cella e' vuota: si usera' il valore generale."""
+            cella = ws.cell(riga, col).value
+            if cella is None or (isinstance(cella, str) and not cella.strip()):
+                return None
+            return _numero(cella, FOGLIO_VASCHE, f"{lettera}{riga}", nome, errori)
+
+        corsa = _facoltativo(4, "D", "corsa verticale")
+        sgocciolamento = _facoltativo(5, "E", "sgocciolamento")
         if pos is None or posti is None:
             continue
-        tanks[tid] = Tank(id=tid, position=pos, capacity=posti)
+        tanks[tid] = Tank(
+            id=tid,
+            position=pos,
+            capacity=posti,
+            lift_height=corsa,
+            drain_time=sgocciolamento,
+        )
     if not tanks:
         errori.aggiungi(FOGLIO_VASCHE, "A2", "nessuna vasca definita")
     return tanks
@@ -364,10 +428,8 @@ def _leggi_parametri(ws, errori: _Errori) -> dict:
                 par[nome] = default
             continue
         valore, riga = grezzi[nome]
-        if (
-            not obbligatorio
-            and default is not None
-            and (valore is None or (isinstance(valore, str) and not valore.strip()))
+        if not obbligatorio and (
+            valore is None or (isinstance(valore, str) and not valore.strip())
         ):
             par[nome] = default  # riga presente ma lasciata vuota: si usa il default
             continue
@@ -459,6 +521,26 @@ def scrivi_modello(percorso_file: str) -> str:
             "(vuoto = 1)",
             None,
         ),
+        (
+            "  corsa_verticale_m   solo per le vasche piu' profonde o piu' basse "
+            "della media;",
+            None,
+        ),
+        (
+            "                lasciando vuoto si usa altezza_sollevamento_m del "
+            "foglio Parametri",
+            None,
+        ),
+        (
+            "  sgocciolamento_s    quanto il telaio resta sospeso sopra QUESTA "
+            "vasca a scolare;",
+            None,
+        ),
+        (
+            "                dipende dal bagno, non dal carroponte. Vuoto = "
+            "tempo_sgocciolamento_s generale",
+            None,
+        ),
         ("", None),
         (f"Foglio {FOGLIO_PERCORSO}", titolo_par),
         (
@@ -531,17 +613,21 @@ def scrivi_modello(percorso_file: str) -> str:
 
     # -- Vasche ----------------------------------------------------------
     ws = wb.create_sheet(FOGLIO_VASCHE)
-    prepara(ws, ["id", "posizione_m", "posti"], [22, 14, 8])
-    for tid, pos, posti in [
-        ("CARICO", 0.0, 1),
-        ("SGRASSO", 2.5, 1),
-        ("RISCIACQUO_1", 5.5, 1),
-        ("ZINCATURA", 9.5, 2),
-        ("RISCIACQUO_2", 13.0, 1),
-        ("PASSIVAZIONE", 16.5, 1),
-        ("SCARICO", 20.0, 1),
+    prepara(
+        ws,
+        ["id", "posizione_m", "posti", "corsa_verticale_m", "sgocciolamento_s"],
+        [22, 14, 8, 20, 20],
+    )
+    for tid, pos, posti, corsa, scolo in [
+        ("CARICO", 0.0, 1, None, None),
+        ("SGRASSO", 2.5, 1, None, None),
+        ("RISCIACQUO_1", 5.5, 1, None, None),
+        ("ZINCATURA", 9.5, 2, 1.1, 8),
+        ("RISCIACQUO_2", 13.0, 1, None, None),
+        ("PASSIVAZIONE", 16.5, 1, None, None),
+        ("SCARICO", 20.0, 1, None, None),
     ]:
-        ws.append([tid, pos, posti])
+        ws.append([tid, pos, posti, corsa, scolo])
 
     # -- Percorso --------------------------------------------------------
     ws = wb.create_sheet(FOGLIO_PERCORSO)
@@ -577,8 +663,14 @@ def scrivi_modello(percorso_file: str) -> str:
         "ingombro_lato_positivo_m": 0.5,
         "ingombro_lato_negativo_m": 0.7,
         "distanza_sicurezza_m": 0.6,
-        "tempo_presa_s": 6,
-        "tempo_rilascio_s": 4,
+        "altezza_sollevamento_m": 0.8,
+        "v_max_sollevamento_vuoto_m_s": 0.5,
+        "a_max_sollevamento_vuoto_m_s2": 0.8,
+        "v_max_sollevamento_carico_m_s": 0.3,
+        "a_max_sollevamento_carico_m_s2": 0.5,
+        "tempo_aggancio_s": 2,
+        "tempo_sgancio_s": 1,
+        "tempo_sgocciolamento_s": 2,
         "risoluzione_tick_per_s": 100,
         "passi_fascia_sicurezza": 6,
         "max_carroponti": 4,
@@ -785,6 +877,22 @@ def scrivi_risultati(
             "0.000",
         )
 
+    sezione("Movimentazione verticale")
+    voce("Corsa (valore generale)", round(data.lift_height, 3), "m", "0.000")
+    presa = {round(data.pick_time_at(s), 2) for s in range(1, data.n_moves)}
+    rilascio = {round(data.release_time_at(s), 2) for s in range(1, data.n_moves)}
+    voce(
+        "Tempo di presa",
+        min(presa) if presa else 0.0,
+        "s" + ("" if len(presa) <= 1 else f" (fino a {max(presa):.2f} s, varia per vasca)"),
+    )
+    voce(
+        "Tempo di rilascio",
+        min(rilascio) if rilascio else 0.0,
+        "s"
+        + ("" if len(rilascio) <= 1 else f" (fino a {max(rilascio):.2f} s, varia per vasca)"),
+    )
+
     sezione("Verifica indipendente")
     voce("Esito", "SUPERATA" if report.ok else "NON SUPERATA")
     voce("Errori", len(report.errors))
@@ -874,6 +982,10 @@ def scrivi_risultati(
                 round(spec.dwell_max - permanenza, 2) if 0 < s < data.n_moves else "",
                 report.tank_occupancy.get(spec.tank_id, 1),
                 cap,
+                round(data.lift_height_at(s), 3),
+                round(data.drain_time_at(s), 2),
+                round(data.pick_time_at(s), 2),
+                round(data.release_time_at(s), 2),
             ]
         )
     tabella(
@@ -891,10 +1003,22 @@ def scrivi_risultati(
             "margine sul max [s]",
             "posti usati",
             "posti disponibili",
+            "corsa verticale [m]",
+            "sgocciolamento [s]",
+            "presa [s]",
+            "rilascio [s]",
         ],
-        [5, 20, 14, 13, 12, 15, 10, 10, 19, 19, 12, 17],
+        [5, 20, 14, 13, 12, 15, 10, 10, 19, 19, 12, 17, 19, 19, 11, 13],
         righe,
-        formati={4: "0.00", 5: "0.00", 6: "0.00"},
+        formati={
+            4: "0.00",
+            5: "0.00",
+            6: "0.00",
+            13: "0.000",
+            14: "0.00",
+            15: "0.00",
+            16: "0.00",
+        },
     )
     ws.append([])
     ws.append(

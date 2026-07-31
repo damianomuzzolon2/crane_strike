@@ -37,7 +37,9 @@ def main():
         "CARICO": Tank("CARICO", 0.0),
         "SGRASSO": Tank("SGRASSO", 2.5),
         "RISCIACQUO_1": Tank("RISCIACQUO_1", 5.5),
-        "ZINCATURA": Tank("ZINCATURA", 9.5, capacity=2),
+        # vasca piu' profonda e con sgocciolamento lungo: il bagno di zinco
+        # cola parecchio, e lasciarlo cadere fuori dalla vasca e' uno spreco
+        "ZINCATURA": Tank("ZINCATURA", 9.5, capacity=2, lift_height=1.1, drain_time=8.0),
         "RISCIACQUO_2": Tank("RISCIACQUO_2", 13.0),
         "PASSIVAZIONE": Tank("PASSIVAZIONE", 16.5),
         "SCARICO": Tank("SCARICO", 20.0),
@@ -78,16 +80,24 @@ def main():
 
     # ---------------------------------------------------------------
     # 4-bis) Movimentazione verticale del pezzo. Il carroponte non si
-    #    limita a traslare: deve calare il gancio, agganciare e tirare
-    #    su il telaio (con lo sgocciolamento sopra la vasca), e poi
-    #    immergerlo nella vasca successiva e sganciare. Sono tempi
-    #    tutt'altro che trascurabili in una linea reale.
+    #    limita a traslare: cala il gancio, aggancia, tira su il telaio
+    #    (con lo sgocciolamento sopra la vasca), e poi lo immerge nella
+    #    vasca successiva e sgancia. I tempi non si dichiarano: si
+    #    ricavano dalla corsa verticale e dalla cinematica di
+    #    sollevamento, come per il moto orizzontale.
     #    NOTA: i tempi di permanenza dichiarati sopra restano il tempo
     #    EFFETTIVO in bagno, misurato da fine immersione a inizio
     #    emersione; le fasi verticali si sommano a parte.
     # ---------------------------------------------------------------
-    pick_time = 6.0  # [s] discesa gancio + aggancio + emersione/sgocciolamento
-    release_time = 4.0  # [s] immersione + sgancio + risalita gancio a vuoto
+    lift_height = 0.8  # [m] corsa fra quota di trasporto e quota di immersione
+    kin_lift_empty = Kinematics(v_max=0.5, a_max=0.8)  # gancio scarico
+    kin_lift_loaded = Kinematics(v_max=0.3, a_max=0.5)  # col telaio
+    engage_time = 2.0  # [s] aggancio del telaio, prima del sollevamento
+    disengage_time = 1.0  # [s] sgancio, dopo l'immersione
+    # Sgocciolamento: il telaio resta sospeso sopra la vasca a lasciar scolare
+    # il bagno. Dipende dalla chimica, non dal carroponte: qui il valore
+    # generale e' modesto, ma sulla ZINCATURA e' molto piu' lungo (vedi Tank).
+    drain_time = 2.0  # [s]
 
     # ---------------------------------------------------------------
     # 5) Numero di carroponti E zone: entrambi scelti automaticamente.
@@ -108,9 +118,20 @@ def main():
         safety_distance=safety_distance,
         zones=None,  # <-- zone scelte automaticamente
         time_scale=100,  # risoluzione: centesimi di secondo
-        pick_time=pick_time,
-        release_time=release_time,
+        lift_height=lift_height,
+        kin_lift_empty=kin_lift_empty,
+        kin_lift_loaded=kin_lift_loaded,
+        engage_time=engage_time,
+        disengage_time=disengage_time,
+        drain_time=drain_time,
     )
+    print("Fasi verticali calcolate:")
+    for s in range(1, data.n_moves):
+        print(
+            f"  {data.route[s].tank_id:14s} presa {data.pick_time_at(s):5.2f} s "
+            f"(di cui sgocciolamento {data.drain_time_at(s):4.1f} s), "
+            f"rilascio {data.release_time_at(s):5.2f} s"
+        )
 
     print(f"Stazioni: {data.n_stations}  |  Mosse: {data.n_moves}")
     print(f"Takt time ammesso: [{data.takt_min:.1f}, {data.takt_max:.1f}] s")

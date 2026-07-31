@@ -84,7 +84,22 @@ def test_andata_e_ritorno():
             "cinematiche vuoto e carico",
         )
         check(
-            (d.pick_time, d.release_time) == (6.0, 4.0), "tempi di presa e rilascio"
+            (d.lift_height, d.engage_time, d.disengage_time) == (0.8, 2.0, 1.0),
+            "corsa verticale e tempi di aggancio/sgancio",
+        )
+        check(
+            (d.kin_lift_empty.v_max, d.kin_lift_loaded.a_max) == (0.5, 0.5),
+            "cinematiche di sollevamento",
+        )
+        check(
+            d.tanks["ZINCATURA"].lift_height == 1.1
+            and d.tanks["SGRASSO"].lift_height is None,
+            "corsa verticale per vasca solo dove indicata",
+        )
+        check(
+            d.pick_time_at(3) > d.pick_time_at(1),
+            f"la vasca piu' profonda ha presa piu' lunga "
+            f"({d.pick_time_at(3):.2f} s contro {d.pick_time_at(1):.2f} s)",
         )
         check(d.zones is None, "foglio Zone vuoto -> scelta automatica")
         check(
@@ -188,16 +203,72 @@ def test_parametro_facoltativo_vuoto():
         ws = wb[FOGLIO_PARAMETRI]
         for riga in range(2, ws.max_row + 1):
             if ws.cell(riga, 1).value in (
-                "tempo_presa_s",
+                "tempo_aggancio_s",
                 "risoluzione_tick_per_s",
                 "max_carroponti",
             ):
                 ws.cell(riga, 2).value = None
         wb.save(p)
         cfg = leggi_problema(p)
-        check(cfg.data.pick_time == 0.0, "tempo_presa_s -> default 0")
+        check(cfg.data.engage_time == 0.0, "tempo_aggancio_s -> default 0")
         check(cfg.data.time_scale == 100, "risoluzione_tick_per_s -> default 100")
         check(cfg.max_carroponti == 6, "max_carroponti -> default 6")
+    finally:
+        os.unlink(p)
+
+
+def test_sollevamento_incoerente():
+    print("\n[8-bis] corsa verticale senza cinematica di sollevamento")
+    p = modello_temporaneo()
+    try:
+        from openpyxl import load_workbook
+
+        wb = load_workbook(p)
+        ws = wb[FOGLIO_PARAMETRI]
+        for riga in range(2, ws.max_row + 1):
+            if str(ws.cell(riga, 1).value or "").startswith("v_max_sollevamento"):
+                ws.cell(riga, 2).value = None
+        wb.save(p)
+        msg = errore_leggendo(p)
+        check(
+            "cinematiche di sollevamento" in msg,
+            "corsa dichiarata ma cinematica mancante: segnalato",
+        )
+    finally:
+        os.unlink(p)
+
+    # con corsa 0 la cinematica non serve, e i tempi verticali sono nulli
+    p = modello_temporaneo()
+    try:
+        from openpyxl import load_workbook
+
+        wb = load_workbook(p)
+        ws = wb[FOGLIO_PARAMETRI]
+        for riga in range(2, ws.max_row + 1):
+            nome = str(ws.cell(riga, 1).value or "")
+            if nome.startswith(("v_max_sollevamento", "a_max_sollevamento")):
+                ws.cell(riga, 2).value = None
+            elif nome == "altezza_sollevamento_m":
+                ws.cell(riga, 2).value = 0
+        ws2 = wb[FOGLIO_VASCHE]
+        for riga in range(2, ws2.max_row + 1):
+            ws2.cell(riga, 4).value = None
+        wb.save(p)
+        cfg = leggi_problema(p)
+        # niente corsa = nessun moto verticale, ma aggancio e sgancio restano:
+        # sono tempi morti, non dipendono da quanto e' lunga la corsa
+        check(
+            cfg.data.kin_lift_empty is None and cfg.data.kin_lift_loaded is None,
+            "corsa nulla: la cinematica di sollevamento non e' richiesta",
+        )
+        check(
+            cfg.data.pick_time_at(1)
+            == cfg.data.engage_time + cfg.data.drain_time_at(1)
+            and cfg.data.release_time_at(1) == cfg.data.disengage_time,
+            f"restano solo i tempi morti: presa {cfg.data.pick_time_at(1)} s "
+            f"(aggancio + sgocciolamento), rilascio "
+            f"{cfg.data.release_time_at(1)} s (sgancio)",
+        )
     finally:
         os.unlink(p)
 
@@ -486,6 +557,7 @@ def main():
     test_percorso_riordinato()
     test_parametro_sconosciuto()
     test_parametro_facoltativo_vuoto()
+    test_sollevamento_incoerente()
     test_zone_manuali()
     test_errori_multipli()
     test_foglio_mancante()

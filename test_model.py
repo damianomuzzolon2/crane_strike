@@ -180,8 +180,11 @@ def test_fasi_verticali_e_capienza():
         [HoistZone(0, 1), HoistZone(2, 3)],
         dwell=(40, 120),
         capacity=2,
-        pick_time=7.0,
-        release_time=5.0,
+        lift_height=0.8,
+        kin_lift_empty=Kinematics(v_max=0.5, a_max=0.8),
+        kin_lift_loaded=Kinematics(v_max=0.3, a_max=0.5),
+        engage_time=2.0,
+        disengage_time=1.0,
         takt_min=25.0,
         takt_max=90.0,
     )
