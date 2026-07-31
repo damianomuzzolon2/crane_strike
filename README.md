@@ -44,10 +44,11 @@ salvato `ciclogramma.png` col grafico.
 
 ## Come modellare il tuo caso
 
-1. **Vasche** (`Tank`): id e posizione `[m]` lungo la rotaia.
+1. **Vasche** (`Tank`): id, posizione `[m]` lungo la rotaia e numero di posti
+   simultanei (`capacity`, default 1 — vedi sotto).
 2. **Percorso** (`route`, lista di `StationSpec`): sequenza di vasche che il
-   pezzo attraversa, con tempo di permanenza `[min,max]` in secondi e numero
-   di posti simultanei (`capacity`, default 1 — vedi sotto).
+   pezzo attraversa, con tempo di permanenza `[min,max]` in secondi. La stessa
+   vasca puo' comparire piu' volte.
    Assunzione v1: **un solo percorso condiviso da tutti i pezzi**.
 3. **Cinematica**: `Kinematics(v_max, a_max)` separata per carroponte vuoto
    e carico.
@@ -73,16 +74,21 @@ salvato `ciclogramma.png` col grafico.
 
 ### Capienza delle vasche (`capacity`)
 
-`StationSpec.capacity` e' il numero di **posti simultanei** nella vasca, e vale
-`1` per default. I pezzi entrano ogni `T` secondi e ciascuno tiene occupato un
-posto per
+`Tank.capacity` e' il numero di **posti simultanei** nella vasca, e vale `1`
+per default. E' una proprieta' della **vasca fisica**, non della tappa del
+percorso: se la ricetta passa due volte dalla stessa vasca, i pezzi delle due
+tappe si contendono gli stessi posti.
+
+Un pezzo tiene occupato un posto per
 
 ```text
 occupazione = release_time + dwell + pick_time
 ```
 
 — non solo il tempo in bagno: il telaio ingombra il posto dall'inizio
-dell'immersione fino alla fine dell'emersione. I pezzi contemporaneamente
+dell'immersione fino alla fine dell'emersione.
+
+Per una vasca usata **una sola volta** nella ricetta i pezzi contemporaneamente
 presenti sono `ceil(occupazione / T)`, e il modello impone
 
 ```text
@@ -91,6 +97,15 @@ occupazione <= capacity * T
 
 che e' esattamente equivalente. `capacity` e' una costante intera e `T` una
 variabile, quindi il vincolo resta lineare e non costa praticamente nulla.
+
+Per una vasca usata **piu' volte** serve altro. Sommare i massimi delle singole
+tappe sarebbe cautelativo e scarterebbe soluzioni valide: le tappe possono
+essere sfasate fra loro, e allora un posto solo puo' bastare per entrambe. Il
+modello usa quindi un vincolo **cumulativo** esatto — ogni pezzo occupa un
+posto per il suo intervallo, gli intervalli si ripetono ogni `T`, e in nessun
+istante se ne possono sovrapporre piu' di `capacity`. Verificato: su una linea
+che passa due volte dalla stessa vasca con permanenze brevi, il modello trova
+una soluzione con **un posto solo**, sfasando le due tappe.
 
 Il default `1` e' deliberatamente il caso restrittivo: obbliga a **dichiarare**
 le vasche multi-posto invece di lasciarlo implicito. Conseguenza pratica: con
@@ -103,13 +118,8 @@ Se una vasca e' irrimediabilmente insufficiente
 subito con un messaggio esplicito, invece di lasciar restituire un
 `INFEASIBLE` muto dopo minuti di ricerca.
 
-Due limiti da conoscere:
-
-- la prima e l'ultima stazione (carico/scarico) sono fuori dalla catena delle
-  permanenze e quindi **non** hanno vincolo di capienza;
-- il vincolo e' per **tappa del percorso**, non per vasca fisica: se la stessa
-  vasca compare in due tappe, i posti richiesti si sommano e il modello non se
-  ne accorge. Il verificatore lo segnala come avviso.
+Un limite da conoscere: la prima e l'ultima stazione (carico/scarico) sono
+fuori dalla catena delle permanenze e quindi **non** hanno vincolo di capienza.
 
 ### Tempo di presa e rilascio (immersione/emersione)
 
@@ -363,9 +373,9 @@ fa scelte di modellazione precise, in particolare:
   che ha consegnato riparte subito e attende alla stazione della mossa
   successiva. Poterlo far attendere altrove gli darebbe piu' modo di
   allontanarsi dal vicino.
-- **Capienza delle vasche**: vincolata tramite `StationSpec.capacity`, ma solo
-  per le stazioni intermedie e **per tappa del percorso**, non per vasca
-  fisica (vedi la sezione dedicata sopra).
+- **Capienza delle vasche**: vincolata tramite `Tank.capacity`, in modo esatto
+  anche quando la stessa vasca compare piu' volte nella ricetta, ma solo per le
+  stazioni intermedie (carico e scarico restano fuori).
 - **Un solo percorso vasche** condiviso da tutti i pezzi (nessun mix di
   prodotti diversi in questa versione).
 

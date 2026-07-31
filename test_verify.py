@@ -63,9 +63,11 @@ def kinds(report, kind: str, severity: str | None = None) -> list:
 
 def make_data(positions, dwells, zones, **kw) -> ProblemData:
     """dwells: lista di (dwell_min, dwell_max) oppure (dwell_min, dwell_max,
-    capacity) per stazione."""
-    tanks = {f"V{i}": Tank(f"V{i}", p) for i, p in enumerate(positions)}
-    route = [StationSpec(f"V{i}", *spec) for i, spec in enumerate(dwells)]
+    capacity) per stazione. Qui ogni vasca compare una volta sola nel
+    percorso, quindi la capacity della tappa e' quella della vasca."""
+    caps = [spec[2] if len(spec) > 2 else 1 for spec in dwells]
+    tanks = {f"V{i}": Tank(f"V{i}", p, caps[i]) for i, p in enumerate(positions)}
+    route = [StationSpec(f"V{i}", spec[0], spec[1]) for i, spec in enumerate(dwells)]
     params = dict(
         tanks=tanks,
         route=route,
@@ -473,41 +475,65 @@ def test_capienza_validazione():
         takt_max=200.0,
         **base,
     )
-    check(d.route[1].capacity == 2, "con capacity=2 la stessa linea e' accettata")
+    check(d.tank_capacity(1) == 2, "con capacity=2 la stessa linea e' accettata")
 
 
-def test_vasca_ripetuta():
-    print("\n[14] stessa vasca fisica usata in piu' tappe del percorso")
-    tanks = {
-        "CAR": Tank("CAR", 0.0),
-        "LAV": Tank("LAV", 5.0),
-        "SCA": Tank("SCA", 10.0),
-    }
-    # il pezzo torna nella stessa vasca LAV due volte
-    route = [
-        StationSpec("CAR", 0, 0),
-        StationSpec("LAV", 30, 90, capacity=2),
-        StationSpec("LAV", 30, 90, capacity=2),
-        StationSpec("SCA", 0, 0),
-    ]
-    data = ProblemData(
-        tanks=tanks,
-        route=route,
+def _linea_vasca_ripetuta(cap_lav: int, dwell=(20, 90)) -> ProblemData:
+    """Il pezzo torna DUE volte nella stessa vasca fisica LAV."""
+    return ProblemData(
+        tanks={
+            "CAR": Tank("CAR", 0.0),
+            "LAV": Tank("LAV", 5.0, capacity=cap_lav),
+            "SEC": Tank("SEC", 10.0),
+            "SCA": Tank("SCA", 15.0),
+        },
+        route=[
+            StationSpec("CAR", 0, 0),
+            StationSpec("LAV", *dwell),
+            StationSpec("SEC", *dwell),
+            StationSpec("LAV", *dwell),
+            StationSpec("SCA", 0, 0),
+        ],
         takt_min=50.0,
         takt_max=200.0,
         kin_empty=KIN_EMPTY,
         kin_loaded=KIN_LOADED,
         hoist_length=1.2,
         safety_distance=0.6,
-        zones=[HoistZone(0, 1), HoistZone(2, 2)],
+        zones=[HoistZone(0, 1), HoistZone(2, 3)],
         time_scale=100,
     )
+
+
+def test_vasca_ripetuta():
+    print("\n[14] stessa vasca fisica usata in piu' tappe del percorso")
     T = 100.0
-    sol = build_solution(data, T, [{0: 0.0, 1: 40.0}, {2: 75.0}], extra_periods={2: 1})
+
+    # (a) le due permanenze in LAV sono SFASATE fra loro: un posto solo basta,
+    #     anche se ciascuna tappa ne userebbe uno. Sommare i massimi darebbe 2
+    #     e scarterebbe una soluzione valida.
+    data = _linea_vasca_ripetuta(cap_lav=1)
+    d0 = data.loaded_leg_seconds(0)
+    sol = build_solution(data, T, [{0: 0.0, 1: d0 + 20.0}, {2: 40.0, 3: 70.0}])
     r = verify_solution(data, sol)
+    n = r.tank_occupancy.get("LAV")
     check(
-        len(kinds(r, "tank_capacity", "warning")) == 1,
-        "avvisa che i posti si sommano fra le tappe",
+        n == 1,
+        f"tappe sfasate: LAV richiede {n} posto/i (non la somma delle tappe)",
+    )
+    check(not kinds(r, "tank_capacity", "error"), "con capacity=1 nessun errore")
+
+    # (b) permanenze lunghe: i pezzi delle due tappe convivono davvero
+    data2 = _linea_vasca_ripetuta(cap_lav=1, dwell=(150, 300))
+    sol2 = build_solution(
+        data2, T, [{0: 0.0, 1: 10.0}, {2: 40.0, 3: 70.0}], extra_periods={1: 1, 3: 1}
+    )
+    r2 = verify_solution(data2, sol2)
+    n2 = r2.tank_occupancy.get("LAV")
+    check(n2 >= 3, f"permanenze lunghe: LAV richiede {n2} posti")
+    check(
+        len(kinds(r2, "tank_capacity", "error")) == 1 and not r2.ok,
+        "con capacity=1 e' un ERRORE",
     )
 
 

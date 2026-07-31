@@ -55,10 +55,13 @@ def linea(
     **kw,
 ) -> ProblemData:
     n_st = n_moves + 1
-    tanks = {f"V{i}": Tank(f"V{i}", i * spacing) for i in range(n_st)}
+    tanks = {
+        f"V{i}": Tank(f"V{i}", i * spacing, 1 if i in (0, n_st - 1) else capacity)
+        for i in range(n_st)
+    }
     route = [StationSpec("V0", 0, 0)]
     for i in range(1, n_st - 1):
-        route.append(StationSpec(f"V{i}", dwell[0], dwell[1], capacity=capacity))
+        route.append(StationSpec(f"V{i}", dwell[0], dwell[1]))
     route.append(StationSpec(f"V{n_st - 1}", 0, 0))
     params = dict(
         tanks=tanks,
@@ -219,6 +222,74 @@ def test_scelta_automatica():
     )
 
 
+def test_vasca_ripetuta():
+    print("\n[8] stessa vasca fisica usata due volte nella ricetta")
+    # Il pezzo torna in LAV dopo essere passato da SEC: le posizioni lungo la
+    # rotaia non sono piu' monotone, quindi serve un carroponte solo (nessun
+    # confine fra zone, nessun vincolo di lato).
+    def linea_lav(cap, dwell):
+        return ProblemData(
+            tanks={
+                "CAR": Tank("CAR", 0.0),
+                "LAV": Tank("LAV", 5.0, capacity=cap),
+                "SEC": Tank("SEC", 10.0),
+                "SCA": Tank("SCA", 15.0),
+            },
+            route=[
+                StationSpec("CAR", 0, 0),
+                StationSpec("LAV", *dwell),
+                StationSpec("SEC", *dwell),
+                StationSpec("LAV", *dwell),
+                StationSpec("SCA", 0, 0),
+            ],
+            takt_min=20.0,
+            takt_max=200.0,
+            kin_empty=KIN_EMPTY,
+            kin_loaded=KIN_LOADED,
+            hoist_length=1.2,
+            safety_distance=0.6,
+            zones=[HoistZone(0, 3)],
+            time_scale=100,
+        )
+
+    # (a) permanenze brevi: le due tappe si possono sfasare, un posto basta.
+    #     Se il modello sommasse i massimi delle due tappe direbbe INFEASIBLE.
+    data = linea_lav(cap=1, dwell=(10, 60))
+    sol, r = risolvi_e_verifica(data, "vasca ripetuta, 1 posto", time_limit=30.0)
+    check(
+        r is not None and r.ok,
+        f"con 1 posto e' fattibile: T={sol.T:.2f}s"
+        if r
+        else f"con 1 posto: {sol.status} (atteso fattibile)",
+    )
+    if r is not None:
+        check(
+            r.tank_occupancy.get("LAV") == 1,
+            f"LAV usa {r.tank_occupancy.get('LAV')} posto/i, come dichiarato",
+        )
+
+    # (b) permanenze lunghe rispetto al takt: un posto non puo' bastare
+    data2 = linea_lav(cap=1, dwell=(150, 200))
+    sol2 = solve(data2, time_limit_s=30.0)
+    if sol2.status in ("OPTIMAL", "FEASIBLE"):
+        r2 = verify_solution(data2, sol2)
+        check(
+            r2.ok and r2.tank_occupancy.get("LAV", 9) <= 1,
+            f"se risolve, la capienza e' rispettata (LAV={r2.tank_occupancy.get('LAV')})",
+        )
+    else:
+        check(True, f"riconosciuto {sol2.status}, invece di violare la capienza")
+
+    # (c) con 3 posti la stessa linea deve tornare fattibile
+    data3 = linea_lav(cap=3, dwell=(150, 200))
+    sol3, r3 = risolvi_e_verifica(data3, "vasca ripetuta, 3 posti", time_limit=30.0)
+    check(
+        r3 is not None and r3.ok,
+        f"con 3 posti e' fattibile: T={sol3.T:.2f}s, LAV usa "
+        f"{r3.tank_occupancy.get('LAV') if r3 else '?'} posti",
+    )
+
+
 def main():
     print("=" * 72)
     print("TEST END-TO-END DEL MODELLO (richiede OR-Tools)")
@@ -231,6 +302,7 @@ def main():
     test_fasi_verticali_e_capienza()
     test_clearance_steps()
     test_scelta_automatica()
+    test_vasca_ripetuta()
     print("\n" + "=" * 72)
     print(f"RISULTATO: {_n_pass} ok, {_n_fail} falliti  ({time.perf_counter() - t0:.0f}s)")
     print("=" * 72)

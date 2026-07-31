@@ -48,15 +48,15 @@ APPROCCIO SCELTO E SUE ASSUNZIONI (importante leggere prima di usare il codice)
    (vasche non ordinate lungo la rotaia, zone che si scavalcano): la rileva
    zone_layout_conflicts() e la rifiuta solve().
 
-4-bis. Ogni vasca ha un numero dichiarato di POSTI (`StationSpec.capacity`,
+4-bis. Ogni vasca FISICA ha un numero dichiarato di POSTI (`Tank.capacity`,
    default 1). Poiche' i pezzi entrano ogni T secondi e ciascuno occupa un
-   posto per (immersione + bagno + emersione), il modello impone
-   occupazione <= capacity * T, che equivale a "i pezzi contemporaneamente
-   presenti non superano i posti". Vale solo per le stazioni intermedie
-   (carico e scarico sono fuori dalla catena) e per TAPPA del percorso, non
-   per vasca fisica: se la stessa vasca compare due volte nella ricetta, i
-   posti richiesti si sommano e il modello non se ne accorge (verify.py lo
-   segnala).
+   posto per (immersione + bagno + emersione), per una vasca usata una sola
+   volta nella ricetta basta imporre occupazione <= capacity * T, che equivale
+   a "i pezzi contemporaneamente presenti non superano i posti". Se la stessa
+   vasca compare piu' volte, i pezzi delle diverse tappe si contendono gli
+   stessi posti e serve un vincolo CUMULATIVO (esatto: tiene conto del fatto
+   che le tappe possono essere sfasate fra loro). Vale solo per le stazioni
+   intermedie: carico e scarico sono fuori dalla catena delle permanenze.
 
 5. Il moto orizzontale segue il profilo cinematico di kinematics.py; la
    movimentazione VERTICALE del pezzo (discesa gancio, aggancio, emersione,
@@ -97,6 +97,10 @@ from kinematics import Kinematics, travel_time as _travel_time_seconds
 class Tank:
     id: str
     position: float  # [m] posizione lungo la rotaia
+    # Posti simultanei nella vasca. E' una proprieta' della VASCA FISICA, non
+    # della singola tappa del percorso: se la ricetta passa due volte dalla
+    # stessa vasca, i pezzi delle due tappe si contendono gli stessi posti.
+    capacity: int = 1
 
 
 @dataclass(frozen=True)
@@ -107,12 +111,6 @@ class StationSpec:
     tank_id: str
     dwell_min: float  # [s] tempo minimo di permanenza (tolleranza -)
     dwell_max: float  # [s] tempo massimo di permanenza (tolleranza +)
-    # Posti simultanei nella vasca. Con pezzi che entrano ogni T secondi e che
-    # occupano un posto per `occupazione` secondi, i pezzi contemporaneamente
-    # presenti sono ceil(occupazione / T): con capacity=1 (default) la
-    # permanenza non puo' superare il takt time. Metterlo esplicitamente > 1
-    # e' il modo di dichiarare una vasca multi-posto.
-    capacity: int = 1
 
 
 @dataclass(frozen=True)
@@ -182,25 +180,29 @@ class ProblemData:
             raise ValueError("pick_time e release_time devono essere >= 0")
         if self.clearance_steps < 1:
             raise ValueError("clearance_steps deve essere >= 1")
-        for i, s in enumerate(self.route):
-            if s.capacity < 1:
+        for t in self.tanks.values():
+            if t.capacity < 1:
                 raise ValueError(
-                    f"capacity deve essere >= 1 per la vasca '{s.tank_id}' "
-                    f"(stazione {i}), trovato {s.capacity}"
+                    f"capacity deve essere >= 1 per la vasca '{t.id}', "
+                    f"trovato {t.capacity}"
                 )
         # Capienza palesemente insufficiente: il problema e' infattibile
         # qualunque siano zone, numero di carroponti e ordine di visita.
         # Meglio dirlo subito e chiaramente che restituire un INFEASIBLE muto.
+        # (Condizione necessaria valutata su una tappa alla volta: se la stessa
+        # vasca compare piu' volte nella ricetta il vincolo vero e' ancora piu'
+        # stretto, ma lo impone il modello.)
         for s_idx in range(1, len(self.route) - 1):
             spec = self.route[s_idx]
+            cap = self.tank_capacity(s_idx)
             occ_min = self.slot_occupancy_seconds(s_idx, spec.dwell_min)
-            if occ_min > spec.capacity * self.takt_max:
+            if occ_min > cap * self.takt_max:
                 raise ValueError(
                     f"vasca '{spec.tank_id}' (stazione {s_idx}): un pezzo occupa "
                     f"un posto per almeno {occ_min:.1f}s, ma con capacity="
-                    f"{spec.capacity} e takt_max={self.takt_max:.1f}s il limite "
-                    f"e' {spec.capacity * self.takt_max:.1f}s. Aumenta capacity "
-                    f"(vasca multi-posto), riduci dwell_min, o alza takt_max."
+                    f"{cap} e takt_max={self.takt_max:.1f}s il limite "
+                    f"e' {cap * self.takt_max:.1f}s. Aumenta la capacity della "
+                    f"vasca (multi-posto), riduci dwell_min, o alza takt_max."
                 )
 
     # -- comodita' --------------------------------------------------------
@@ -223,6 +225,19 @@ class ProblemData:
 
     def station_position(self, idx: int) -> float:
         return self.tanks[self.route[idx].tank_id].position
+
+    def tank_capacity(self, idx: int) -> int:
+        """Posti della vasca usata alla tappa `idx` del percorso."""
+        return self.tanks[self.route[idx].tank_id].capacity
+
+    def steps_by_tank(self) -> dict[str, list[int]]:
+        """Vasca -> tappe del percorso che la usano, escluse carico e scarico
+        (fuori dalla catena delle permanenze). Se una vasca compare piu' volte
+        i pezzi delle diverse tappe si contendono gli stessi posti."""
+        out: dict[str, list[int]] = {}
+        for idx in range(1, len(self.route) - 1):
+            out.setdefault(self.route[idx].tank_id, []).append(idx)
+        return out
 
     def move_distance(self, k: int) -> float:
         return abs(self.station_position(k + 1) - self.station_position(k))
@@ -534,6 +549,7 @@ def solve(
     actual_time = [model.NewIntVar(0, horizon, f"at_{k}") for k in range(data.n_moves)]
     model.Add(actual_time[0] == 0)
 
+    occupancy = {}  # tappa -> espressione "per quanto tiene occupato un posto"
     for k in range(1, data.n_moves):
         station = (
             k  # la vasca k viene raggiunta dalla mossa k-1 e lasciata dalla mossa k
@@ -548,13 +564,15 @@ def solve(
         # -- 1-bis) Capienza della vasca -------------------------------------
         # I pezzi entrano nella vasca ogni T secondi e ciascuno tiene occupato
         # un posto per `slot_occupancy` secondi (immersione + bagno +
-        # emersione), quindi i pezzi contemporaneamente presenti sono
-        # ceil(occupazione / T). Imporre occupazione <= capacity * T e'
-        # esattamente equivalente a ceil(occupazione / T) <= capacity.
+        # emersione), quindi i pezzi di QUESTA tappa contemporaneamente
+        # presenti sono ceil(occupazione / T). Imporre occupazione <=
+        # capacity * T e' esattamente equivalente a ceil(...) <= capacity.
         # `capacity` e' una costante intera e Tv una variabile: il prodotto
         # resta LINEARE, quindi il vincolo non costa praticamente nulla.
+        # Se la stessa vasca compare in piu' tappe serve altro: vedi 1-ter.
         occ_extra = T_(data.release_time_at(station)) + T_(data.pick_time_at(station))
-        model.Add(actual_time[k] - arrival + occ_extra <= spec.capacity * Tv)
+        occupancy[station] = actual_time[k] - arrival + occ_extra
+        model.Add(occupancy[station] <= data.tank_capacity(station) * Tv)
 
     # -- 2) Per ciascun carroponte: circuito ciclico sulle mosse della
     #    propria zona, con ordine di visita libero. ------------------------
@@ -720,6 +738,45 @@ def solve(
                 arcs=arcs,
             )
         )
+
+    # -- 2-bis) Capienza delle vasche usate PIU' VOLTE nella ricetta --------
+    #
+    # Il vincolo 1-bis limita i pezzi di una singola tappa. Se pero' la stessa
+    # vasca fisica compare in due o piu' tappe del percorso, i loro pezzi si
+    # contendono gli stessi posti e i conteggi si sommano. Sommare i massimi
+    # sarebbe cautelativo (le due tappe potrebbero essere sfasate fra loro), e
+    # per una vasca a posto singolo scarterebbe soluzioni valide.
+    #
+    # La formulazione esatta e' un vincolo CUMULATIVO: ogni pezzo occupa un
+    # posto per l'intervallo [fine immersione ... fine emersione], gli
+    # intervalli si ripetono ogni T, e in nessun istante se ne possono
+    # sovrapporre piu' di `capacity`. Basta replicare ogni intervallo su
+    # abbastanza periodi perche' la finestra centrale sia coperta per intero:
+    # ai bordi il vincolo risulta solo piu' debole, mai piu' forte.
+    local_pick_of = {}
+    for zd in zone_data:
+        local_pick_of.update(zd["local_pick"])
+
+    for tank_id, steps in data.steps_by_tank().items():
+        if len(steps) < 2:
+            continue  # gia' coperta esattamente dal vincolo 1-bis
+        cap = data.tanks[tank_id].capacity
+        k_lo = -(math.ceil((T_max + max(travel_loaded)) / T_min) + 1)
+        k_hi = math.ceil(((cap + 1) * T_max + max(travel_loaded)) / T_min) + 1
+        intervals = []
+        for station in steps:
+            # fine dell'emersione: il telaio lascia libero il posto
+            end_expr = local_pick_of[station] + T_(data.pick_time_at(station))
+            occ_expr = occupancy[station]
+            for sh in range(k_lo, k_hi + 1):
+                st = _as_intvar(end_expr - occ_expr + sh * Tv, f"cap_{tank_id}_{station}_{sh}_s")
+                en = _as_intvar(end_expr + sh * Tv, f"cap_{tank_id}_{station}_{sh}_e")
+                sz = model.NewIntVar(0, horizon, f"cap_{tank_id}_{station}_{sh}_sz")
+                model.Add(sz == en - st)
+                intervals.append(
+                    model.NewIntervalVar(st, sz, en, f"cap_{tank_id}_{station}_{sh}")
+                )
+        model.AddCumulative(intervals, [1] * len(intervals), cap)
 
     # -- 3) Non collisione: fascia di esclusione attorno a ogni confine -----
     #
