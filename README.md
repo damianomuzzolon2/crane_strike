@@ -28,19 +28,66 @@ periodici. È una scelta valida: il codice qui sotto la usa.
 - `plotting.py` — disegna il ciclogramma (posizione vs tempo).
 - `verify.py` — **verificatore indipendente**: ricontrolla in Python puro
   (senza CP-SAT) che la soluzione trovata sia davvero valida.
+- `excel_io.py` — lettura della linea da file Excel e generazione del modello
+  da compilare.
+- `ciclogramma.py` — **comando principale**: Excel in ingresso, ciclogramma
+  verificato in uscita.
 - `test_verify.py` — test del verificatore, non richiede OR-Tools.
 - `test_model.py` — test end-to-end del modello, richiede OR-Tools.
-- `esempio.py` — esempio completo end-to-end, eseguibile da riga di comando.
+- `test_excel_io.py` — test della lettura da Excel, non richiede OR-Tools.
+- `esempio.py` — la stessa linea definita in codice, per chi integra il
+  solutore in altro.
 
 ## Installazione ed esecuzione
 
 ```bash
-pip install ortools matplotlib
-python esempio.py
+pip install ortools matplotlib openpyxl
 ```
 
-Verra' stampato lo stato della risoluzione e (se una soluzione e' trovata)
-salvato `ciclogramma.png` col grafico.
+### Uso normale: la linea si descrive in un file Excel
+
+```bash
+python ciclogramma.py --modello linea.xlsx    # crea il file da compilare
+# ... compili linea.xlsx ...
+python ciclogramma.py linea.xlsx              # calcola il ciclogramma
+```
+
+Il modello generato e' gia' compilato con una linea di zincatura d'esempio, in
+modo che si possa lanciare subito e poi modificarlo pezzo per pezzo. Ha cinque
+fogli:
+
+| foglio | contenuto |
+| --- | --- |
+| `Istruzioni` | come compilare gli altri fogli |
+| `Vasche` | id, posizione lungo la rotaia, numero di posti |
+| `Percorso` | sequenza di vasche attraversate, con le permanenze |
+| `Parametri` | takt time, cinematiche, ingombri, tempi verticali, opzioni |
+| `Zone` | facoltativo: suddivisione manuale delle mosse fra i carroponti. **Lasciandolo vuoto** numero di carroponti e zone vengono scelti automaticamente |
+
+Il comando stampa il takt time trovato, il report della verifica indipendente e
+salva il grafico (`linea.png` accanto all'input, o dove indicato con
+`--grafico`). Altre opzioni: `--cicli N`, `--niente-grafico`, `--log`.
+
+Gli errori di compilazione vengono raccolti **tutti insieme**, con foglio e
+cella, cosi' si corregge il file in una volta sola:
+
+```text
+Il file 'linea.xlsx' non e' compilato correttamente:
+  - [Vasche!B3] posizione: atteso un numero, trovato 'due metri'
+  - [Percorso!B4] la vasca 'SGRASSAGGIO' non e' definita nel foglio Vasche
+  - [Parametri!A2] parametro 'takt_minimo' non riconosciuto. Quelli ammessi sono: ...
+```
+
+I numeri scritti con la virgola decimale (`2,5`) vengono accettati.
+
+### Uso da Python
+
+`esempio.py` mostra come definire la stessa linea direttamente in codice e
+richiamare il solutore, se serve integrarlo in qualcos'altro:
+
+```bash
+python esempio.py
+```
 
 ## Come modellare il tuo caso
 
@@ -388,6 +435,7 @@ contigua fra zone, piu' ricette, collisione meno conservativa).
 ```bash
 python kinematics.py     # autotest della cinematica
 python test_verify.py    # test del verificatore (non richiede OR-Tools)
+python test_excel_io.py  # test della lettura da Excel (non richiede OR-Tools)
 python test_model.py     # test end-to-end del modello (richiede OR-Tools)
 python esempio.py        # risoluzione CP-SAT reale + verifica + grafico
 ```
@@ -404,8 +452,12 @@ I due file di test rispondono a domande opposte e si completano:
   di proposito (collisioni, permanenze, periodicita', fasi verticali, capienza,
   geometrie patologiche). Non richiede OR-Tools: le soluzioni sono costruite a
   mano.
-- `test_model.py` — 7 casi, 16 asserzioni. *Il modello produce soluzioni
+- `test_model.py` — 8 casi, 20 asserzioni. *Il modello produce soluzioni
   fisicamente valide?* Risolve davvero e passa ogni risultato al verificatore.
+- `test_excel_io.py` — 12 casi, 30 asserzioni. *Un file compilato male viene
+  respinto con un messaggio utile?* Quasi tutti i casi sono errori di
+  compilazione: valori mancanti o non numerici, vasche inesistenti o duplicate,
+  righe riordinate, parametri sbagliati, zone incomplete.
 
 In piu', il vincolo di non collisione e' stato validato su uno **sweep di 288
 configurazioni** (numero di mosse, spaziatura da 1,0 a 3,0 m, tempi verticali,

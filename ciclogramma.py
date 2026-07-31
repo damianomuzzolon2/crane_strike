@@ -1,0 +1,150 @@
+"""
+ciclogramma.py
+--------------
+Comando principale: legge la definizione di una linea da un file Excel, calcola
+il ciclogramma, lo verifica e produce i risultati.
+
+    python ciclogramma.py --modello linea.xlsx    crea il file da compilare
+    python ciclogramma.py linea.xlsx              calcola il ciclogramma
+
+Opzioni utili:
+    --grafico FILE.png    dove salvare il ciclogramma (default: accanto
+                          all'input, stesso nome con estensione .png)
+    --cicli N             quanti periodi disegnare (default 2)
+    --niente-grafico      salta il disegno
+    --log                 mostra i tentativi della ricerca automatica
+"""
+
+from __future__ import annotations
+
+import argparse
+import dataclasses
+import os
+import sys
+
+from excel_io import leggi_problema, scrivi_modello
+from model import solve, solve_auto_hoists
+from verify import verify_solution
+
+
+def _argomenti(argv=None):
+    p = argparse.ArgumentParser(
+        prog="ciclogramma",
+        description="Calcola il ciclogramma dei carroponti di una linea "
+        "galvanica descritta in un file Excel.",
+    )
+    p.add_argument("file", help="file Excel con la definizione della linea")
+    p.add_argument(
+        "--modello",
+        action="store_true",
+        help="invece di calcolare, scrive in FILE un modello da compilare",
+    )
+    p.add_argument("--grafico", metavar="FILE.png", help="dove salvare il ciclogramma")
+    p.add_argument(
+        "--cicli", type=int, default=2, help="periodi da disegnare (default 2)"
+    )
+    p.add_argument(
+        "--niente-grafico", action="store_true", help="non disegnare il ciclogramma"
+    )
+    p.add_argument(
+        "--log", action="store_true", help="mostra i tentativi della ricerca automatica"
+    )
+    return p.parse_args(argv)
+
+
+def main(argv=None) -> int:
+    args = _argomenti(argv)
+
+    if args.modello:
+        scrivi_modello(args.file)
+        print(f"Modello scritto in {args.file}")
+        print("Compilalo (parti dal foglio Istruzioni) e poi rilancia:")
+        print(f"    python ciclogramma.py {args.file}")
+        return 0
+
+    if not os.path.exists(args.file):
+        print(f"File non trovato: {args.file}", file=sys.stderr)
+        print(
+            f"Per crearne uno da compilare: "
+            f"python ciclogramma.py --modello {args.file}",
+            file=sys.stderr,
+        )
+        return 2
+
+    try:
+        cfg = leggi_problema(args.file)
+    except ValueError as e:
+        print(e, file=sys.stderr)
+        return 2
+
+    data = cfg.data
+    print(f"Linea letta da {args.file}")
+    print(f"  stazioni: {data.n_stations}   mosse: {data.n_moves}")
+    print(f"  takt time ammesso: [{data.takt_min:.1f}, {data.takt_max:.1f}] s")
+
+    # -- risoluzione -------------------------------------------------------
+    if cfg.zone_manuali is not None:
+        print(
+            f"  zone indicate a mano: "
+            f"{[(z.lo, z.hi) for z in cfg.zone_manuali]}"
+        )
+        solution = solve(data, time_limit_s=cfg.tempo_limite_s, log_search=args.log)
+        zones = cfg.zone_manuali
+        n_hoists = len(zones)
+    else:
+        print("  cerco numero di carroponti e zone migliori...")
+        solution, zones, n_hoists = solve_auto_hoists(
+            data,
+            max_hoists=cfg.max_carroponti,
+            time_limit_per_candidate=cfg.tempo_limite_s,
+            log_progress=args.log,
+        )
+
+    if solution.status not in ("OPTIMAL", "FEASIBLE"):
+        print()
+        print(f"Nessuna soluzione trovata (stato: {solution.status}).")
+        print("Cosa provare:")
+        print("  - allargare la tolleranza sul takt time (takt_min_s / takt_max_s)")
+        print("  - aumentare max_carroponti")
+        print("  - aumentare i posti delle vasche piu' lente")
+        print("  - allungare tempo_limite_per_tentativo_s")
+        for voce in solution.raw.get("hoist_sweep", []):
+            print(f"      {voce}")
+        return 1
+
+    data_finale = dataclasses.replace(data, zones=zones)
+    print()
+    print(f"Carroponti: {n_hoists}   zone: {[(z.lo, z.hi) for z in zones]}")
+    print(f"Takt time: {solution.T:.2f} s")
+
+    # -- verifica indipendente --------------------------------------------
+    report = verify_solution(data_finale, solution)
+    print()
+    print(report.summary())
+    if not report.ok:
+        print("ATTENZIONE: la soluzione NON supera la verifica indipendente.")
+        print("Le violazioni elencate sopra vanno esaminate prima di usare")
+        print("questo ciclogramma su un impianto reale.")
+
+    # -- grafico -----------------------------------------------------------
+    if not args.niente_grafico:
+        import matplotlib
+
+        matplotlib.use("Agg")
+        from plotting import plot_cyclogram
+
+        destinazione = args.grafico or (os.path.splitext(args.file)[0] + ".png")
+        plot_cyclogram(
+            data_finale,
+            solution,
+            n_cycles=args.cicli,
+            title=f"Ciclogramma - {os.path.basename(args.file)}",
+            save_path=destinazione,
+        )
+        print(f"Grafico salvato in {destinazione}")
+
+    return 0 if report.ok else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
