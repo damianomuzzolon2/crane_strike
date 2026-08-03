@@ -32,9 +32,17 @@ periodici. È una scelta valida: il codice qui sotto la usa.
   compilare, scrittura dei risultati in Excel.
 - `ciclogramma.py` — **comando principale**: Excel in ingresso, ciclogramma
   verificato in uscita.
+- `interfaccia.py` — **interfaccia grafica**: apre la linea, calcola o fa
+  disegnare a mano il ciclogramma, verifica e salva. Nessun comando.
+- `manuale.py` — supporto al disegno manuale: il "pettine" dei pezzi e la
+  composizione libera del ciclogramma.
+- `costruisci_exe.py` + `ciclogrammi.spec` — impacchettamento in eseguibile
+  autonomo.
 - `test_verify.py` — test del verificatore, non richiede OR-Tools.
 - `test_model.py` — test end-to-end del modello, richiede OR-Tools.
-- `test_excel_io.py` — test della lettura da Excel, non richiede OR-Tools.
+- `test_excel_io.py` — test della lettura e scrittura Excel, non richiede
+  OR-Tools.
+- `test_interfaccia.py` — test funzionale dell'interfaccia grafica.
 - `esempio.py` — la stessa linea definita in codice, per chi integra il
   solutore in altro.
 
@@ -44,7 +52,56 @@ periodici. È una scelta valida: il codice qui sotto la usa.
 pip install ortools matplotlib openpyxl
 ```
 
-### Uso normale: la linea si descrive in un file Excel
+### Uso normale: l'interfaccia grafica
+
+Doppio clic su **`Ciclogrammi.bat`** (o `python interfaccia.py`).
+
+![interfaccia](doc/interfaccia.png)
+
+Dalla finestra si fa tutto:
+
+| pulsante | cosa fa |
+| --- | --- |
+| `Nuovo modello Excel...` | crea il file da compilare, gia' pieno con una linea di esempio |
+| `Apri linea...` | carica un file Excel |
+| `Calcola automaticamente` | cerca numero di carroponti, zone e takt time migliori |
+| `Disegna a mano` | apre il pettine dei pezzi per comporre il ciclogramma a mano |
+| `Salva risultati...` | scrive l'Excel dei risultati e l'immagine |
+
+Il verdetto della verifica indipendente sta in un banner sempre visibile, e il
+ciclogramma calcolato si puo' **modificare**: trascinando i punti di prelievo
+sul grafico, o cambiando i valori nella scheda *Modifica*. A ogni modifica il
+ciclogramma viene ricostruito e riverificato.
+
+### Su PC senza Python: l'eseguibile
+
+```bash
+python costruisci_exe.py
+```
+
+Produce `dist/Ciclogrammi/` (circa 290 MB): si copia la cartella intera sul PC
+di destinazione e si lancia `Ciclogrammi.exe`. Non serve installare nulla.
+Prima di impacchettare il comando esegue tutti i test — un eseguibile
+costruito su codice rotto e' peggio di nessun eseguibile, perche' l'errore
+lo si scopre in stabilimento.
+
+Sul PC di destinazione conviene fare una prova una volta sola:
+
+```bash
+Ciclogrammi.exe --autotest
+```
+
+Crea un modello, lo rilegge, calcola, verifica e salva, poi scrive un
+resoconto. Che l'eseguibile si costruisca non vuol dire che funzioni:
+OR-Tools porta con se' librerie native, e se non fossero finite dentro il
+pacchetto ce se ne accorgerebbe solo al primo calcolo.
+
+E' una cartella e non un singolo file per una ragione pratica: con OR-Tools e
+matplotlib dentro, un `--onefile` supera i 200 MB e a ogni avvio deve
+scompattarsi in una cartella temporanea, con decine di secondi di attesa
+ogni volta.
+
+### Da riga di comando
 
 ```bash
 python ciclogramma.py --modello linea.xlsx    # crea il file da compilare

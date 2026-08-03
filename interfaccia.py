@@ -17,6 +17,7 @@ eseguibile autonomo.
 from __future__ import annotations
 
 import dataclasses
+import multiprocessing
 import os
 import queue
 import sys
@@ -1425,11 +1426,147 @@ class Applicazione(tk.Tk):
         self._stato(titolo)
 
 
+def autotest(cartella: str | None = None) -> int:
+    """Prova l'installazione da cima a fondo, senza intervento dell'utente:
+    crea un modello, lo rilegge, calcola, verifica, salva.
+
+    Serve soprattutto per l'eseguibile impacchettato: che si costruisca non
+    vuol dire che funzioni -- OR-Tools porta librerie native che potrebbero
+    non essere finite dentro, e ce ne si accorgerebbe solo al primo calcolo,
+    in stabilimento. Da lanciare cosi':
+
+        Ciclogrammi.exe --autotest
+
+    Scrive un resoconto accanto ai file prodotti e restituisce 0 se tutto
+    funziona."""
+    import tempfile
+
+    destinazione = cartella or tempfile.mkdtemp(prefix="ciclogrammi_prova_")
+    os.makedirs(destinazione, exist_ok=True)
+    resoconto = os.path.join(destinazione, "autotest.txt")
+    righe = []
+
+    def annota(testo):
+        """Scrive subito su file, non alla fine. Se il programma si pianta --
+        ed e' proprio quando serve saperlo -- un resoconto accumulato in
+        memoria non arriverebbe mai su disco, e non si saprebbe nemmeno a che
+        punto si e' fermato."""
+        righe.append(testo)
+        try:
+            with open(resoconto, "w", encoding="utf-8") as f:
+                f.write("\n".join(righe) + "\n")
+        except Exception:
+            pass
+
+    esito = 1
+    app = None
+    try:
+        linea = os.path.join(destinazione, "linea_di_prova.xlsx")
+        scrivi_modello(linea)
+        annota(f"modello Excel creato: {linea}")
+
+        annota("apro la finestra...")
+        app = Applicazione(linea)
+        # Senza questo, un errore qualsiasi aprirebbe una finestra modale che
+        # resta li' ad aspettare un clic che nessuno dara' mai: l'autotest
+        # sembrerebbe piantato invece di dire cosa non va.
+        app._errore = lambda titolo, dettaglio: annota(
+            f"ERRORE - {titolo}: {dettaglio}"
+        )
+        annota("finestra aperta")
+        for _ in range(200):
+            app.update()
+            if app.config_linea is not None:
+                break
+        if app.config_linea is None:
+            annota("ERRORE: il file non e' stato caricato")
+            raise RuntimeError("caricamento fallito")
+        annota(f"linea letta: {app.config_linea.data.n_stations} stazioni")
+
+        annota("avvio il calcolo (OR-Tools)...")
+        app._calcola_automatico()
+        import time as _t
+
+        scadenza = _t.time() + 300
+        while app._lavoro_in_corso and _t.time() < scadenza:
+            app.update()
+            _t.sleep(0.02)
+        app.update()
+        if app.soluzione is None:
+            annota("ERRORE: nessuna soluzione (OR-Tools non funziona?)")
+            raise RuntimeError("calcolo fallito")
+        annota(
+            f"calcolo riuscito: {len(app.dati.zones)} carroponti, "
+            f"T = {app.soluzione.T:.2f} s"
+        )
+        annota(
+            "verifica indipendente: "
+            + ("SUPERATA" if app.report.ok else f"{len(app.report.errors)} errori")
+        )
+
+        uscita = os.path.join(destinazione, "risultati.xlsx")
+        scrivi_risultati(uscita, app.dati, app.soluzione, app.report, sorgente=linea)
+        png = os.path.join(destinazione, "ciclogramma.png")
+        app.figura.savefig(png, dpi=110, bbox_inches="tight")
+        annota(f"risultati salvati: {uscita}")
+        annota(f"grafico salvato: {png}")
+
+        if app.report.ok and os.path.getsize(uscita) > 5000:
+            annota("")
+            annota("ESITO: tutto funziona.")
+            esito = 0
+        else:
+            annota("")
+            annota("ESITO: qualcosa non torna, vedi sopra.")
+    except Exception:
+        annota("")
+        annota("ESITO: interrotto da un errore.")
+        annota(traceback.format_exc())
+    finally:
+        if app is not None:
+            try:
+                app.tela.get_tk_widget().destroy()
+            except Exception:
+                pass
+            try:
+                app.destroy()
+            except Exception:
+                pass
+
+    try:
+        print("\n".join(righe))
+    except Exception:
+        pass  # impacchettato senza console non c'e' nessuno stdout
+    return esito
+
+
 def main(argv=None):
+    # Obbligatorio quando il programma e' impacchettato in un eseguibile: senza
+    # questa riga ogni processo figlio rilancia l'eseguibile dall'inizio invece
+    # di eseguire il proprio compito, e il programma si pianta senza dire nulla.
+    multiprocessing.freeze_support()
     argv = sys.argv[1:] if argv is None else argv
+    if argv and argv[0] == "--autotest":
+        return autotest(argv[1] if len(argv) > 1 else None)
     file_iniziale = argv[0] if argv else None
-    app = Applicazione(file_iniziale)
-    app.mainloop()
+    try:
+        app = Applicazione(file_iniziale)
+        app.mainloop()
+    except Exception:
+        # Impacchettato in eseguibile non c'e' nessuna console: senza questo,
+        # un errore all'avvio farebbe sparire il programma senza dire niente.
+        dettaglio = traceback.format_exc()
+        try:
+            radice = tk.Tk()
+            radice.withdraw()
+            messagebox.showerror(
+                f"{TITOLO} - errore imprevisto",
+                "Il programma si e' interrotto.\n\n" + dettaglio,
+            )
+            radice.destroy()
+        except Exception:
+            print(dettaglio, file=sys.stderr)
+        return 1
     return 0
 
 

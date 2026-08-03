@@ -1,0 +1,7 @@
+# Dipendenze per far girare il programma
+ortools>=9.10      # solutore CP-SAT
+matplotlib>=3.8    # disegno del ciclogramma
+openpyxl>=3.1      # lettura e scrittura dei file Excel
+
+# Solo per costruire l'eseguibile autonomo (python costruisci_exe.py)
+pyinstaller>=6.0
