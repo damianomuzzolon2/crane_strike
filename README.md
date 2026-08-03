@@ -8,6 +8,11 @@ che spostano pezzi attraverso una sequenza di vasche, rispettando:
 - velocita'/accelerazione massime diverse per carroponte vuoto e carico,
 - vincoli di non collisione fra carroponti sulla stessa rotaia.
 
+Si usa da **interfaccia grafica**, da riga di comando o come libreria Python.
+La linea si descrive in un file Excel e i risultati escono in Excel. Ogni
+soluzione, calcolata o disegnata a mano, passa da un **verificatore
+indipendente** che la ricontrolla senza usare il solutore.
+
 ## Perche' CP-SAT
 
 Il problema è un **Cyclic Hoist Scheduling Problem (CHSP)**: un problema di
@@ -18,112 +23,230 @@ istante). La Constraint Programming — e nello specifico CP-SAT di OR-Tools —
 per la sua naturalezza nel esprimere vincoli disgiuntivi/di non-overlap e
 periodici. È una scelta valida: il codice qui sotto la usa.
 
-## File
+## I file del progetto
 
-- `kinematics.py` — tempo di percorrenza e profilo di posizione per un moto
-  trapezoidale/triangolare (accelerazione costante, eventuale crociera,
-  decelerazione costante).
-- `model.py` — strutture dati di input, costruzione del modello CP-SAT e
-  risoluzione, estrazione della traiettoria di ciascun carroponte.
-- `plotting.py` — disegna il ciclogramma (posizione vs tempo).
-- `verify.py` — **verificatore indipendente**: ricontrolla in Python puro
-  (senza CP-SAT) che la soluzione trovata sia davvero valida.
-- `excel_io.py` — lettura della linea da file Excel, generazione del modello da
-  compilare, scrittura dei risultati in Excel.
-- `ciclogramma.py` — **comando principale**: Excel in ingresso, ciclogramma
-  verificato in uscita.
-- `interfaccia.py` — **interfaccia grafica**: apre la linea, calcola o fa
-  disegnare a mano il ciclogramma, verifica e salva. Nessun comando.
-- `manuale.py` — supporto al disegno manuale: il "pettine" dei pezzi e la
-  composizione libera del ciclogramma.
-- `costruisci_exe.py` + `ciclogrammi.spec` — impacchettamento in eseguibile
-  autonomo.
-- `test_verify.py` — test del verificatore, non richiede OR-Tools.
-- `test_model.py` — test end-to-end del modello, richiede OR-Tools.
-- `test_excel_io.py` — test della lettura e scrittura Excel, non richiede
-  OR-Tools.
-- `test_interfaccia.py` — test funzionale dell'interfaccia grafica.
-- `esempio.py` — la stessa linea definita in codice, per chi integra il
-  solutore in altro.
+Quattordici file Python, divisi per ruolo. Le dipendenze vanno in una
+direzione sola — interfaccia -> motore -> cinematica — e mai al contrario:
+`model.py` non sa che esiste un'interfaccia, e `kinematics.py` non sa che
+esiste un ciclogramma. E' quello che permette di provare il motore senza
+aprire una finestra, e la cinematica senza avere OR-Tools installato.
+
+```text
+  interfaccia.py      ciclogramma.py      esempio.py        <- si lanciano
+        |                   |                  |
+        +-------------------+------------------+
+        |            |            |            |
+    excel_io.py  manuale.py  plotting.py   verify.py        <- contorno
+        |            |            |            |
+        +------------+-----+------+------------+
+                           |
+                       model.py                             <- motore (CP-SAT)
+                           |
+                     kinematics.py                          <- fisica
+```
+
+### Motore di calcolo
+
+| file | righe | contenuto |
+| --- | ---: | --- |
+| `kinematics.py` | 130 | La fisica del movimento, in metri e secondi. `travel_time()` da' il tempo per percorrere una distanza con profilo trapezoidale o triangolare; `position_profile()` la posizione istante per istante; `profile_breakpoints()` gli spigoli della curva, che servono al verificatore per limitare in modo rigoroso l'errore di campionamento. Non sa nulla del resto del progetto. |
+| `model.py` | 1711 | Il cuore. Contiene le **strutture dati** (`Tank`, `StationSpec`, `HoistZone`, `ProblemData`, `Segment`, `Solution`), la costruzione e risoluzione del **modello CP-SAT** (`solve`), la scelta automatica di zone e numero di carroponti (`solve_auto_zones`, `solve_auto_hoists`), e la costruzione di un ciclogramma **senza risolvere** a partire dai suoi gradi di liberta' (`build_solution`, `estrai_gradi_di_liberta`) — quest'ultima e' cio' che rende possibile l'editor. |
+| `verify.py` | 980 | Il **verificatore indipendente**: `verify_solution()` ricontrolla una soluzione in Python puro, senza CP-SAT, campionando le posizioni reali dei carroponti. Restituisce un `VerificationReport` con l'elenco delle `Violation` divise per gravita'. E' la rete di sicurezza contro gli errori nella formulazione del modello. |
+| `manuale.py` | 230 | Supporto al **disegno a mano**: il "pettine" dei pezzi (`pettine`, `catena_pezzo`), la composizione libera del ciclogramma (`componi`) e il controllo che i carroponti non si scavalchino sulla rotaia (`perche_non_va`). |
+
+### Ingresso, uscita, disegno
+
+| file | righe | contenuto |
+| --- | ---: | --- |
+| `excel_io.py` | 1099 | Tutto l'Excel: `scrivi_modello()` genera il file da compilare, `leggi_problema()` lo rilegge raccogliendo **tutti** gli errori di compilazione con foglio e cella, `scrivi_risultati()` produce il file dei risultati a quattro fogli. |
+| `plotting.py` | 156 | `plot_cyclogram()`: disegna il ciclogramma (posizione lungo la rotaia contro tempo) con il profilo cinematico vero, non con segmenti diritti. |
+
+### Programmi da lanciare
+
+| file | righe | contenuto |
+| --- | ---: | --- |
+| `interfaccia.py` | 1574 | L'**interfaccia grafica** (tkinter). La classe `Applicazione` e' tutta la finestra: caricamento, calcolo in background, grafico incorporato, editor dei punti, disegno manuale, verifica e salvataggio. `autotest()` prova l'installazione da sola. E' il programma che usa un utente normale. |
+| `ciclogramma.py` | 170 | Lo stesso lavoro da **riga di comando**, per chi preferisce il terminale o vuole automatizzare. |
+| `esempio.py` | 195 | La linea di esempio definita **in codice** invece che in Excel, per chi vuole integrare il solutore in qualcos'altro. |
+| `costruisci_exe.py` | 119 | Costruisce l'**eseguibile autonomo** con PyInstaller. Vedi sotto. |
+| `ciclogrammi.spec` | — | La ricetta per PyInstaller: cosa includere, cosa escludere, come impacchettare. Non si lancia a mano, la usa `costruisci_exe.py`. |
+| `Ciclogrammi.bat` | — | Avvia l'interfaccia con un doppio clic, senza aprire il terminale. |
+
+### Test
+
+Ogni file di test si lancia da solo (`python test_xxx.py`), stampa cosa ha
+provato e restituisce un codice d'uscita diverso da zero se qualcosa non va.
+Non serve pytest.
+
+| file | righe | cosa verifica |
+| --- | ---: | --- |
+| `test_verify.py` | 831 | **Il verificatore.** Risponde a "chi verifica il verificatore?": venti casi, di cui uno solo corretto e tutti gli altri rotti di proposito (collisioni, permanenze fuori tolleranza, periodicita' incoerente, geometrie patologiche, capienze). Un controllore che non segnala mai nulla e' inutile, quindi ogni controllo ha un caso che DEVE farlo scattare. Non richiede OR-Tools: le soluzioni sono costruite a mano. |
+| `test_model.py` | 393 | **Il modello CP-SAT.** Risolve davvero e passa ogni soluzione al verificatore: vasche ravvicinate, tre carroponti, capienza, tempi verticali, e la fedelta' della ricostruzione di una soluzione dai suoi gradi di liberta'. Richiede OR-Tools. |
+| `test_excel_io.py` | 577 | **La lettura e la scrittura Excel.** Quasi tutti i casi sono file compilati male: valori mancanti o non numerici, vasche inesistenti o duplicate, righe riordinate, parametri sbagliati. Piu' la struttura del file dei risultati. Non richiede OR-Tools. |
+| `test_interfaccia.py` | 530 | **Le funzioni dell'interfaccia grafica.** La finestra viene costruita davvero e pilotata da codice — si "premono" i pulsanti chiamando i metodi e si fa girare il ciclo degli eventi con `update()` invece di `mainloop()`. Verifica che i pulsanti si abilitino al momento giusto, che il calcolo in background consegni il risultato, che le modifiche vengano riverificate, che una modifica impossibile venga rifiutata senza schiantarsi, e che il disegno manuale produca il pettine giusto. Richiede OR-Tools e un ambiente grafico. |
+
+`kinematics.py` ha in fondo un autotest che si lancia allo stesso modo
+(`python kinematics.py`).
 
 ## Installazione ed esecuzione
 
 ```bash
-pip install ortools matplotlib openpyxl
+pip install -r requirements.txt
 ```
 
-### Uso normale: l'interfaccia grafica
+Servono `ortools` (il solutore), `matplotlib` (il disegno) e `openpyxl` (i file
+Excel). `pyinstaller` serve solo a chi deve costruire l'eseguibile.
 
-Doppio clic su **`Ciclogrammi.bat`** (o `python interfaccia.py`).
+## Come si usa l'interfaccia
+
+Doppio clic su **`Ciclogrammi.bat`** (oppure `python interfaccia.py`, oppure
+`Ciclogrammi.exe` se si usa la versione impacchettata).
 
 ![interfaccia](doc/interfaccia.png)
 
-Dalla finestra si fa tutto:
+La finestra e' divisa in tre: la **barra dei comandi** in alto, il
+**ciclogramma** a sinistra, e a destra un **verdetto** sempre in vista con
+sotto quattro schede. In basso una barra di stato che dice cosa sta facendo il
+programma.
+
+### Il giro completo, in breve
+
+1. `Nuovo modello Excel...` — se non hai ancora un file, questo te lo crea gia'
+   compilato con una linea di esempio.
+2. Compili il file (vedi *Come modellare il tuo caso*, piu' sotto).
+3. `Apri linea...` — lo carichi.
+4. `Calcola automaticamente` oppure `Disegna a mano`.
+5. Guardi il verdetto, eventualmente ritocchi.
+6. `Salva risultati...` — esce l'Excel dei risultati e l'immagine.
+
+### La barra dei comandi
 
 | pulsante | cosa fa |
 | --- | --- |
-| `Nuovo modello Excel...` | crea il file da compilare, gia' pieno con una linea di esempio |
-| `Apri linea...` | carica un file Excel |
-| `Calcola automaticamente` | cerca numero di carroponti, zone e takt time migliori |
-| `Disegna a mano` | apre il pettine dei pezzi per comporre il ciclogramma a mano |
-| `Salva risultati...` | scrive l'Excel dei risultati e l'immagine |
+| `Apri linea...` | Carica un file Excel con la definizione della linea. Se il file e' compilato male non succede nulla di brutto: compare una finestra con **tutti** gli errori trovati, con foglio e cella. |
+| `Nuovo modello Excel...` | Crea il file da compilare, gia' pieno con una linea di zincatura d'esempio, e chiede se aprirlo subito. E' il modo consigliato di cominciare: si parte da qualcosa che funziona e lo si modifica. |
+| `Calcola automaticamente` | Cerca il numero minimo di carroponti, la suddivisione migliore della linea e il takt time piu' basso. Puo' durare da qualche secondo a qualche minuto: la barra in basso a destra si muove e i pulsanti restano disabilitati finche' non ha finito. La finestra **non si blocca**. |
+| `Disegna a mano` | Passa alla composizione manuale (vedi sotto). |
+| `Salva risultati...` | Scrive l'Excel dei risultati e, accanto, l'immagine del ciclogramma. Si abilita solo quando c'e' qualcosa da salvare. |
 
-Il verdetto della verifica indipendente sta in un banner sempre visibile, e il
-ciclogramma calcolato si puo' **modificare**: trascinando i punti di prelievo
-sul grafico, o cambiando i valori nella scheda *Modifica*. A ogni modifica il
-ciclogramma viene ricostruito e riverificato.
+### Il verdetto
 
-### Su PC senza Python: l'eseguibile
+La striscia colorata in alto a destra e' l'informazione piu' importante, e per
+questo non finisce mai dentro una scheda:
 
-```bash
-python costruisci_exe.py
+- **verde** — `VERIFICA SUPERATA`, con takt time e pezzi/ora. Il ciclogramma e'
+  fisicamente valido e rispetta tutte le tolleranze dichiarate.
+- **rosso** — quanti errori sono stati trovati. Il dettaglio e' nella scheda
+  *Verifica*.
+- **azzurro o arancio** — sei in disegno manuale, i controlli sono sospesi.
+
+### Le quattro schede
+
+**Riepilogo** — takt time, produttivita' in pezzi/ora, quanti carroponti e che
+tratto di linea serve ciascuno, distanza minima raggiunta fra i carri contro
+quella richiesta.
+
+**Modifica** — per ritoccare un ciclogramma gia' calcolato. Vedi sotto.
+
+**Disegno** — per comporlo a mano. Vedi sotto.
+
+**Verifica** — l'elenco dei rilievi del verificatore indipendente, colorati per
+gravita': rosso gli errori, arancio gli avvisi, grigio le note. Le descrizioni
+sono lunghe: **clic su una riga** per leggerla per intero.
+
+La differenza fra i tre livelli conta. Un **errore** vuol dire che il
+ciclogramma non e' utilizzabile (una collisione, una permanenza fuori
+tolleranza). Un **avviso** segnala qualcosa che il modello non sa vincolare e
+che va guardato a mano. Una **nota** e' informativa: per esempio che una vasca
+lavora con due pezzi dentro contemporaneamente, il che e' normale se e' a due
+posti.
+
+### Modificare un ciclogramma calcolato
+
+Un ciclogramma ha pochissimi gradi di liberta' reali: il **takt time**,
+l'**istante di prelievo** di ogni mossa, quanti **periodi interi** il pezzo
+resta in vasca oltre il minimo, e **quale carroponte** fa cosa. Tutto il resto
+— traiettorie, tempi assoluti, ordine di visita — e' conseguenza. La scheda
+*Modifica* espone esattamente quelli, in tre modi:
+
+- **Trascinando sul grafico.** Prendi un punto di prelievo — l'inizio di un
+  tratto colorato — e spostalo a destra o a sinistra. Mentre trascini, una guida
+  arancione mostra dove finira' e la barra di stato dice di quanti secondi lo
+  stai spostando.
+- **Dalla tabella delle mosse.** Doppio clic sulla colonna `prelievo [s]` per
+  scrivere l'istante esatto, o sulla colonna `giri` per far restare il pezzo in
+  vasca un takt in piu'.
+- **Takt time e numero di carroponti**, in alto nella scheda.
+
+**A ogni modifica il ciclogramma viene ricostruito da capo e riverificato**: il
+verdetto e l'elenco dei rilievi si aggiornano subito. Se una modifica rendesse
+il ciclogramma impossibile — per esempio il carroponte non farebbe in tempo ad
+arrivare — viene **rifiutata**, lo stato torna com'era e la barra in basso
+spiega perche'. Meglio di un grafico che sparisce.
+
+`Annulla modifica` torna indietro di un passo, e si puo' premere piu' volte.
+
+`Rifai il calcolo automatico` ricalcola tutto da zero: **le modifiche fatte a
+mano vengono perse.**
+
+Attenzione a `Carroponti`: cambiarlo non e' una modifica come le altre. Le fasi
+di prelievo erano state scelte per un'altra suddivisione della linea e quasi
+mai restano realizzabili con una diversa, quindi il programma **ricalcola** la
+miglior soluzione per quel numero di carroponti.
+
+### Comporre un ciclogramma a mano
+
+`Disegna a mano` apre il **pettine**: dieci scalinate grigie, una per ogni pezzo
+in lavorazione, distanziate esattamente di un takt time. Ogni scalinata mostra
+le soste in vasca (tratti orizzontali) e i trasporti (tratti che salgono).
+
+![disegno manuale](doc/disegno-manuale.png)
+
+E' il metodo con cui i ciclogrammi si tracciano a mano da sempre: prima il
+pettine dei pezzi, poi si decide quali trasporti fa ciascun carroponte.
+
+- **Clic su un trasporto** per assegnarlo al carroponte attivo (si sceglie con
+  il menu `attivo`). Il trasporto assegnato prende il colore del carroponte, e
+  compaiono le linee tratteggiate dei suoi rientri a vuoto.
+- **Doppio clic su un tempo in vasca** per cambiarlo: le scalinate si spostano
+  da quel punto in poi, e magari a quel punto conviene assegnare diversamente.
+  La tabella mostra accanto il minimo e il massimo di processo, ma **non
+  impedisce** di uscirne.
+- **Doppio clic su una riga della tabella `Assegnazione`** per passare il
+  trasporto al carroponte successivo.
+
+**Durante il disegno i controlli sono sospesi.** Si compone liberamente, e anche
+un ciclogramma impossibile viene disegnato lo stesso: i tratti che il carroponte
+non farebbe in tempo a percorrere sono **in rosso spesso** sul grafico e
+descritti uno per uno nella scheda *Riepilogo*, per esempio cosi':
+
+```text
+dalla mossa 3 non si fa in tempo ad arrivare alla mossa 5: il carroponte
+sarebbe pronto a 140,1 s ma il prelievo e' a 98,1 s, 42,0 s troppo tardi
 ```
 
-Produce `dist/Ciclogrammi/` (circa 290 MB): si copia la cartella intera sul PC
-di destinazione e si lancia `Ciclogrammi.exe`. Non serve installare nulla.
-Prima di impacchettare il comando esegue tutti i test — un eseguibile
-costruito su codice rotto e' peggio di nessun eseguibile, perche' l'errore
-lo si scopre in stabilimento.
+Il report completo — permanenze, collisioni, capienze, takt time — arriva
+quando si preme `Verifica adesso`.
 
-Sul PC di destinazione conviene fare una prova una volta sola:
+`Torna all'automatico` abbandona il disegno e fa ricalcolare tutto al solutore.
 
-```bash
-Ciclogrammi.exe --autotest
-```
+L'unica cosa che resta impedita e' assegnare i trasporti in modo che due
+carroponti debbano **scavalcarsi** sulla rotaia. Non e' una regola del modello:
+e' la rotaia. Il messaggio lo dice, e il doppio clic sulla tabella propone solo
+i carroponti che possono davvero prendersi quella mossa.
 
-Crea un modello, lo rilegge, calcola, verifica e salva, poi scrive un
-resoconto. Che l'eseguibile si costruisca non vuol dire che funzioni:
-OR-Tools porta con se' librerie native, e se non fossero finite dentro il
-pacchetto ce se ne accorgerebbe solo al primo calcolo.
+### Se il calcolo non trova niente
 
-E' una cartella e non un singolo file per una ragione pratica: con OR-Tools e
-matplotlib dentro, un `--onefile` supera i 200 MB e a ogni avvio deve
-scompattarsi in una cartella temporanea, con decine di secondi di attesa
-ogni volta.
+Capita, ed e' un'informazione: vuol dire che con i dati dati la linea non sta in
+piedi. Il riepilogo elenca cosa provare — allargare la tolleranza sul takt time,
+aumentare il numero massimo di carroponti, aggiungere posti alle vasche piu'
+lente, allungare il tempo limite di calcolo. In alternativa `Disegna a mano`, e
+si guarda dove il conto non torna: li' non c'e' niente da trovare, si vede.
 
-### Da riga di comando
+## Cosa produce
 
-```bash
-python ciclogramma.py --modello linea.xlsx    # crea il file da compilare
-# ... compili linea.xlsx ...
-python ciclogramma.py linea.xlsx              # calcola il ciclogramma
-```
-
-Il modello generato e' gia' compilato con una linea di zincatura d'esempio, in
-modo che si possa lanciare subito e poi modificarlo pezzo per pezzo. Ha cinque
-fogli:
-
-| foglio | contenuto |
-| --- | --- |
-| `Istruzioni` | come compilare gli altri fogli |
-| `Vasche` | id, posizione lungo la rotaia, numero di posti, corsa verticale, sgocciolamento |
-| `Percorso` | sequenza di vasche attraversate, con le permanenze |
-| `Parametri` | takt time, cinematiche, ingombri, tempi verticali, opzioni |
-| `Zone` | facoltativo: suddivisione manuale delle mosse fra i carroponti. **Lasciandolo vuoto** numero di carroponti e zone vengono scelti automaticamente |
-
-### Cosa produce
-
-Accanto al file di ingresso:
+Sia l'interfaccia sia la riga di comando producono, accanto al file di
+ingresso:
 
 - **`linea_risultati.xlsx`** — quattro fogli:
 
@@ -152,6 +275,28 @@ Il file 'linea.xlsx' non e' compilato correttamente:
 
 I numeri scritti con la virgola decimale (`2,5`) vengono accettati.
 
+## Altri modi di usarlo
+
+### Da riga di comando
+
+```bash
+python ciclogramma.py --modello linea.xlsx    # crea il file da compilare
+# ... compili linea.xlsx ...
+python ciclogramma.py linea.xlsx              # calcola il ciclogramma
+```
+
+Il modello generato e' gia' compilato con una linea di zincatura d'esempio, in
+modo che si possa lanciare subito e poi modificarlo pezzo per pezzo. Ha cinque
+fogli:
+
+| foglio | contenuto |
+| --- | --- |
+| `Istruzioni` | come compilare gli altri fogli |
+| `Vasche` | id, posizione lungo la rotaia, numero di posti, corsa verticale, sgocciolamento |
+| `Percorso` | sequenza di vasche attraversate, con le permanenze |
+| `Parametri` | takt time, cinematiche, ingombri, tempi verticali, opzioni |
+| `Zone` | facoltativo: suddivisione manuale delle mosse fra i carroponti. **Lasciandolo vuoto** numero di carroponti e zone vengono scelti automaticamente |
+
 ### Uso da Python
 
 `esempio.py` mostra come definire la stessa linea direttamente in codice e
@@ -160,6 +305,65 @@ richiamare il solutore, se serve integrarlo in qualcos'altro:
 ```bash
 python esempio.py
 ```
+
+## Creare l'eseguibile per PC senza Python
+
+Serve PyInstaller una volta sola:
+
+```bash
+pip install pyinstaller
+```
+
+Poi, dalla cartella del progetto, **un comando**:
+
+```bash
+python costruisci_exe.py
+```
+
+Ci vogliono un paio di minuti. Al termine si trova tutto in
+`dist/Ciclogrammi/`, circa 290 MB: si copia **la cartella intera** sul PC di
+destinazione e si lancia `Ciclogrammi.exe`. Non serve installare ne' Python
+ne' altro.
+
+Con `--con-test` il comando esegue prima l'intera suite di test, e non
+impacchetta se qualcosa non passa. Non e' obbligatorio, ma e' l'unico modo per
+non scoprire un problema in stabilimento.
+
+### Verificare che funzioni davvero
+
+Sul PC di destinazione, una volta sola:
+
+```bash
+Ciclogrammi.exe --autotest
+```
+
+Crea un file di esempio, lo rilegge, calcola il ciclogramma, lo verifica, salva
+i risultati e scrive un `autotest.txt` con l'esito. Trenta secondi.
+
+Non e' una formalita': **che l'eseguibile si costruisca non vuol dire che
+funzioni.** Durante la messa a punto il pacchetto veniva creato senza il
+minimo errore, si apriva regolarmente, e poi moriva al primo calcolo con
+`No module named 'pandas'` — perche' OR-Tools importa pandas internamente e
+lo spec lo escludeva come alleggerimento. Un problema del genere, scoperto
+davanti al cliente, e' un'altra faccenda.
+
+### Perche' una cartella e non un singolo file
+
+Con OR-Tools e matplotlib dentro, un `--onefile` supera i 280 MB e a **ogni
+avvio** deve scompattarsi in una cartella temporanea: decine di secondi di
+attesa tutte le volte. La cartella si copia tale e quale e parte subito.
+
+### Se serve rimettere le mani nello spec
+
+`ciclogrammi.spec` e' la ricetta per PyInstaller. Due punti delicati:
+
+- **`excludes`**: qui si tolgono i pacchetti inutili per alleggerire. Attenzione
+  a `pandas`: il progetto non lo usa, ma OR-Tools si', quindi non va escluso.
+  Vale la regola generale che un pacchetto va tolto solo se si e' sicuri che
+  nessuna dipendenza lo importi.
+- **`console=False`**: niente finestra nera all'avvio. Come contropartita, un
+  errore all'avvio sarebbe invisibile, quindi `interfaccia.py` lo intercetta e
+  lo mostra in una finestra di dialogo.
 
 ## Come modellare il tuo caso
 
@@ -572,33 +776,42 @@ contigua fra zone, piu' ricette, collisione meno conservativa).
 ## Nota sui test effettuati
 
 ```bash
-python kinematics.py     # autotest della cinematica
-python test_verify.py    # test del verificatore (non richiede OR-Tools)
-python test_excel_io.py  # test della lettura da Excel (non richiede OR-Tools)
-python test_model.py     # test end-to-end del modello (richiede OR-Tools)
-python esempio.py        # risoluzione CP-SAT reale + verifica + grafico
+python kinematics.py        # autotest della cinematica
+python test_verify.py       # il verificatore              (no OR-Tools)
+python test_excel_io.py     # lettura e scrittura Excel    (no OR-Tools)
+python test_model.py        # il modello CP-SAT            (serve OR-Tools)
+python test_interfaccia.py  # l'interfaccia grafica        (serve OR-Tools)
+python esempio.py           # risoluzione reale + verifica + grafico
 ```
 
+Ognuno stampa cosa ha provato e finisce con `RISULTATO: n ok, m falliti`.
+Nessuna dipendenza da pytest. Stato attuale: **65, 54, 24 e 50 asserzioni,
+zero fallimenti**.
+
 **La risoluzione CP-SAT e' eseguita e verificata end-to-end.** Sull'esempio
-fornito (con i tempi verticali attivi) il solver trova `T = 110 s` con 2
-carroponti, separazione minima 3,50 m contro 1,80 m richiesti, e il
-verificatore indipendente conferma la soluzione senza errori.
+fornito il solver trova `T = 131,88 s` con 2 carroponti, separazione minima
+3,50 m contro 1,80 m richiesti, e il verificatore indipendente conferma la
+soluzione senza errori.
 
-I due file di test rispondono a domande opposte e si completano:
+I quattro file rispondono a domande diverse e si completano:
 
-- `test_verify.py` — 20 casi, 64 asserzioni. *Il verificatore trova davvero
-  quello che deve trovare?* Uno solo dei casi e' corretto, gli altri sono rotti
-  di proposito (collisioni, permanenze, periodicita', fasi verticali, capienza,
-  geometrie patologiche). Non richiede OR-Tools: le soluzioni sono costruite a
-  mano.
-- `test_model.py` — 8 casi, 20 asserzioni. *Il modello produce soluzioni
-  fisicamente valide?* Risolve davvero e passa ogni risultato al verificatore.
-- `test_excel_io.py` — 18 casi, 54 asserzioni. *Un file compilato male viene
-  respinto con un messaggio utile, e i risultati escono corretti?* In ingresso:
-  valori mancanti o non numerici, vasche inesistenti o duplicate, righe
-  riordinate, parametri sbagliati, zone incomplete. In uscita: struttura dei
-  fogli, corrispondenza fra tratti e vasche, somma delle durate pari al takt
-  time, permanenze entro tolleranza, rilievi riportati.
+- `test_verify.py` — 20 casi. *Il verificatore trova davvero quello che deve
+  trovare?* Uno solo dei casi e' corretto, gli altri sono rotti di proposito
+  (collisioni, permanenze, periodicita', fasi verticali, capienza, geometrie
+  patologiche). Le soluzioni sono costruite a mano, quindi non serve OR-Tools.
+- `test_model.py` — 9 casi. *Il modello produce soluzioni fisicamente valide?*
+  Risolve davvero e passa ogni risultato al verificatore.
+- `test_excel_io.py` — 18 casi. *Un file compilato male viene respinto con un
+  messaggio utile, e i risultati escono corretti?* In ingresso: valori mancanti
+  o non numerici, vasche inesistenti o duplicate, righe riordinate, parametri
+  sbagliati, zone incomplete. In uscita: struttura dei fogli, corrispondenza
+  fra tratti e vasche, somma delle durate pari al takt time.
+- `test_interfaccia.py` — 8 casi. *L'interfaccia si comporta come deve?* La
+  finestra viene costruita davvero e pilotata da codice. E' l'unico modo per
+  accorgersi che un pulsante e' rimasto disabilitato, che il calcolo in
+  background non consegna mai il risultato, o che una modifica impossibile
+  manda tutto per aria invece di essere rifiutata: cose che un test sulle sole
+  funzioni di calcolo non vedrebbe.
 
 In piu', il vincolo di non collisione e' stato validato su uno **sweep di 288
 configurazioni** (numero di mosse, spaziatura da 1,0 a 3,0 m, tempi verticali,

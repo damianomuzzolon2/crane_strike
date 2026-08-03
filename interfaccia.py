@@ -306,7 +306,9 @@ class Applicazione(tk.Tk):
         self.btn_annulla.pack(side=tk.LEFT)
         self.btn_riottimizza = ttk.Button(
             pulsanti,
-            text="Ricalcola da qui",
+            # non "da qui": il solutore riparte da zero e le modifiche fatte a
+            # mano vengono perse. L'etichetta deve dirlo.
+            text="Rifai il calcolo automatico",
             command=self._calcola_automatico,
         )
         self.btn_riottimizza.pack(side=tk.LEFT, padx=(6, 0))
