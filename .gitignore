@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+*.pyc
+
+# Impacchettamento con PyInstaller
+build/
+dist/
+
+# Risultati prodotti dai programmi
+*_risultati.xlsx
+ciclogramma.png
+linea.png
+template.png
+disegno-manuale.png
+interfaccia.png
+
+# Claude
+.claude/
