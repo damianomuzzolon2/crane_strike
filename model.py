@@ -1146,8 +1146,17 @@ def build_solution(
     for k in range(1, data.n_moves):
         arrivo = actual_time[k - 1] + data.loaded_leg_seconds(k - 1)
         minimo = arrivo + data.route[k].dwell_min
-        # si sale di periodi interi: la FASE resta quella scelta dall'utente
-        n_giri = math.ceil((minimo - actual_time[k]) / T) if actual_time[k] < minimo else 0
+        # Si sale di periodi interi: la FASE resta quella scelta dall'utente.
+        # La tolleranza sul ceil non e' un dettaglio. Quando la permanenza
+        # cade esattamente sul minimo -- il caso tipico di una soluzione
+        # ottima -- basta uno scarto infinitesimo per far scattare un periodo
+        # di troppo, e la permanenza salta di T secondi interi. Lo scarto c'e'
+        # sempre: le fasi che arrivano dal solutore sono arrotondate al tick,
+        # mentre qui i tempi di percorrenza sono ricalcolati in virgola
+        # mobile. La tolleranza e' quindi quella del progetto (eps_seconds),
+        # non un epsilon numerico.
+        giri = (minimo - actual_time[k]) / T
+        n_giri = max(0, math.ceil(giri - data.eps_seconds / T))
         actual_time[k] += (n_giri + extra_periods.get(k, 0)) * T
 
     # -- per ciascuna zona: ordine di visita e traiettoria ------------------
@@ -1179,6 +1188,41 @@ def build_solution(
         plans=plans,
         actual_time=actual_time,
     )
+
+
+def estrai_gradi_di_liberta(
+    data: ProblemData, solution: Solution
+) -> tuple[float, dict[int, float], dict[int, int]]:
+    """Estrae da una soluzione i tre soli valori che servono a ricostruirla:
+    takt time, fase di prelievo di ogni mossa, e periodi in piu' rispetto al
+    minimo trascorsi in ciascuna vasca.
+
+    I periodi in piu' NON sono deducibili dalle fasi: il solutore puo'
+    benissimo scegliere di lasciare il pezzo in vasca un takt in piu' del
+    necessario, e la fase resta la stessa. Senza questo terzo valore, la
+    ricostruzione tornerebbe al minimo e cambierebbe le permanenze.
+
+    Il risultato e' pensato per essere passato a build_solution: e' lo stato
+    modificabile di un ciclogramma.
+    """
+    if not solution.plans or not solution.actual_time:
+        raise ValueError(
+            "la soluzione non porta con se' i valori risolti: impossibile "
+            "estrarne i gradi di liberta'"
+        )
+    T = solution.T
+    local_pick = {k: v for p in solution.plans for k, v in p.local_pick.items()}
+    at = solution.actual_time
+    extra: dict[int, int] = {}
+    for k in range(1, data.n_moves):
+        arrivo = at[k - 1] + data.loaded_leg_seconds(k - 1)
+        minimo = arrivo + data.route[k].dwell_min
+        base = local_pick[k]
+        n_min = max(0, math.ceil((minimo - base) / T - data.eps_seconds / T))
+        n_reale = round((at[k] - base) / T)
+        if n_reale > n_min:
+            extra[k] = n_reale - n_min
+    return T, local_pick, extra
 
 
 def proposta_semplice(

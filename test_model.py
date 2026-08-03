@@ -22,6 +22,8 @@ from model import (
     ProblemData,
     StationSpec,
     Tank,
+    build_solution,
+    estrai_gradi_di_liberta,
     solve,
     solve_auto_hoists,
 )
@@ -311,6 +313,62 @@ def test_vasca_ripetuta():
     )
 
 
+def test_ricostruzione_fedele():
+    print("\n[9] ricostruire una soluzione dalle sole fasi la lascia identica")
+    # E' la fondazione dell'editor: l'utente modifica le fasi di prelievo e il
+    # ciclogramma viene rimesso insieme da li'. Se il solo rimetterlo insieme
+    # -- senza toccare nulla -- gia' cambiasse le permanenze, ogni modifica
+    # partirebbe da una base sbagliata.
+    for spacing, zone in ((2.5, [HoistZone(0, 1), HoistZone(2, 3)]), (1.5, None)):
+        data = linea(
+            4,
+            spacing,
+            zone or [HoistZone(0, 3)],
+            dwell=(30, 200),
+            capacity=3,
+            takt_min=20.0,
+            takt_max=120.0,
+            lift_height=0.6,
+            kin_lift_empty=Kinematics(v_max=0.5, a_max=0.8),
+            kin_lift_loaded=Kinematics(v_max=0.3, a_max=0.5),
+            engage_time=2.0,
+            disengage_time=1.0,
+            drain_time=3.0,
+        )
+        sol, r = risolvi_e_verifica(data, f"base spaziatura {spacing}")
+        if r is None:
+            check(False, f"spaziatura {spacing}: {sol.status}, niente da ricostruire")
+            continue
+        T, fasi, giri = estrai_gradi_di_liberta(data, sol)
+        rifatta = build_solution(data, T, fasi, extra_periods=giri)
+        r2 = verify_solution(data, rifatta)
+
+        def permanenze(s):
+            return [
+                round(
+                    s.actual_time[k]
+                    - (s.actual_time[k - 1] + data.loaded_leg_seconds(k - 1)),
+                    2,
+                )
+                for k in range(1, data.n_moves)
+            ]
+
+        check(
+            permanenze(rifatta) == permanenze(sol),
+            f"spaziatura {spacing}: permanenze identiche {permanenze(sol)}",
+        )
+        # con un carroponte solo la separazione e' infinita: confrontarla con
+        # una differenza darebbe nan, che non e' ne' uguale ne' diverso
+        stessa_sep = r2.min_separation == r.min_separation or (
+            abs(r2.min_separation - r.min_separation) < 1e-6
+        )
+        check(
+            r2.ok == r.ok and stessa_sep,
+            f"spaziatura {spacing}: stesso verdetto e stessa separazione "
+            f"({r2.min_separation:.3f} m)",
+        )
+
+
 def main():
     print("=" * 72)
     print("TEST END-TO-END DEL MODELLO (richiede OR-Tools)")
@@ -324,6 +382,7 @@ def main():
     test_clearance_steps()
     test_scelta_automatica()
     test_vasca_ripetuta()
+    test_ricostruzione_fedele()
     print("\n" + "=" * 72)
     print(f"RISULTATO: {_n_pass} ok, {_n_fail} falliti  ({time.perf_counter() - t0:.0f}s)")
     print("=" * 72)

@@ -161,6 +161,185 @@ def test_calcolo_automatico(percorso_linea):
         chiudi(app)
 
 
+def _app_risolta(percorso_linea):
+    """Finestra con la linea gia' risolta automaticamente, pronta per le
+    prove di modifica."""
+    from interfaccia import Applicazione
+
+    app = Applicazione(percorso_linea)
+    for _ in range(50):
+        app.update()
+        if app.config_linea is not None:
+            break
+        time.sleep(0.02)
+    app._calcola_automatico()
+    pompa(app)
+    return app
+
+
+def test_modifica_prelievo(percorso_linea):
+    print("\n[4] modifica di un punto di prelievo")
+    app = _app_risolta(percorso_linea)
+    try:
+        check(
+            len(app.fasi) == app.dati.n_moves and app.T_corrente is not None,
+            f"lo stato modificabile e' stato estratto ({len(app.fasi)} fasi)",
+        )
+        check(
+            len(app.tabella_mosse.get_children()) == app.dati.n_moves,
+            "la tabella delle mosse elenca tutte le mosse",
+        )
+        def permanenze():
+            s, d = app.soluzione, app.dati
+            return [
+                round(
+                    s.actual_time[k]
+                    - (s.actual_time[k - 1] + d.loaded_leg_seconds(k - 1)),
+                    2,
+                )
+                for k in range(1, d.n_moves)
+            ]
+
+        prima_ok = app.report.ok
+        permanenze_prima = permanenze()
+        fase_prima = app.fasi[1]
+        istantanea = app._istantanea()
+
+        # 10 s stanno dentro il margine di questa linea: la modifica deve
+        # essere accettata, ma le permanenze devono cambiare davvero -- se
+        # restassero identiche vorrebbe dire che il ciclogramma non e' stato
+        # ricostruito e la verifica sta guardando i dati vecchi
+        app.fasi[1] = (fase_prima + 10.0) % app.T_corrente
+        applicata = app._applica("prova", istantanea)
+        app.update()
+        check(applicata, "lo spostamento di 10 s viene accettato")
+        check(
+            permanenze() != permanenze_prima,
+            f"le permanenze sono state ricalcolate: {permanenze_prima} -> "
+            f"{permanenze()}",
+        )
+        check(
+            len(app.tabella.get_children()) == len(app.report.violations),
+            "l'elenco dei rilievi si e' aggiornato",
+        )
+
+        # uno spostamento grande invece non e' realizzabile: il carroponte non
+        # farebbe in tempo. Deve essere rifiutato, non prodotto e basta.
+        istantanea2 = app._istantanea()
+        app.fasi[1] = (app.fasi[1] + 30.0) % app.T_corrente
+        check(
+            not app._applica("prova grande", istantanea2),
+            "uno spostamento troppo grande viene rifiutato",
+        )
+
+        app._annulla_modifica()
+        app.update()
+        check(
+            abs(app.fasi[1] - fase_prima) < 1e-6
+            and app.report.ok == prima_ok
+            and permanenze() == permanenze_prima,
+            "l'annullamento riporta esattamente alla soluzione di prima",
+        )
+    finally:
+        chiudi(app)
+
+
+def test_modifica_takt_e_carroponti(percorso_linea):
+    print("\n[5] modifica del takt time e del numero di carroponti")
+    app = _app_risolta(percorso_linea)
+    try:
+        T0 = app.T_corrente
+        app.var_takt.set(f"{T0 + 15:.2f}")
+        app._modifica_takt()
+        app.update()
+        check(
+            abs(app.soluzione.T - (T0 + 15)) < 1e-6,
+            f"takt time portato da {T0:.2f} a {app.soluzione.T:.2f} s",
+        )
+
+        app.var_takt.set("non un numero")
+        app._modifica_takt()
+        app.update()
+        check(
+            abs(app.soluzione.T - (T0 + 15)) < 1e-6,
+            "un valore non numerico non cambia nulla e non schianta",
+        )
+
+        n0 = len(app.zone_correnti)
+        app.var_carroponti.set(str(n0 + 1))
+        app._modifica_numero_carroponti()
+        check(pompa(app), "il ricalcolo con piu' carroponti termina")
+        check(
+            len(app.dati.zones) == n0 + 1,
+            f"carroponti portati da {n0} a {len(app.dati.zones)} "
+            f"(T={app.soluzione.T:.2f}s)",
+        )
+        check(app.report.ok, "e la nuova soluzione supera la verifica")
+        check(
+            len(app.tabella_mosse.get_children()) == app.dati.n_moves,
+            "la tabella mostra la nuova assegnazione",
+        )
+    finally:
+        chiudi(app)
+
+
+def test_modifica_impossibile(percorso_linea):
+    print("\n[6] modifica non realizzabile: si torna indietro, non si schianta")
+    app = _app_risolta(percorso_linea)
+    try:
+        stato_prima = (app.T_corrente, dict(app.fasi))
+        soluzione_prima = app.soluzione
+        # tutti i prelievi nello stesso istante: il carroponte dovrebbe essere
+        # in piu' posti insieme, quindi il ciclogramma non esiste
+        istantanea = app._istantanea()
+        for k in app.fasi:
+            app.fasi[k] = 0.0
+        applicata = app._applica("prova impossibile", istantanea)
+        app.update()
+        check(not applicata, "la modifica viene rifiutata")
+        check(
+            app.soluzione is soluzione_prima
+            and app.T_corrente == stato_prima[0]
+            and app.fasi == stato_prima[1],
+            "lo stato torna esattamente com'era",
+        )
+        check(
+            "non applicabile" in app.etichetta_stato["text"],
+            f"l'utente viene avvisato: \"{app.etichetta_stato['text'][:60]}...\"",
+        )
+    finally:
+        chiudi(app)
+
+
+def test_proposta_modificabile(percorso_linea):
+    print("\n[7] anche la proposta di partenza si puo' modificare")
+    from interfaccia import Applicazione
+
+    app = Applicazione(percorso_linea)
+    try:
+        for _ in range(50):
+            app.update()
+            if app.config_linea is not None:
+                break
+            time.sleep(0.02)
+        app._crea_proposta()
+        pompa(app)
+        check(len(app.fasi) == app.dati.n_moves, "la proposta e' modificabile")
+        errori_prima = len(app.report.errors)
+        # da un carroponte a tre: e' la mossa naturale per rendere fattibile
+        # una proposta che con un carroponte solo non sta nelle tolleranze
+        app.var_carroponti.set("3")
+        app._modifica_numero_carroponti()
+        check(pompa(app), "il ricalcolo termina")
+        check(
+            len(app.dati.zones) == 3 and app.report.ok,
+            f"da 1 carroponte con {errori_prima} problemi a 3 carroponti "
+            f"verificati (T={app.soluzione.T:.2f}s)",
+        )
+    finally:
+        chiudi(app)
+
+
 def test_file_illeggibile():
     print("\n[3] file non valido: messaggio, non schianto")
     from interfaccia import Applicazione
@@ -196,6 +375,10 @@ def main():
     try:
         test_apertura_e_proposta(linea)
         test_calcolo_automatico(linea)
+        test_modifica_prelievo(linea)
+        test_modifica_takt_e_carroponti(linea)
+        test_modifica_impossibile(linea)
+        test_proposta_modificabile(linea)
         test_file_illeggibile()
     finally:
         os.unlink(linea)
