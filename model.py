@@ -1107,9 +1107,12 @@ def solve(
 def build_solution(
     data: ProblemData,
     T: float,
-    local_pick: dict[int, float],
+    local_pick: Optional[dict[int, float]] = None,
     extra_periods: Optional[dict[int, int]] = None,
     status: str = "MANUALE",
+    actual_time: Optional[list[float]] = None,
+    tollerante: bool = False,
+    mosse_attive: Optional[set] = None,
 ) -> Solution:
     """Costruisce una Solution completa dai soli gradi di liberta' di un
     ciclogramma: il takt time e l'istante di prelievo (fase, in [0,T)) di
@@ -1134,11 +1137,38 @@ def build_solution(
     """
     if data.zones is None:
         raise ValueError("build_solution richiede data.zones valorizzato")
+    if T <= 0:
+        raise ValueError("il takt time deve essere > 0")
+    incoerenze: Optional[list[str]] = [] if tollerante else None
+
+    # Due modi di dire la stessa cosa: o si danno le fasi e la catena dei
+    # tempi assoluti viene dedotta (modifica di un ciclogramma esistente), o si
+    # danno direttamente i tempi assoluti del pezzo e le fasi ne discendono
+    # (disegno manuale, dove a essere scelti sono i tempi in vasca).
+    if actual_time is not None:
+        if len(actual_time) != data.n_moves:
+            raise ValueError(
+                f"actual_time deve avere {data.n_moves} valori, "
+                f"ne ha {len(actual_time)}"
+            )
+        actual_time = [float(v) for v in actual_time]
+        # `mosse_attive` serve al disegno manuale: finche' l'utente non ha
+        # assegnato tutte le mosse a un carroponte, quelle scoperte non fanno
+        # parte di nessun giro e non vanno disegnate. Il verificatore le
+        # segnalera' come mancanti, che e' esatto.
+        chiavi = (
+            range(data.n_moves)
+            if mosse_attive is None
+            else sorted(mosse_attive)
+        )
+        local_pick = {k: actual_time[k] % T for k in chiavi}
+        return _assembla(data, T, local_pick, actual_time, status, incoerenze)
+
+    if local_pick is None:
+        raise ValueError("servono le fasi di prelievo oppure i tempi assoluti")
     mancanti = [k for k in range(data.n_moves) if k not in local_pick]
     if mancanti:
         raise ValueError(f"manca l'istante di prelievo per le mosse {mancanti}")
-    if T <= 0:
-        raise ValueError("il takt time deve essere > 0")
     extra_periods = extra_periods or {}
 
     # -- tempi assoluti: catena di flusso del pezzo -------------------------
@@ -1159,32 +1189,52 @@ def build_solution(
         n_giri = max(0, math.ceil(giri - data.eps_seconds / T))
         actual_time[k] += (n_giri + extra_periods.get(k, 0)) * T
 
-    # -- per ciascuna zona: ordine di visita e traiettoria ------------------
+    return _assembla(data, T, local_pick, actual_time, status, incoerenze)
+
+
+def _assembla(
+    data: ProblemData,
+    T: float,
+    local_pick: dict[int, float],
+    actual_time: list[float],
+    status: str,
+    incoerenze: Optional[list[str]],
+) -> Solution:
+    """Da fasi e tempi assoluti alle traiettorie di ciascun carroponte."""
     segments_per_hoist = []
     plans = []
     for z in data.zones:
-        moves = list(range(z.lo, z.hi + 1))
+        moves = [k for k in range(z.lo, z.hi + 1) if k in local_pick]
+        if not moves:
+            segments_per_hoist.append([])
+            continue
         order = sorted(moves, key=lambda k: local_pick[k])
-        i0 = order.index(z.lo)
+        riferimento = min(moves)
+        i0 = order.index(riferimento)
         order = order[i0:] + order[:i0]
         lp = {k: float(local_pick[k]) for k in moves}
         finish = {k: lp[k] + data.loaded_leg_seconds(k) for k in moves}
         # "parte appena consegnato": la stessa convenzione che usa il modello
-        dep_hi = finish[z.hi]
+        dep_hi = finish[max(moves)]
         prev = order[-1]
         arr_lo = finish[prev] + data.empty_leg_seconds(
-            data.station_position(prev + 1), data.station_position(z.lo)
+            data.station_position(prev + 1), data.station_position(riferimento)
         )
         segments_per_hoist.append(
-            _build_zone_trajectory(data, z, order, lp, dep_hi, arr_lo, T)
+            _build_zone_trajectory(
+                data, z, order, lp, dep_hi, arr_lo, T, incoerenze
+            )
         )
         plans.append(HoistPlan(z, order, lp, finish, dep_hi, arr_lo))
 
+    raw = {"origine": "costruita da build_solution"}
+    if incoerenze is not None:
+        raw["incoerenze"] = incoerenze
     return Solution(
         status=status,
         T=float(T),
         segments_per_hoist=segments_per_hoist,
-        raw={"origine": "costruita da build_solution"},
+        raw=raw,
         plans=plans,
         actual_time=actual_time,
     )
@@ -1281,8 +1331,14 @@ def _build_zone_trajectory(
     dep_hi: float,
     arr_lo: float,
     T: float,
+    incoerenze: Optional[list[str]] = None,
 ) -> list[Segment]:
-    """order: lista degli indici di mossa nell'ordine in cui il carroponte
+    """incoerenze: se e' una lista, i valori impossibili non sollevano piu'
+    un'eccezione ma vengono descritti li' dentro e la traiettoria viene
+    disegnata lo stesso. Serve al disegno manuale, dove l'utente compone
+    liberamente e vuole VEDERE cosa non torna invece di essere bloccato.
+
+    order: lista degli indici di mossa nell'ordine in cui il carroponte
     le esegue entro un periodo (parte e torna a zone.lo).
     local_pick[k]: istante [s], in [0,T), di prelievo per la mossa k.
     dep_hi: istante [s] in cui il carroponte lascia il confine superiore
@@ -1344,10 +1400,19 @@ def _build_zone_trajectory(
             arrive_t = depart_t + travel_e
 
         if depart_t < t1 - EPS:
-            raise ValueError(
-                f"Valori incoerenti: partenza ({depart_t}) precede la consegna "
-                f"({t1}) per la mossa {k}. Controlla i vincoli del modello."
+            messaggio = (
+                f"il carroponte lascia la stazione "
+                f"{data.route[k + 1].tank_id} a {depart_t:.1f} s, prima di aver "
+                f"finito la consegna della mossa {k} ({t1:.1f} s): "
+                f"mancano {t1 - depart_t:.1f} s"
             )
+            if incoerenze is None:
+                raise ValueError(
+                    f"Valori incoerenti: partenza ({depart_t}) precede la consegna "
+                    f"({t1}) per la mossa {k}. Controlla i vincoli del modello."
+                )
+            incoerenze.append(messaggio)
+            depart_t = t1  # si disegna comunque, a partire da quando e' libero
         elif depart_t < t1:
             depart_t = t1  # scarto minuscolo di arrotondamento, non un errore reale
         if depart_t > t1 + EPS:
@@ -1366,9 +1431,16 @@ def _build_zone_trajectory(
 
         target_pick = local_pick[nxt_k] + (T if nxt_k == zone.lo else 0)
         if target_pick < arrive_t - EPS:
-            raise ValueError(
-                f"Valori incoerenti: arrivo ({arrive_t}) e' successivo al prelievo "
-                f"target ({target_pick}) per la mossa {nxt_k}. Controlla i vincoli."
+            if incoerenze is None:
+                raise ValueError(
+                    f"Valori incoerenti: arrivo ({arrive_t}) e' successivo al prelievo "
+                    f"target ({target_pick}) per la mossa {nxt_k}. Controlla i vincoli."
+                )
+            incoerenze.append(
+                f"dalla mossa {k} non si fa in tempo ad arrivare alla mossa "
+                f"{nxt_k}: il carroponte sarebbe pronto a {arrive_t:.1f} s ma "
+                f"il prelievo e' a {target_pick:.1f} s, {arrive_t - target_pick:.1f} s "
+                f"troppo tardi"
             )
         elif target_pick < arrive_t:
             target_pick = (

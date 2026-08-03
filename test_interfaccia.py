@@ -90,22 +90,12 @@ def test_apertura_e_proposta(percorso_linea):
             "ora si puo' calcolare, ma non ancora salvare",
         )
 
-        app._crea_proposta()
-        check(pompa(app), "la proposta viene consegnata dal thread di lavoro")
-        check(app.soluzione is not None, "la proposta produce un ciclogramma")
+        app._avvia_manuale()
+        app.update()
+        check(app.modo == "manuale", "si entra in modalita' disegno")
         check(
-            app.soluzione.status == "PROPOSTA" and len(app.dati.zones) == 1,
-            f"e' una proposta a un carroponte (T={app.soluzione.T:.1f}s)",
-        )
-        check(
-            str(app.btn_salva["state"]) == "normal", "il salvataggio si e' abilitato"
-        )
-        # la proposta banale non rispetta le tolleranze: e' previsto, e la
-        # tabella deve dirlo invece di lasciare l'utente al buio
-        check(
-            len(app.tabella.get_children()) == len(app.report.violations)
-            and len(app.report.errors) > 0,
-            f"i {len(app.report.errors)} problemi della proposta sono elencati",
+            app.soluzione is not None and app.report is None,
+            "c'e' un ciclogramma da disegnare, ma nessuna verifica ancora",
         )
     finally:
         chiudi(app)
@@ -340,6 +330,152 @@ def test_proposta_modificabile(percorso_linea):
         chiudi(app)
 
 
+def test_disegno_manuale(percorso_linea):
+    print("\n[7] disegno manuale: pettine, assegnazione, verifica su richiesta")
+    from interfaccia import Applicazione
+    import manuale
+
+    app = Applicazione(percorso_linea)
+    try:
+        for _ in range(50):
+            app.update()
+            if app.config_linea is not None:
+                break
+            time.sleep(0.02)
+        app._avvia_manuale()
+        app.update()
+        d = app.config_linea.data
+
+        check(
+            len(app.permanenze) == d.n_moves - 1
+            and all(
+                app.permanenze[k] == d.route[k].dwell_min
+                for k in range(1, d.n_moves)
+            ),
+            "si parte dai tempi in vasca minimi di processo",
+        )
+        check(
+            len(app.tabella_permanenze.get_children()) == d.n_moves - 1
+            and len(app.tabella_assegnazione.get_children()) == d.n_moves,
+            "le tabelle di disegno sono compilate",
+        )
+        pettine = manuale.pettine(d, app.T_corrente, app.permanenze)
+        check(
+            len(pettine) == 10,
+            f"il pettine ha {len(pettine)} scalinate, una per pezzo",
+        )
+        # le scalinate devono essere distanziate esattamente di un takt time
+        scarti = {
+            round(pettine[p + 1][0].t_start - pettine[p][0].t_start, 6)
+            for p in range(len(pettine) - 1)
+        }
+        check(
+            scarti == {round(app.T_corrente, 6)},
+            f"distanziate di un takt time esatto ({scarti.pop():.2f} s)",
+        )
+        # forma a gradini: la scalinata sale dalla prima all'ultima vasca
+        quote = [s.x_end for s in pettine[0]]
+        check(
+            min(quote) == d.station_position(0)
+            and max(quote) == d.station_position(d.n_stations - 1),
+            "ogni scalinata va dalla prima all'ultima vasca",
+        )
+
+        # -- i controlli sono sospesi ---------------------------------------
+        check(app.report is None, "nessuna verifica durante il disegno")
+
+        # -- cambiare un tempo in vasca sposta le scalinate ------------------
+        prima = manuale.catena_pezzo(d, app.permanenze)
+        app.permanenze[1] += 40.0
+        app._ricomponi_manuale()
+        app.update()
+        dopo = manuale.catena_pezzo(d, app.permanenze)
+        check(
+            dopo[2] - prima[2] == 40.0 and dopo[0] == prima[0],
+            f"allungando il bagno di 40 s la scalinata si sposta da quel punto "
+            f"in poi ({prima[2]:.1f} -> {dopo[2]:.1f} s)",
+        )
+
+        # -- spostare il confine fra i carroponti ---------------------------
+        import manuale as m
+        confine = max(k for k, c in app.assegnazione.items() if c == 0)
+        app.assegnazione[confine] = 1
+        check(
+            m.perche_non_va(d, app.assegnazione) is None,
+            f"la mossa {confine} puo' passare al carroponte successivo",
+        )
+        app._ricomponi_manuale()
+        app.update()
+        check(app.soluzione is not None, "il ciclogramma viene ridisegnato")
+
+        # -- un'assegnazione che farebbe scavalcare i carroponti -------------
+        prova = dict(app.assegnazione)
+        prova[0] = 1
+        prova[d.n_moves - 1] = 0
+        motivo = m.perche_non_va(d, prova)
+        check(
+            motivo is not None and "scavalcarsi" in motivo,
+            f"scavalcamento riconosciuto: \"{(motivo or '')[:70]}...\"",
+        )
+
+        # -- una composizione impossibile non blocca: la si vede -------------
+        for k in range(d.n_moves):
+            app.assegnazione[k] = 0
+        app.permanenze = {k: 0.0 for k in range(1, d.n_moves)}
+        app._ricomponi_manuale()
+        app.update()
+        check(
+            app.soluzione is not None,
+            "con un solo carroponte e nessuna sosta il disegno esiste comunque",
+        )
+        check(
+            len(app.incoerenze) > 0,
+            f"e le {len(app.incoerenze)} incoerenze sono descritte",
+        )
+        check(
+            app.report is None,
+            "ma restano incoerenze di disegno, non violazioni: niente verifica",
+        )
+
+        # -- il report arriva solo quando lo si chiede ----------------------
+        app._verifica_adesso()
+        app.update()
+        check(app.report is not None, "'Verifica adesso' produce il report")
+        check(
+            len(app.tabella.get_children()) == len(app.report.violations)
+            and len(app.report.errors) > 0,
+            f"il report elenca {len(app.report.errors)} errori",
+        )
+    finally:
+        chiudi(app)
+
+
+def test_manuale_poi_automatico(percorso_linea):
+    print("\n[8] dal disegno manuale si torna al calcolo automatico")
+    from interfaccia import Applicazione
+
+    app = Applicazione(percorso_linea)
+    try:
+        for _ in range(50):
+            app.update()
+            if app.config_linea is not None:
+                break
+            time.sleep(0.02)
+        app._avvia_manuale()
+        app.update()
+        check(app.modo == "manuale", "in disegno manuale")
+        app._calcola_automatico()
+        check(pompa(app), "il calcolo automatico parte e termina")
+        check(app.modo == "automatico", "si torna in modalita' automatica")
+        check(
+            app.report is not None and app.report.ok,
+            "e la soluzione automatica e' verificata",
+        )
+        check(len(app.incoerenze) == 0, "nessuna incoerenza residua dal disegno")
+    finally:
+        chiudi(app)
+
+
 def test_file_illeggibile():
     print("\n[3] file non valido: messaggio, non schianto")
     from interfaccia import Applicazione
@@ -378,7 +514,8 @@ def main():
         test_modifica_prelievo(linea)
         test_modifica_takt_e_carroponti(linea)
         test_modifica_impossibile(linea)
-        test_proposta_modificabile(linea)
+        test_disegno_manuale(linea)
+        test_manuale_poi_automatico(linea)
         test_file_illeggibile()
     finally:
         os.unlink(linea)

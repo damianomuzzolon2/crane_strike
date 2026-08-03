@@ -43,7 +43,8 @@ from model import (
     solve_auto_hoists,
     solve_auto_zones,
 )
-from plotting import plot_cyclogram
+import manuale
+from plotting import _HOIST_COLORS, _sample_segment, plot_cyclogram
 from verify import verify_solution
 
 TITOLO = "Ciclogrammi carroponti"
@@ -86,6 +87,14 @@ class Applicazione(tk.Tk):
         self._trascinamento = None
         self._guida = None
 
+        # -- disegno manuale ------------------------------------------------
+        self.modo = "automatico"  # oppure "manuale"
+        self.permanenze: dict[int, float] = {}
+        self.assegnazione: dict[int, int] = {}
+        self.n_carroponti_manuale = 2
+        self.carroponte_attivo = 0
+        self.incoerenze: list[str] = []
+
         self._costruisci_interfaccia()
         self._aggiorna_stato_pulsanti()
         if file_iniziale:
@@ -116,8 +125,8 @@ class Applicazione(tk.Tk):
         self.btn_auto.pack(side=tk.LEFT)
         self.btn_proposta = ttk.Button(
             barra,
-            text="Parti da una proposta semplice",
-            command=self._crea_proposta,
+            text="Disegna a mano",
+            command=self._avvia_manuale,
         )
         self.btn_proposta.pack(side=tk.LEFT, padx=(6, 0))
 
@@ -181,6 +190,11 @@ class Applicazione(tk.Tk):
         scheda_modifica = ttk.Frame(schede, padding=6)
         schede.add(scheda_modifica, text="Modifica")
         self._costruisci_scheda_modifica(scheda_modifica)
+
+        # -- scheda: disegno manuale ---------------------------------------
+        scheda_disegno = ttk.Frame(schede, padding=6)
+        schede.add(scheda_disegno, text="Disegno")
+        self._costruisci_scheda_disegno(scheda_disegno)
 
         # -- scheda: verifica ----------------------------------------------
         scheda_verifica = ttk.Frame(schede, padding=6)
@@ -314,6 +328,117 @@ class Applicazione(tk.Tk):
             0.5, 0.5, messaggio, ha="center", va="center", color="#999999", fontsize=12
         )
 
+    def _costruisci_scheda_disegno(self, cornice):
+        ttk.Label(
+            cornice,
+            text="Le scalinate grigie sono i pezzi in lavorazione: una sosta\n"
+            "per ogni vasca, ripetute a un takt time di distanza.\n"
+            "Fai clic su un trasporto per assegnarlo al carroponte attivo.",
+            foreground="#555555",
+        ).pack(anchor=tk.W)
+
+        riga = ttk.Frame(cornice)
+        riga.pack(fill=tk.X, pady=(8, 2))
+        ttk.Label(riga, text="Takt time [s]:").pack(side=tk.LEFT)
+        self.var_takt_manuale = tk.StringVar()
+        campo = ttk.Entry(riga, textvariable=self.var_takt_manuale, width=9)
+        campo.pack(side=tk.LEFT, padx=(6, 2))
+        campo.bind("<Return>", lambda e: self._ricomponi_manuale())
+        ttk.Button(riga, text="Applica", width=8, command=self._ricomponi_manuale).pack(
+            side=tk.LEFT
+        )
+
+        riga2 = ttk.Frame(cornice)
+        riga2.pack(fill=tk.X, pady=(2, 6))
+        ttk.Label(riga2, text="Carroponti:").pack(side=tk.LEFT)
+        self.var_n_carro_manuale = tk.StringVar(value="2")
+        ttk.Spinbox(
+            riga2,
+            from_=1,
+            to=8,
+            width=4,
+            textvariable=self.var_n_carro_manuale,
+            command=self._cambia_carroponti_manuale,
+        ).pack(side=tk.LEFT, padx=(6, 16))
+        ttk.Label(riga2, text="attivo:").pack(side=tk.LEFT)
+        self.var_carro_attivo = tk.StringVar(value="1")
+        self.combo_attivo = ttk.Combobox(
+            riga2,
+            width=5,
+            state="readonly",
+            textvariable=self.var_carro_attivo,
+            values=["1", "2"],
+        )
+        self.combo_attivo.pack(side=tk.LEFT, padx=(6, 0))
+        self.combo_attivo.bind(
+            "<<ComboboxSelected>>",
+            lambda e: setattr(
+                self, "carroponte_attivo", int(self.var_carro_attivo.get()) - 1
+            ),
+        )
+
+        ttk.Label(cornice, text="Tempi in vasca", font=("", 9, "bold")).pack(
+            anchor=tk.W, pady=(6, 2)
+        )
+        cornice_perm = ttk.Frame(cornice)
+        cornice_perm.pack(fill=tk.BOTH, expand=True)
+        self.tabella_permanenze = ttk.Treeview(
+            cornice_perm,
+            columns=("vasca", "tempo", "min", "max"),
+            show="headings",
+            height=7,
+        )
+        for chiave, titolo, larghezza in [
+            ("vasca", "vasca", 130),
+            ("tempo", "tempo [s]", 80),
+            ("min", "min", 55),
+            ("max", "max", 55),
+        ]:
+            self.tabella_permanenze.heading(chiave, text=titolo)
+            self.tabella_permanenze.column(
+                chiave, width=larghezza, anchor=tk.W, stretch=(chiave == "vasca")
+            )
+        self.tabella_permanenze.pack(fill=tk.BOTH, expand=True)
+        self.tabella_permanenze.bind("<Double-1>", self._modifica_permanenza)
+        ttk.Label(
+            cornice,
+            text="Doppio clic sul tempo per cambiarlo: le scalinate si spostano.",
+            foreground="#777777",
+        ).pack(anchor=tk.W, pady=(2, 0))
+
+        ttk.Label(cornice, text="Assegnazione", font=("", 9, "bold")).pack(
+            anchor=tk.W, pady=(8, 2)
+        )
+        cornice_ass = ttk.Frame(cornice)
+        cornice_ass.pack(fill=tk.BOTH, expand=True)
+        self.tabella_assegnazione = ttk.Treeview(
+            cornice_ass,
+            columns=("mossa", "da", "a", "carro"),
+            show="headings",
+            height=7,
+        )
+        for chiave, titolo, larghezza in [
+            ("mossa", "n", 28),
+            ("da", "da vasca", 115),
+            ("a", "a vasca", 115),
+            ("carro", "carrop.", 60),
+        ]:
+            self.tabella_assegnazione.heading(chiave, text=titolo)
+            self.tabella_assegnazione.column(
+                chiave, width=larghezza, anchor=tk.W, stretch=(chiave in ("da", "a"))
+            )
+        self.tabella_assegnazione.pack(fill=tk.BOTH, expand=True)
+        self.tabella_assegnazione.bind("<Double-1>", self._assegna_da_tabella)
+
+        pulsanti = ttk.Frame(cornice)
+        pulsanti.pack(fill=tk.X, pady=(8, 0))
+        ttk.Button(
+            pulsanti, text="Verifica adesso", command=self._verifica_adesso
+        ).pack(side=tk.LEFT)
+        ttk.Button(
+            pulsanti, text="Torna all'automatico", command=self._calcola_automatico
+        ).pack(side=tk.LEFT, padx=(6, 0))
+
     # ------------------------------------------------------------------
     # Azioni
     # ------------------------------------------------------------------
@@ -418,6 +543,10 @@ class Applicazione(tk.Tk):
     def _salva(self):
         if self.soluzione is None:
             return
+        if self.report is None:
+            self._verifica_adesso()
+        if self.report is None:
+            return
         radice = os.path.splitext(self.percorso_file or "ciclogramma")[0]
         percorso = filedialog.asksaveasfilename(
             title="Dove salvare i risultati",
@@ -504,6 +633,8 @@ class Applicazione(tk.Tk):
             return
 
         self.soluzione, self.dati, self.report = sol, dati, report
+        self.modo = "automatico"
+        self.incoerenze = []
         self._carica_stato_modificabile()
         self._mostra_risultato()
         self._aggiorna_stato_pulsanti()
@@ -579,7 +710,7 @@ class Applicazione(tk.Tk):
                 ),
                 tags=(v.severity,),
             )
-        self.schede.tab(2, text=f"Verifica ({len(rep.violations)})")
+        self.schede.tab(3, text=f"Verifica ({len(rep.violations)})")
 
         if rep.ok:
             self.banner.configure(
@@ -600,6 +731,386 @@ class Applicazione(tk.Tk):
             f"Ciclogramma pronto - T = {sol.T:.2f} s - "
             + ("verifica superata" if rep.ok else "VERIFICA NON SUPERATA")
         )
+
+    # ------------------------------------------------------------------
+    # Disegno manuale
+    # ------------------------------------------------------------------
+
+    def _avvia_manuale(self):
+        if not self._pronto_per_calcolare():
+            return
+        d = self.config_linea.data
+        self.modo = "manuale"
+        self.permanenze = manuale.permanenze_iniziali(d)
+        self.T_corrente = d.takt_min
+        self.n_carroponti_manuale = min(2, d.n_moves)
+        self.assegnazione = manuale.assegnazione_iniziale(
+            d, self.n_carroponti_manuale
+        )
+        self.carroponte_attivo = 0
+        self.var_takt_manuale.set(f"{self.T_corrente:.2f}")
+        self.var_n_carro_manuale.set(str(self.n_carroponti_manuale))
+        self._aggiorna_elenco_carroponti()
+        self.schede.select(2)
+        self._ricomponi_manuale()
+
+    def _aggiorna_elenco_carroponti(self):
+        valori = [str(i + 1) for i in range(self.n_carroponti_manuale)]
+        self.combo_attivo.configure(values=valori)
+        if self.var_carro_attivo.get() not in valori:
+            self.var_carro_attivo.set("1")
+            self.carroponte_attivo = 0
+
+    def _cambia_carroponti_manuale(self):
+        try:
+            n = int(self.var_n_carro_manuale.get())
+        except ValueError:
+            return
+        d = self.config_linea.data
+        self.n_carroponti_manuale = max(1, min(n, d.n_moves))
+        # le mosse assegnate a carroponti che non esistono piu' tornano al primo
+        for k, c in list(self.assegnazione.items()):
+            if c >= self.n_carroponti_manuale:
+                self.assegnazione[k] = self.n_carroponti_manuale - 1
+        self._aggiorna_elenco_carroponti()
+        self._ricomponi_manuale()
+
+    def _ricomponi_manuale(self):
+        """Ricostruisce il disegno. Nessuna verifica: qui l'utente compone
+        liberamente, e anche un ciclogramma impossibile va mostrato."""
+        d = self.config_linea.data
+        try:
+            T = float(self.var_takt_manuale.get().replace(",", "."))
+            if T <= 0:
+                raise ValueError
+        except ValueError:
+            self._stato("Il takt time deve essere un numero maggiore di zero")
+            return
+        self.T_corrente = T
+        self.soluzione, self.dati, self.incoerenze = manuale.componi(
+            d, T, self.permanenze, self.assegnazione, self.n_carroponti_manuale
+        )
+        self.zone_correnti = list(self.dati.zones)
+        self.report = None
+        self._disegna_pettine()
+        self._popola_tabelle_disegno()
+        self._banner_disegno()
+        self._aggiorna_stato_pulsanti()
+
+    def _disegna_pettine(self):
+        d, T = self.config_linea.data, self.T_corrente
+        self.assi.clear()
+        for lato in self.assi.spines.values():
+            lato.set_visible(True)
+
+        etichette: dict[float, list[str]] = {}
+        for st in d.route:
+            y = d.tanks[st.tank_id].position
+            etichette.setdefault(y, [])
+            if st.tank_id not in etichette[y]:
+                etichette[y].append(st.tank_id)
+        for y in etichette:
+            self.assi.axhline(y, color="#dddddd", linewidth=1, zorder=0)
+        quote = sorted(etichette)
+        self.assi.set_yticks(quote)
+        self.assi.set_yticklabels(
+            [f"{' / '.join(etichette[y])}\n{y:.2f} m" for y in quote], fontsize=8
+        )
+
+        # -- il pettine: un pezzo per scalinata ----------------------------
+        # Il pettine e' lo SCHELETRO e deve restare il disegno dominante: le
+        # linee dei carroponti ci passano sopra, non lo coprono.
+        scalinate = manuale.pettine(d, T, self.permanenze)
+        for segs in scalinate:
+            for s in segs:
+                ts, xs = _sample_segment(s)
+                if s.kind == "wait":  # sosta in vasca: e' il dato che si regola
+                    self.assi.plot(
+                        ts, xs, color="#8a8a8a", linewidth=1.4, zorder=2
+                    )
+                    continue
+                k = self._mossa_del_segmento(s)
+                c = self.assegnazione.get(k)
+                if c is None:
+                    self.assi.plot(
+                        ts, xs, color="#999999", linewidth=1.1, zorder=2
+                    )
+                else:
+                    self.assi.plot(
+                        ts,
+                        xs,
+                        color=_HOIST_COLORS[c % len(_HOIST_COLORS)],
+                        linewidth=2.6,
+                        zorder=4,
+                    )
+
+        # -- i rientri a vuoto dei carroponti, ripetuti su tutto il pettine -
+        # Le attese non si disegnano: coinciderebbero con le soste del
+        # pettine, raddoppiando le linee senza aggiungere informazione.
+        n_cicli = manuale.RIPETIZIONI_PREDEFINITE + 4
+        for h, segs in enumerate(self.soluzione.segments_per_hoist):
+            colore = _HOIST_COLORS[h % len(_HOIST_COLORS)]
+            ordinati = sorted(segs, key=lambda s: s.t_start)
+            impossibili = set()
+            for i, (a, b) in enumerate(zip(ordinati, ordinati[1:])):
+                if b.t_start < a.t_end - 0.05:
+                    impossibili.add(i + 1)
+            for i, s in enumerate(ordinati):
+                if s.kind != "empty":
+                    continue
+                ts, xs = _sample_segment(s)
+                rotto = i in impossibili
+                for ciclo in range(n_cicli):
+                    self.assi.plot(
+                        ts + ciclo * T,
+                        xs,
+                        color="#cc0000" if rotto else colore,
+                        linewidth=2.0 if rotto else 1.0,
+                        linestyle="--",
+                        alpha=1.0 if rotto else 0.55,
+                        zorder=5 if rotto else 3,
+                    )
+
+        fine = manuale.RIPETIZIONI_PREDEFINITE * T + (
+            scalinate[0][-1].t_end if scalinate else T
+        )
+        self.assi.set_xlim(0.0, fine)
+        self.assi.set_xlabel("tempo [s]")
+        self.assi.set_ylabel("posizione lungo la rotaia")
+        self.assi.set_title(
+            f"Disegno manuale  —  takt time T = {T:.2f} s  —  "
+            f"{manuale.RIPETIZIONI_PREDEFINITE} pezzi"
+        )
+        self.assi.grid(axis="x", color="#f0f0f0")
+        from matplotlib.lines import Line2D
+
+        legenda = [
+            Line2D([0], [0], color="#8a8a8a", lw=1.4, label="sosta in vasca"),
+            Line2D([0], [0], color="#999999", lw=1.1, label="trasporto non assegnato"),
+            Line2D([0], [0], color="#333333", lw=2.6, label="trasporto assegnato"),
+            Line2D(
+                [0], [0], color="#333333", lw=1.0, linestyle="--",
+                label="rientro a vuoto",
+            ),
+            Line2D(
+                [0], [0], color="#cc0000", lw=2.0, linestyle="--",
+                label="tratto impossibile",
+            ),
+        ]
+        self.assi.legend(
+            handles=legenda, loc="upper left", fontsize=7, framealpha=0.9, ncol=2
+        )
+        self.figura.tight_layout()
+        self.tela.draw()
+
+    def _mossa_del_segmento(self, s) -> int | None:
+        """A quale mossa appartiene un tratto del pettine, dalle posizioni."""
+        d = self.config_linea.data
+        for k in range(d.n_moves):
+            x0, x1 = d.station_position(k), d.station_position(k + 1)
+            if s.kind == "loaded" and abs(s.x_start - x0) < 1e-6 and abs(s.x_end - x1) < 1e-6:
+                return k
+            if s.kind == "pick" and abs(s.x_start - x0) < 1e-6:
+                return k
+            if s.kind == "release" and abs(s.x_start - x1) < 1e-6:
+                return k
+        return None
+
+    def _clic_manuale(self, evento):
+        """Assegna al carroponte attivo il trasporto piu' vicino al clic."""
+        if evento.xdata is None or self.config_linea is None:
+            return
+        d = self.config_linea.data
+        candidati = manuale.trasporti_cliccabili(d, self.T_corrente, self.permanenze)
+        clic = (evento.x, evento.y)
+        migliore, distanza_min = None, 1e9
+        for k, t0, t1, x0, x1 in candidati:
+            # distanza in pixel dal punto medio del trasporto
+            px, py = self.assi.transData.transform(((t0 + t1) / 2, (x0 + x1) / 2))
+            dist = ((px - clic[0]) ** 2 + (py - clic[1]) ** 2) ** 0.5
+            if dist < distanza_min:
+                migliore, distanza_min = k, dist
+        if migliore is None or distanza_min > 30:
+            return
+        prima = self.assegnazione.get(migliore)
+        self.assegnazione[migliore] = self.carroponte_attivo
+        motivo = manuale.perche_non_va(d, self.assegnazione)
+        if motivo:
+            if prima is None:
+                self.assegnazione.pop(migliore, None)
+            else:
+                self.assegnazione[migliore] = prima
+            self._stato(f"Non si puo': {motivo}")
+            return
+        self._stato(
+            f"Mossa {migliore} "
+            f"({d.route[migliore].tank_id} -> {d.route[migliore + 1].tank_id}) "
+            f"assegnata al carroponte {self.carroponte_attivo + 1}"
+        )
+        self._ricomponi_manuale()
+
+    def _modifica_permanenza(self, evento):
+        riga = self.tabella_permanenze.identify_row(evento.y)
+        colonna = self.tabella_permanenze.identify_column(evento.x)
+        if not riga or colonna != "#2":
+            return
+        indice = self.tabella_permanenze.index(riga) + 1
+        x, y, larghezza, altezza = self.tabella_permanenze.bbox(riga, colonna)
+        editore = ttk.Entry(self.tabella_permanenze)
+        editore.place(x=x, y=y, width=larghezza, height=altezza)
+        editore.insert(0, f"{self.permanenze[indice]:.1f}")
+        editore.select_range(0, tk.END)
+        editore.focus_set()
+
+        def conferma(_e=None):
+            testo = editore.get()
+            editore.destroy()
+            try:
+                self.permanenze[indice] = max(0.0, float(testo.replace(",", ".")))
+            except ValueError:
+                self._stato("Valore non valido")
+                return
+            self._ricomponi_manuale()
+
+        editore.bind("<Return>", conferma)
+        editore.bind("<FocusOut>", lambda e: editore.destroy())
+        editore.bind("<Escape>", lambda e: editore.destroy())
+
+    def _assegna_da_tabella(self, evento):
+        riga = self.tabella_assegnazione.identify_row(evento.y)
+        if not riga:
+            return
+        k = int(self.tabella_assegnazione.item(riga, "values")[0])
+        # a ogni doppio clic si passa al carroponte successivo: e' il modo piu'
+        # rapido di correggere senza dover cambiare il carroponte attivo
+        attuale = self.assegnazione.get(k, -1)
+        d = self.config_linea.data
+        # si prova il carroponte successivo, e se scavalcherebbe si continua a
+        # girare: cosi' il doppio clic propone solo assegnazioni possibili
+        for passo in range(1, self.n_carroponti_manuale + 1):
+            candidato = (attuale + passo) % self.n_carroponti_manuale
+            prova = dict(self.assegnazione)
+            prova[k] = candidato
+            if manuale.perche_non_va(d, prova) is None:
+                self.assegnazione = prova
+                self._ricomponi_manuale()
+                return
+        self._stato(
+            "Nessun altro carroponte puo' fare questa mossa senza scavalcare "
+            "i vicini"
+        )
+
+    def _popola_tabelle_disegno(self):
+        d = self.config_linea.data
+        for r in self.tabella_permanenze.get_children():
+            self.tabella_permanenze.delete(r)
+        for k in range(1, d.n_moves):
+            spec = d.route[k]
+            self.tabella_permanenze.insert(
+                "",
+                tk.END,
+                values=(
+                    spec.tank_id,
+                    f"{self.permanenze[k]:.1f}",
+                    f"{spec.dwell_min:.0f}",
+                    f"{spec.dwell_max:.0f}",
+                ),
+            )
+        for r in self.tabella_assegnazione.get_children():
+            self.tabella_assegnazione.delete(r)
+        for k in range(d.n_moves):
+            self.tabella_assegnazione.insert(
+                "",
+                tk.END,
+                values=(
+                    k,
+                    d.route[k].tank_id,
+                    d.route[k + 1].tank_id,
+                    self.assegnazione.get(k, "-") + 1
+                    if k in self.assegnazione
+                    else "-",
+                ),
+            )
+
+    def _banner_disegno(self):
+        n = len(self.incoerenze)
+        if n == 0:
+            self.banner.configure(
+                text=f"DISEGNO IN CORSO   -   T = {self.T_corrente:.2f} s   -   "
+                "nessuna incoerenza; premi Verifica adesso",
+                background="#d0e0f0",
+                foreground="#1c4587",
+            )
+        else:
+            self.banner.configure(
+                text=f"DISEGNO IN CORSO   -   {n} tratti impossibili "
+                f"(evidenziati in rosso)",
+                background="#fce5cd",
+                foreground="#7f6000",
+            )
+        testo = [
+            "Disegno manuale.",
+            "",
+            "Le scalinate grigie sono i pezzi: uno ogni takt time.",
+            "I trasporti colorati sono quelli gia' assegnati a un carroponte.",
+            "Le linee tratteggiate sono gli spostamenti a vuoto dei carroponti.",
+            "",
+            f"Takt time: {self.T_corrente:.2f} s",
+            f"Carroponti: {self.n_carroponti_manuale}",
+            "",
+        ]
+        if self.incoerenze:
+            testo.append("Tratti impossibili:")
+            testo.extend("  - " + m for m in self.incoerenze)
+        else:
+            testo.append("Nessun tratto impossibile.")
+        testo.append("")
+        testo.append(
+            "I controlli sono sospesi: premi 'Verifica adesso' quando vuoi "
+            "il report completo."
+        )
+        self._scrivi_riepilogo("\n".join(testo))
+
+    def _verifica_adesso(self):
+        if self.soluzione is None or self.dati is None:
+            return
+        try:
+            self.report = verify_solution(self.dati, self.soluzione)
+        except Exception as e:
+            self._errore("Verifica non eseguibile", str(e))
+            return
+        self._svuota_tabella()
+        for v in self.report.violations:
+            self.tabella.insert(
+                "",
+                tk.END,
+                values=(
+                    _ETICHETTE_GRAVITA.get(v.severity, v.severity),
+                    v.kind,
+                    v.message,
+                ),
+                tags=(v.severity,),
+            )
+        self.schede.tab(3, text=f"Verifica ({len(self.report.violations)})")
+        self.schede.select(3)
+        if self.report.ok and not self.incoerenze:
+            self.banner.configure(
+                text=f"VERIFICA SUPERATA   -   T = {self.T_corrente:.2f} s",
+                background="#d9ead3",
+                foreground="#274e13",
+            )
+        else:
+            self.banner.configure(
+                text=f"{len(self.report.errors)} ERRORI, "
+                f"{len(self.incoerenze)} tratti impossibili",
+                background="#f4cccc",
+                foreground="#990000",
+            )
+        self._stato(
+            "Verifica eseguita: "
+            + ("superata" if self.report.ok else f"{len(self.report.errors)} errori")
+        )
+        self._aggiorna_stato_pulsanti()
 
     # ------------------------------------------------------------------
     # Modifica del ciclogramma
@@ -777,6 +1288,9 @@ class Applicazione(tk.Tk):
     def _su_pressione(self, evento):
         if evento.inaxes is not self.assi or self.soluzione is None:
             return
+        if self.modo == "manuale":
+            self._clic_manuale(evento)
+            return
         if not self.fasi:
             return
         # il confronto va fatto in PIXEL: in coordinate dati un secondo e un
@@ -804,7 +1318,9 @@ class Applicazione(tk.Tk):
         )
 
     def _su_movimento(self, evento):
-        if self._trascinamento is None or evento.xdata is None:
+        if self.modo == "manuale" or self._trascinamento is None:
+            return
+        if evento.xdata is None:
             return
         delta = evento.xdata - self._trascinamento["x_iniziale"]
         nuovo = self._trascinamento["t_iniziale"] + delta
