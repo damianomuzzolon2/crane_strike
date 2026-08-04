@@ -84,6 +84,15 @@ def test_apertura_e_proposta(percorso_linea):
         app._carica(percorso_linea)
         app.update()
         check(app.config_linea is not None, "linea caricata")
+        # Percorso intero, non il solo nome: serve a distinguere fra copie
+        # dello stesso file in cartelle diverse.
+        atteso = os.path.normpath(os.path.abspath(percorso_linea))
+        check(
+            str(app.etichetta_file["text"]) == atteso
+            and app.title().endswith(atteso)
+            and atteso in app.testo_riepilogo.get("1.0", "end"),
+            f"percorso completo in barra, titolo e riepilogo ({atteso})",
+        )
         check(
             str(app.btn_auto["state"]) == "normal"
             and str(app.btn_salva["state"]) == "disabled",

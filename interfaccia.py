@@ -140,8 +140,14 @@ class Applicazione(tk.Tk):
         )
         self.btn_salva.pack(side=tk.LEFT)
 
-        self.etichetta_file = ttk.Label(barra, text="Nessuna linea caricata")
-        self.etichetta_file.pack(side=tk.RIGHT)
+        # Percorso completo, non solo il nome: su un PC di stabilimento lo
+        # stesso file esiste in piu' copie (scrivania, cartella di commessa,
+        # rete) e sapere *quale* si sta guardando conta piu' del nome.
+        # expand=True gli lascia tutto lo spazio che avanza dai pulsanti.
+        self.etichetta_file = ttk.Label(
+            barra, text="Nessuna linea caricata", anchor=tk.E
+        )
+        self.etichetta_file.pack(side=tk.RIGHT, fill=tk.X, expand=True, padx=(12, 0))
 
         # -- corpo: grafico a sinistra, pannello a destra -------------------
         corpo = ttk.PanedWindow(self, orient=tk.HORIZONTAL)
@@ -460,14 +466,19 @@ class Applicazione(tk.Tk):
         except Exception as e:
             self._errore("Il file non puo' essere letto", str(e))
             return
+        # Assoluto e normalizzato: la finestra di dialogo di Tk restituisce le
+        # barre al contrario ("C:/..."), e dalla riga di comando puo' arrivare
+        # un percorso relativo. Cosi' quello che si legge e' un percorso vero,
+        # copiabile e incollabile in Esplora risorse.
+        percorso = os.path.normpath(os.path.abspath(percorso))
         self.percorso_file = percorso
         self.dati = None
         self.soluzione = None
         self.report = None
         d = self.config_linea.data
-        self.etichetta_file.configure(text=os.path.basename(percorso))
+        self._mostra_percorso(percorso)
         self._scrivi_riepilogo(
-            f"Linea: {os.path.basename(percorso)}\n"
+            f"Linea: {percorso}\n"
             f"Stazioni: {d.n_stations}   Mosse: {d.n_moves}\n"
             f"Takt time ammesso: {d.takt_min:.1f} - {d.takt_max:.1f} s\n"
             f"Vasche: {', '.join(d.tanks)}\n\n"
@@ -1409,6 +1420,20 @@ class Applicazione(tk.Tk):
             if (self.soluzione is not None and not self._lavoro_in_corso)
             else tk.DISABLED
         )
+
+    def _mostra_percorso(self, percorso: str | None):
+        """Fa comparire il percorso completo del file di ingresso in barra e
+        nel titolo della finestra.
+
+        Nel titolo perche' la barra dei comandi ha spazio limitato: se il
+        percorso e' lunghissimo li' viene tagliato, mentre il titolo lo mostra
+        comunque (e resta leggibile anche con la finestra ridotta a icona)."""
+        if not percorso:
+            self.etichetta_file.configure(text="Nessuna linea caricata")
+            self.title(TITOLO)
+            return
+        self.etichetta_file.configure(text=percorso)
+        self.title(f"{TITOLO} - {percorso}")
 
     def _scrivi_riepilogo(self, testo: str):
         self.testo_riepilogo.configure(state=tk.NORMAL)

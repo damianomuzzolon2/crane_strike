@@ -129,6 +129,12 @@ programma.
 | `Disegna a mano` | Passa alla composizione manuale (vedi sotto). |
 | `Salva risultati...` | Scrive l'Excel dei risultati e, accanto, l'immagine del ciclogramma. Si abilita solo quando c'e' qualcosa da salvare. |
 
+A destra nella stessa barra c'e' il **percorso completo** del file caricato —
+non solo il nome, perche' dello stesso file girano di solito piu' copie (la
+scrivania, la cartella di commessa, la rete) e serve sapere quale si sta
+guardando. Lo stesso percorso compare nel titolo della finestra e in cima alla
+scheda *Riepilogo*: se la barra e' troppo stretta per contenerlo, si legge li'.
+
 ### Il verdetto
 
 La striscia colorata in alto a destra e' l'informazione piu' importante, e per
