@@ -135,6 +135,26 @@ scrivania, la cartella di commessa, la rete) e serve sapere quale si sta
 guardando. Lo stesso percorso compare nel titolo della finestra e in cima alla
 scheda *Riepilogo*: se la barra e' troppo stretta per contenerlo, si legge li'.
 
+### Come si legge il ciclogramma
+
+In orizzontale il tempo, in verticale la posizione lungo la rotaia: le vasche
+sono le righe, col nome e la quota sull'asse. Il disegno ripete **due cicli**
+di seguito, cosi' si vede a occhio che il pattern si richiude.
+
+Il colore dice una cosa sola: **di quale carroponte** e' la traiettoria. Il
+tratto ne dice un'altra sola:
+
+- **continuo** — il carroponte ha il pezzo in mano. I tratti che salgono o
+  scendono sono i trasferimenti fra vasche, quelli piatti agli estremi sono la
+  presa e il rilascio (il carro e' fermo sopra la vasca mentre il telaio esce
+  dal bagno o ci entra).
+- **tratteggiato** — il carroponte e' senza pezzo: rientro a vuoto se la linea
+  si muove, attesa sopra la vasca se e' piatta.
+
+Niente altro. Un colore per ogni tipo di tratto rendeva il grafico un
+arcobaleno in cui non si riusciva piu' a seguire un carroponte dall'inizio alla
+fine, che e' l'unica cosa per cui serve un ciclogramma.
+
 ### Il verdetto
 
 La striscia colorata in alto a destra e' l'informazione piu' importante, e per
@@ -536,9 +556,10 @@ misurato da fine immersione a inizio emersione. Non vanno gonfiati a mano per
 tenere conto delle fasi verticali.
 
 Le due fasi compaiono nel ciclogramma come segmenti orizzontali dedicati
-(`Segment.kind` vale `"pick"` o `"release"`), in arancio e viola: il
-carroponte e' fermo sopra la vasca. Con tempi verticali nulli non viene emesso
-alcun segmento e il risultato torna quello di una linea senza sollevamento.
+(`Segment.kind` vale `"pick"` o `"release"`): il carroponte e' fermo sopra la
+vasca, quindi si leggono come le spalle piatte agli estremi di ogni
+trasferimento. Con tempi verticali nulli non viene emesso alcun segmento e il
+risultato torna quello di una linea senza sollevamento.
 
 Attenzione al dimensionamento: i tempi verticali si sommano a **ogni** mossa e
 si fanno sentire in fretta. Nell'esempio fornito valgono da 16 a 25 s per mossa,

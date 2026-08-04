@@ -17,17 +17,25 @@ from matplotlib.patches import Patch
 from kinematics import position_profile
 from model import ProblemData, Solution, Segment
 
+# Il colore dice UNA cosa sola: di quale carroponte e' la linea. Un colore per
+# ogni tipo di tratto (carico, vuoto, attesa, presa, rilascio) piu' un colore
+# per carroponte faceva un arcobaleno in cui non si seguiva piu' nessuna
+# traiettoria. L'unica altra distinzione utile e' se il pezzo e' appeso o no,
+# ed e' affidata al tratteggio; lo spessore e' uguale per tutti.
+_LARGHEZZA = 2.2
+
 _STYLE = {
-    "loaded": dict(color="#c0392b", linewidth=2.6, zorder=3),
-    "empty": dict(color="#2980b9", linewidth=1.6, linestyle="--", zorder=2),
-    "wait": dict(color="#7f8c8d", linewidth=1.6, zorder=1),
-    # fasi verticali: il carroponte e' fermo sopra la vasca
-    "pick": dict(color="#e67e22", linewidth=5.0, solid_capstyle="butt", zorder=4),
-    "release": dict(color="#8e44ad", linewidth=5.0, solid_capstyle="butt", zorder=4),
+    # Con il pezzo appeso. La presa e il rilascio sono movimenti verticali:
+    # il carroponte sta fermo sopra la vasca, quindi si vedono come le spalle
+    # orizzontali agli estremi del trasferimento. Stesso tratto continuo,
+    # perche' sono la stessa cosa: il pezzo e' in mano al carroponte.
+    "loaded": dict(linewidth=_LARGHEZZA, zorder=3),
+    "pick": dict(linewidth=_LARGHEZZA, solid_capstyle="butt", zorder=3),
+    "release": dict(linewidth=_LARGHEZZA, solid_capstyle="butt", zorder=3),
+    # Senza pezzo: rientro a vuoto e attesa sopra la vasca, tratteggiati.
+    "empty": dict(linewidth=_LARGHEZZA, linestyle="--", zorder=2),
+    "wait": dict(linewidth=_LARGHEZZA, linestyle="--", zorder=2),
 }
-# Solo questi tratti vengono ricolorati col colore del carroponte: le fasi
-# verticali e le attese mantengono un colore proprio, altrimenti sparirebbero.
-_KINEMATIC_KINDS = {"loaded", "empty"}
 _HOIST_COLORS = ["#c0392b", "#2980b9", "#27ae60", "#8e44ad", "#d35400", "#16a085"]
 
 
@@ -98,10 +106,7 @@ def plot_cyclogram(
             for seg in segs:
                 ts, xs = _sample_segment(seg)
                 ts = ts + offset
-                style = dict(_STYLE[seg.kind])
-                if seg.kind in _KINEMATIC_KINDS:
-                    style["color"] = color
-                ax.plot(ts, xs, **style)
+                ax.plot(ts, xs, color=color, **_STYLE[seg.kind])
 
     # -- linee verticali di separazione fra cicli ---------------------------
     for cycle in range(n_cycles + 1):
@@ -113,31 +118,25 @@ def plot_cyclogram(
     ax.set_xlim(0.0, n_cycles * T * 1.01)
 
     # -- legenda --------------------------------------------------------
+    # Due sole voci sul tipo di tratto, piu' una per carroponte. Il grigio
+    # neutro dice che vale per tutti i carroponti: il colore lo si legge sotto.
     legend_elems = [
-        Line2D([0], [0], color="#333333", lw=2.6, label="con pezzo (carico)"),
         Line2D(
             [0],
             [0],
             color="#333333",
-            lw=1.6,
-            linestyle="--",
-            label="senza pezzo (vuoto)",
+            lw=_LARGHEZZA,
+            label="con il pezzo (presa, trasferimento, rilascio)",
         ),
-        Line2D([0], [0], color="#7f8c8d", lw=1.6, label="in attesa"),
+        Line2D(
+            [0],
+            [0],
+            color="#333333",
+            lw=_LARGHEZZA,
+            linestyle="--",
+            label="senza pezzo (rientro a vuoto, attesa)",
+        ),
     ]
-    # le voci sulle fasi verticali compaiono solo se sono davvero in uso
-    if any(
-        seg.kind == "pick" for segs in solution.segments_per_hoist for seg in segs
-    ):
-        legend_elems.append(
-            Line2D([0], [0], color="#e67e22", lw=5.0, label="presa (emersione)")
-        )
-    if any(
-        seg.kind == "release" for segs in solution.segments_per_hoist for seg in segs
-    ):
-        legend_elems.append(
-            Line2D([0], [0], color="#8e44ad", lw=5.0, label="rilascio (immersione)")
-        )
     for h in range(data.n_hoists):
         legend_elems.append(
             Patch(
