@@ -38,6 +38,18 @@ def check(condition: bool, description: str):
         print(f"  FAIL {description}")
 
 
+class Rotella:
+    """Il minimo che serve a `_su_rotella` per fingere una rotellata: gli
+    eventi veri di matplotlib arrivano solo da un puntatore in carne e ossa."""
+
+    def __init__(self, assi, direzione, x, y, tasto=None):
+        self.inaxes = assi
+        self.button = direzione  # 'up' oppure 'down'
+        self.key = tasto
+        self.xdata = x
+        self.ydata = y
+
+
 def pompa(app, secondi_max=180.0):
     """Fa girare il ciclo degli eventi finche' il lavoro in background non e'
     finito (o scade il tempo). Sostituisce mainloop() nei test."""
@@ -221,6 +233,14 @@ def test_modifica_prelievo(percorso_linea):
             len(app.tabella.get_children()) == len(app.report.violations),
             "l'elenco dei rilievi si e' aggiornato",
         )
+        # Il ciclogramma modificato ha stato "MANUALE": va disegnato come
+        # qualunque altro. Se il grafico si svuota, modificare i punti non
+        # serve piu' a niente -- e' proprio quello che si vuole vedere.
+        check(
+            len(app.assi.lines) > 0 and not app.assi.texts,
+            f"il grafico continua a mostrare il ciclogramma "
+            f"({len(app.assi.lines)} linee, stato {app.soluzione.status})",
+        )
 
         # uno spostamento grande invece non e' realizzabile: il carroponte non
         # farebbe in tempo. Deve essere rifiutato, non prodotto e basta.
@@ -239,6 +259,30 @@ def test_modifica_prelievo(percorso_linea):
             and permanenze() == permanenze_prima,
             "l'annullamento riporta esattamente alla soluzione di prima",
         )
+
+        # -- zoom ----------------------------------------------------------
+        # Zoomare e poi vedersi resettare la vista al primo ritocco renderebbe
+        # lo zoom inutile proprio quando serve: si ingrandisce per lavorare
+        # sul dettaglio, e il ritocco arriva subito dopo.
+        larghezza = lambda: app.assi.get_xlim()[1] - app.assi.get_xlim()[0]
+        prima = larghezza()
+        app._su_rotella(Rotella(app.assi, "up", 60.0, 5.0))
+        app.update()
+        check(larghezza() < prima * 0.95, f"la rotella zooma ({prima:.0f} -> {larghezza():.0f} s)")
+
+        zoomata = app.assi.get_xlim()
+        app.fasi[1] = (app.fasi[1] + 5.0) % app.T_corrente
+        app._applica("prova zoom", app._istantanea())
+        app.update()
+        check(
+            abs(app.assi.get_xlim()[0] - zoomata[0]) < 1e-6
+            and abs(app.assi.get_xlim()[1] - zoomata[1]) < 1e-6,
+            "e la vista ingrandita sopravvive al ridisegno",
+        )
+
+        app.barra_grafico.home()
+        app.update()
+        check(not app._zoom_utente, "'vista intera' rimette il grafico com'era")
     finally:
         chiudi(app)
 

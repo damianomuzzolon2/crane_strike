@@ -59,13 +59,13 @@ aprire una finestra, e la cinematica senza avere OR-Tools installato.
 | file | righe | contenuto |
 | --- | ---: | --- |
 | `excel_io.py` | 1099 | Tutto l'Excel: `scrivi_modello()` genera il file da compilare, `leggi_problema()` lo rilegge raccogliendo **tutti** gli errori di compilazione con foglio e cella, `scrivi_risultati()` produce il file dei risultati a quattro fogli. |
-| `plotting.py` | 155 | `plot_cyclogram()`: disegna il ciclogramma (posizione lungo la rotaia contro tempo) con il profilo cinematico vero, non con segmenti diritti. |
+| `plotting.py` | 164 | `plot_cyclogram()`: disegna il ciclogramma (posizione lungo la rotaia contro tempo) con il profilo cinematico vero, non con segmenti diritti. |
 
 ### Programmi da lanciare
 
 | file | righe | contenuto |
 | --- | ---: | --- |
-| `interfaccia.py` | 1595 | L'**interfaccia grafica** (tkinter). La classe `Applicazione` e' tutta la finestra: caricamento, calcolo in background, grafico incorporato, editor dei punti, disegno manuale, verifica e salvataggio. `autotest()` prova l'installazione da sola. E' il programma che usa un utente normale. |
+| `interfaccia.py` | 1751 | L'**interfaccia grafica** (tkinter). La classe `Applicazione` e' tutta la finestra: caricamento, calcolo in background, grafico incorporato, editor dei punti, disegno manuale, verifica e salvataggio. `autotest()` prova l'installazione da sola. E' il programma che usa un utente normale. |
 | `ciclogramma.py` | 170 | Lo stesso lavoro da **riga di comando**, per chi preferisce il terminale o vuole automatizzare. |
 | `esempio.py` | 195 | La linea di esempio definita **in codice** invece che in Excel, per chi vuole integrare il solutore in qualcos'altro. |
 | `costruisci_exe.py` | 119 | Costruisce l'**eseguibile autonomo** con PyInstaller. Vedi sotto. |
@@ -83,7 +83,7 @@ Non serve pytest.
 | `test_verify.py` | 839 | **Il verificatore.** Risponde a "chi verifica il verificatore?": venti casi, di cui uno solo corretto e tutti gli altri rotti di proposito (collisioni, permanenze fuori tolleranza, periodicita' incoerente, geometrie patologiche, capienze). Un controllore che non segnala mai nulla e' inutile, quindi ogni controllo ha un caso che DEVE farlo scattare. Non richiede OR-Tools: le soluzioni sono costruite a mano. |
 | `test_model.py` | 393 | **Il modello CP-SAT.** Risolve davvero e passa ogni soluzione al verificatore: vasche ravvicinate, tre carroponti, capienza, tempi verticali, e la fedelta' della ricostruzione di una soluzione dai suoi gradi di liberta'. Richiede OR-Tools. |
 | `test_excel_io.py` | 577 | **La lettura e la scrittura Excel.** Quasi tutti i casi sono file compilati male: valori mancanti o non numerici, vasche inesistenti o duplicate, righe riordinate, parametri sbagliati. Piu' la struttura del file dei risultati. Non richiede OR-Tools. |
-| `test_interfaccia.py` | 539 | **Le funzioni dell'interfaccia grafica.** La finestra viene costruita davvero e pilotata da codice — si "premono" i pulsanti chiamando i metodi e si fa girare il ciclo degli eventi con `update()` invece di `mainloop()`. Verifica che i pulsanti si abilitino al momento giusto, che il calcolo in background consegni il risultato, che le modifiche vengano riverificate, che una modifica impossibile venga rifiutata senza schiantarsi, e che il disegno manuale produca il pettine giusto. Richiede OR-Tools e un ambiente grafico. |
+| `test_interfaccia.py` | 583 | **Le funzioni dell'interfaccia grafica.** La finestra viene costruita davvero e pilotata da codice — si "premono" i pulsanti chiamando i metodi e si fa girare il ciclo degli eventi con `update()` invece di `mainloop()`. Verifica che i pulsanti si abilitino al momento giusto, che il calcolo in background consegni il risultato, che le modifiche vengano riverificate, che una modifica impossibile venga rifiutata senza schiantarsi, e che il disegno manuale produca il pettine giusto. Richiede OR-Tools e un ambiente grafico. |
 
 `kinematics.py` ha in fondo un autotest che si lancia allo stesso modo
 (`python kinematics.py`).
@@ -154,6 +154,31 @@ tratto ne dice un'altra sola:
 Niente altro. Un colore per ogni tipo di tratto rendeva il grafico un
 arcobaleno in cui non si riusciva piu' a seguire un carroponte dall'inizio alla
 fine, che e' l'unica cosa per cui serve un ciclogramma.
+
+### Ingrandire
+
+Su una linea lunga i punti interessanti stanno spesso in pochi secondi. Il
+grafico si ingrandisce in due modi:
+
+- **rotella del mouse** — ingrandisce e rimpicciolisce sui **tempi**, centrato
+  dove tieni il puntatore. E' la direzione in cui si cerca il dettaglio: le
+  vasche sono poche e fisse. Con **Shift** la rotella agisce sulle posizioni,
+  con **Ctrl** su tutti e due gli assi.
+- **barra sotto al grafico** — la lente ingrandisce un rettangolo che disegni
+  tu, la croce sposta l'inquadratura trascinando, la casetta torna a inquadrare
+  tutto, le frecce ripercorrono le viste precedenti. Il dischetto salva
+  l'immagine **cosi' come la stai vedendo**, ingrandimento compreso.
+
+Quando la lente o la croce sono premute il clic serve a navigare: il
+trascinamento dei punti e l'assegnazione dei trasporti sono sospesi finche' non
+le rilasci.
+
+**L'ingrandimento sopravvive alle modifiche.** Ritocchi un punto, cambi un tempo
+in vasca, assegni un trasporto: il grafico viene ridisegnato ma resta inquadrato
+dov'eri. Sarebbe inutile ingrandire per lavorare su un dettaglio se poi il primo
+ritocco riportasse la vista al punto di partenza. Si riparte da capo solo quando
+cambia il disegno stesso: un'altra linea, o il passaggio fra calcolo automatico
+e disegno manuale.
 
 ### Il verdetto
 
@@ -883,6 +908,17 @@ reali, tutti invisibili guardando solo lo stato `OPTIMAL` del solver.
    spostamento a vuoto di lunghezza zero che, sommato allo scarto di
    arrotondamento sui tick, si ordinava male rispetto ai vicini e spezzava la
    traiettoria. Difetto preesistente, corretto.
+
+Un quarto difetto non l'ha trovato il verificatore ma l'uso dell'interfaccia:
+`plot_cyclogram` disegnava solo gli stati `OPTIMAL` e `FEASIBLE`, mentre una
+soluzione ritoccata a mano ha stato `MANUALE`. Il risultato era che **il
+grafico si svuotava alla prima modifica**, sostituito da "Impossibile
+disegnare", proprio nella funzione che serve a modificare guardando il grafico.
+Le tabelle e la verifica intanto si aggiornavano regolarmente, quindi nessun
+test se ne era accorto. Ora si disegna qualunque soluzione che abbia dei
+segmenti, e un test controlla che dopo una modifica il grafico ci sia ancora.
+Morale: un controllo scritto per rifiutare l'input sbagliato che finisce per
+rifiutare anche quello giusto e' un modo comune di rompere le cose in silenzio.
 
 ### Storia precedente
 

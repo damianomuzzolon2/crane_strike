@@ -17,6 +17,7 @@ eseguibile autonomo.
 from __future__ import annotations
 
 import dataclasses
+import gc
 import multiprocessing
 import os
 import queue
@@ -31,7 +32,7 @@ matplotlib.use("TkAgg")
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
-from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
 from matplotlib.figure import Figure
 
 from excel_io import leggi_problema, scrivi_modello, scrivi_risultati
@@ -66,6 +67,57 @@ _SOTTILE = 1.2
 _SPESSO = 2.6
 
 
+class _BarraGrafico(NavigationToolbar2Tk):
+    """La barra di navigazione di matplotlib (zoom a rettangolo, pan, vista
+    intera, salva immagine), che avvisa l'applicazione quando la vista cambia.
+
+    Serve avvisarla perche' il grafico viene ridisegnato da zero a ogni
+    modifica: senza sapere che l'utente ha ingrandito una zona, ogni clic gli
+    farebbe saltare la vista al punto di partenza -- proprio mentre sta
+    lavorando sul dettaglio per cui aveva ingrandito."""
+
+    # Le stesse voci di matplotlib, con le descrizioni in italiano e senza
+    # "Configure subplots": regola i margini, che qui vengono comunque
+    # ricalcolati da tight_layout a ogni ridisegno, quindi non farebbe altro
+    # che sfasare il grafico. I nomi in prima colonna restano in inglese: la
+    # barra ci cerca dentro 'Back' e 'Forward' per abilitarli.
+    toolitems = (
+        ("Home", "Torna a inquadrare tutto", "home", "home"),
+        ("Back", "Vista precedente", "back", "back"),
+        ("Forward", "Vista successiva", "forward", "forward"),
+        (None, None, None, None),
+        ("Pan", "Sposta l'inquadratura trascinando", "move", "pan"),
+        ("Zoom", "Ingrandisci un rettangolo", "zoom_to_rect", "zoom"),
+        (None, None, None, None),
+        ("Save", "Salva l'immagine come si vede adesso", "filesave", "save_figure"),
+    )
+
+    def __init__(self, tela, cornice, al_cambio, al_ripristino):
+        self._al_cambio = al_cambio
+        self._al_ripristino = al_ripristino
+        super().__init__(tela, cornice, pack_toolbar=False)
+
+    def home(self, *args):
+        self._al_ripristino()
+        super().home(*args)
+
+    def release_zoom(self, event):
+        super().release_zoom(event)
+        self._al_cambio()
+
+    def release_pan(self, event):
+        super().release_pan(event)
+        self._al_cambio()
+
+    def back(self, *args):
+        super().back(*args)
+        self._al_cambio()
+
+    def forward(self, *args):
+        super().forward(*args)
+        self._al_cambio()
+
+
 class Applicazione(tk.Tk):
     def __init__(self, file_iniziale: str | None = None):
         super().__init__()
@@ -94,6 +146,9 @@ class Applicazione(tk.Tk):
         self._annulla: list = []  # pila per il ripristino
         self._trascinamento = None
         self._guida = None
+        # zoom: vero quando l'inquadratura l'ha scelta l'utente e va
+        # conservata attraverso i ridisegni
+        self._zoom_utente = False
 
         # -- disegno manuale ------------------------------------------------
         self.modo = "automatico"  # oppure "manuale"
@@ -166,10 +221,17 @@ class Applicazione(tk.Tk):
         self.assi = self.figura.add_subplot(111)
         self._grafico_vuoto()
         self.tela = FigureCanvasTkAgg(self.figura, master=cornice_grafico)
-        self.tela.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+        # La barra va impacchettata PRIMA della tela: la tela si prende tutto
+        # lo spazio che avanza (expand=True) e altrimenti non ne lascerebbe.
+        self.barra_grafico = _BarraGrafico(
+            self.tela, cornice_grafico, self._segna_zoom, self._azzera_zoom
+        )
+        self.barra_grafico.pack(side=tk.BOTTOM, fill=tk.X)
+        self.tela.get_tk_widget().pack(side=tk.TOP, fill=tk.BOTH, expand=True)
         self.tela.mpl_connect("button_press_event", self._su_pressione)
         self.tela.mpl_connect("motion_notify_event", self._su_movimento)
         self.tela.mpl_connect("button_release_event", self._su_rilascio)
+        self.tela.mpl_connect("scroll_event", self._su_rotella)
 
         pannello = ttk.Frame(corpo, width=470)
         corpo.add(pannello, weight=1)
@@ -483,6 +545,7 @@ class Applicazione(tk.Tk):
         self.dati = None
         self.soluzione = None
         self.report = None
+        self._reimposta_grafico()  # altra linea, altre quote: si riparte da tutto
         d = self.config_linea.data
         self._mostra_percorso(percorso)
         self._scrivi_riepilogo(
@@ -655,6 +718,8 @@ class Applicazione(tk.Tk):
             return
 
         self.soluzione, self.dati, self.report = sol, dati, report
+        if self.modo != "automatico":
+            self._reimposta_grafico()  # si torna dal pettine al ciclogramma
         self.modo = "automatico"
         self.incoerenze = []
         self._carica_stato_modificabile()
@@ -667,6 +732,7 @@ class Applicazione(tk.Tk):
 
     def _mostra_risultato(self):
         sol, dati, rep = self.soluzione, self.dati, self.report
+        vista = self._vista_corrente()
         self.assi.clear()
         for lato in self.assi.spines.values():
             lato.set_visible(True)
@@ -681,6 +747,7 @@ class Applicazione(tk.Tk):
         except Exception as e:
             self._grafico_vuoto(f"Impossibile disegnare: {e}")
         self.figura.tight_layout()
+        self._riapplica_vista(vista)
         self.tela.draw()
 
         origine = {
@@ -762,6 +829,9 @@ class Applicazione(tk.Tk):
         if not self._pronto_per_calcolare():
             return
         d = self.config_linea.data
+        # dal ciclogramma (2 cicli) al pettine (14): un'inquadratura scelta
+        # sull'uno non vuol dire piu' niente sull'altro
+        self._reimposta_grafico()
         self.modo = "manuale"
         self.permanenze = manuale.permanenze_iniziali(d)
         self.T_corrente = d.takt_min
@@ -821,6 +891,7 @@ class Applicazione(tk.Tk):
 
     def _disegna_pettine(self):
         d, T = self.config_linea.data, self.T_corrente
+        vista = self._vista_corrente()
         self.assi.clear()
         for lato in self.assi.spines.values():
             lato.set_visible(True)
@@ -914,6 +985,7 @@ class Applicazione(tk.Tk):
             handles=legenda, loc="upper left", fontsize=7, framealpha=0.9, ncol=3
         )
         self.figura.tight_layout()
+        self._riapplica_vista(vista)
         self.tela.draw()
 
     def _mossa_del_segmento(self, s) -> int | None:
@@ -1296,6 +1368,8 @@ class Applicazione(tk.Tk):
     def _su_pressione(self, evento):
         if evento.inaxes is not self.assi or self.soluzione is None:
             return
+        if self._navigazione_attiva():
+            return  # sta navigando: il clic e' della barra, non nostro
         if self.modo == "manuale":
             self._clic_manuale(evento)
             return
@@ -1415,6 +1489,71 @@ class Applicazione(tk.Tk):
             else tk.DISABLED
         )
 
+    # ------------------------------------------------------------------
+    # Zoom
+    # ------------------------------------------------------------------
+
+    def _segna_zoom(self):
+        """L'utente ha scelto lui l'inquadratura: da qui in poi va rispettata."""
+        self._zoom_utente = True
+
+    def _azzera_zoom(self):
+        """Si torna a inquadrare tutto (pulsante 'vista intera')."""
+        self._zoom_utente = False
+
+    def _reimposta_grafico(self):
+        """Il grafico cambia natura -- altra linea, o passaggio fra calcolo
+        automatico e disegno manuale. Oltre allo zoom si butta via anche la
+        cronologia di navigazione: le viste memorizzate si riferiscono a un
+        disegno che non c'e' piu', e 'indietro' porterebbe su una fetta a
+        caso di quello nuovo."""
+        self._zoom_utente = False
+        if getattr(self, "barra_grafico", None) is not None:
+            self.barra_grafico.update()
+
+    def _vista_corrente(self):
+        """Inquadratura da conservare attraverso il prossimo ridisegno,
+        oppure None se va bene quella naturale."""
+        if not self._zoom_utente:
+            return None
+        return self.assi.get_xlim(), self.assi.get_ylim()
+
+    def _riapplica_vista(self, vista):
+        if vista is None:
+            return
+        self.assi.set_xlim(vista[0])
+        self.assi.set_ylim(vista[1])
+
+    def _su_rotella(self, evento):
+        """Zoom con la rotella, centrato dove sta il puntatore.
+
+        Agisce sul solo asse dei tempi: le vasche sono poche e fisse, mentre
+        il tempo e' la direzione in cui si cerca il dettaglio. Con Shift si
+        zooma sulle posizioni, con Ctrl su tutti e due."""
+        if evento.inaxes is not self.assi:
+            return
+        fattore = 1 / 1.3 if evento.button == "up" else 1.3
+        tasto = evento.key or ""
+        if "shift" not in tasto and evento.xdata is not None:
+            x0, x1 = self.assi.get_xlim()
+            self.assi.set_xlim(
+                evento.xdata + (x0 - evento.xdata) * fattore,
+                evento.xdata + (x1 - evento.xdata) * fattore,
+            )
+        if ("shift" in tasto or "control" in tasto) and evento.ydata is not None:
+            y0, y1 = self.assi.get_ylim()
+            self.assi.set_ylim(
+                evento.ydata + (y0 - evento.ydata) * fattore,
+                evento.ydata + (y1 - evento.ydata) * fattore,
+            )
+        self._segna_zoom()
+        self.tela.draw_idle()
+
+    def _navigazione_attiva(self) -> bool:
+        """Vero quando e' selezionato lo zoom a rettangolo o il pan: in quel
+        caso il clic serve a navigare, non a modificare il ciclogramma."""
+        return bool(str(getattr(self.barra_grafico, "mode", "")))
+
     def _mostra_percorso(self, percorso: str | None):
         """Fa comparire il percorso completo del file di ingresso in barra e
         nel titolo della finestra.
@@ -1445,6 +1584,23 @@ class Applicazione(tk.Tk):
     def _errore(self, titolo: str, dettaglio: str):
         messagebox.showerror(f"{TITOLO} - {titolo}", dettaglio)
         self._stato(titolo)
+
+    def destroy(self):
+        # Le icone dei pulsanti della barra del grafico sono immagini di Tk.
+        # Se sopravvivono alla finestra, il garbage collector prova a
+        # cancellarle su un interprete Tk che non esiste piu' e stampa un
+        # traceback ("main thread is not in main loop"): innocuo, ma appare a
+        # ogni chiusura e sembra un guasto. Si lasciano andare finche' Tk e'
+        # ancora in piedi.
+        barra = getattr(self, "barra_grafico", None)
+        if barra is not None:
+            for pulsante in getattr(barra, "_buttons", {}).values():
+                pulsante._ntimage = None
+            barra._buttons = {}
+            self.barra_grafico = None
+            barra.destroy()
+            gc.collect()
+        super().destroy()
 
 
 def autotest(cartella: str | None = None) -> int:

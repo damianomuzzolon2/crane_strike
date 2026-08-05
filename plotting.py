@@ -38,6 +38,10 @@ _STYLE = {
 }
 _HOIST_COLORS = ["#c0392b", "#2980b9", "#27ae60", "#8e44ad", "#d35400", "#16a085"]
 
+# Stati che dichiarano esplicitamente l'assenza di una soluzione: gli unici
+# per cui non c'e' proprio niente da disegnare.
+_STATI_SENZA_SOLUZIONE = {"INFEASIBLE", "MODEL_INVALID", "UNKNOWN", "NOT_SOLVED"}
+
 
 def _sample_segment(seg: Segment, n=25):
     """Restituisce array (t, x) campionati lungo il segmento, usando il
@@ -71,7 +75,12 @@ def plot_cyclogram(
     ax=None,
     save_path: str | None = None,
 ):
-    if solution.status not in ("OPTIMAL", "FEASIBLE"):
+    # Si disegna tutto cio' che ha dei segmenti, qualunque sia lo stato: una
+    # soluzione modificata a mano ("MANUALE") o una proposta di partenza
+    # ("PROPOSTA") sono esattamente i casi in cui guardare il ciclogramma
+    # serve di piu'. Il filtro va sugli stati che dichiarano di NON avere una
+    # soluzione -- stessa convenzione di verify._STATI_SENZA_SOLUZIONE.
+    if solution.status in _STATI_SENZA_SOLUZIONE or not solution.segments_per_hoist:
         raise ValueError(f"Nessuna soluzione da disegnare (status={solution.status})")
 
     T = solution.T
