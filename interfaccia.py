@@ -58,6 +58,13 @@ _COLORI_GRAVITA = {
 }
 _ETICHETTE_GRAVITA = {"error": "ERRORE", "warning": "avviso", "info": "nota"}
 
+# Disegno manuale: un solo grigio per tutto cio' che l'utente non ha ancora
+# deciso, e due soli spessori. Il colore compare solo dove si e' assegnato un
+# trasporto a un carroponte, e li' vuol dire quello e nient'altro.
+_GRIGIO = "#9a9a9a"
+_SOTTILE = 1.2
+_SPESSO = 2.6
+
 
 class Applicazione(tk.Tk):
     def __init__(self, file_iniziale: str | None = None):
@@ -342,7 +349,8 @@ class Applicazione(tk.Tk):
             cornice,
             text="Le scalinate grigie sono i pezzi in lavorazione: una sosta\n"
             "per ogni vasca, ripetute a un takt time di distanza.\n"
-            "Fai clic su un trasporto per assegnarlo al carroponte attivo.",
+            "Fai clic su un trasporto per assegnarlo al carroponte attivo:\n"
+            "prende il suo colore e diventa piu' spesso.",
             foreground="#555555",
         ).pack(anchor=tk.W)
 
@@ -838,51 +846,42 @@ class Applicazione(tk.Tk):
         for segs in scalinate:
             for s in segs:
                 ts, xs = _sample_segment(s)
-                if s.kind == "wait":  # sosta in vasca: e' il dato che si regola
-                    self.assi.plot(
-                        ts, xs, color="#8a8a8a", linewidth=1.4, zorder=2
-                    )
-                    continue
-                k = self._mossa_del_segmento(s)
-                c = self.assegnazione.get(k)
+                k = self._mossa_del_segmento(s) if s.kind != "wait" else None
+                c = self.assegnazione.get(k) if k is not None else None
                 if c is None:
-                    self.assi.plot(
-                        ts, xs, color="#999999", linewidth=1.1, zorder=2
-                    )
+                    # Scheletro: soste in vasca e trasporti ancora liberi, tutti
+                    # dello stesso grigio. Distinguerli servirebbe a niente --
+                    # sono entrambi "cose che non ho ancora deciso".
+                    self.assi.plot(ts, xs, color=_GRIGIO, linewidth=_SOTTILE, zorder=2)
                 else:
                     self.assi.plot(
                         ts,
                         xs,
                         color=_HOIST_COLORS[c % len(_HOIST_COLORS)],
-                        linewidth=2.6,
+                        linewidth=_SPESSO,
                         zorder=4,
                     )
 
         # -- i rientri a vuoto dei carroponti, ripetuti su tutto il pettine -
-        # Le attese non si disegnano: coinciderebbero con le soste del
-        # pettine, raddoppiando le linee senza aggiungere informazione.
+        # Restano grigi come lo scheletro: il colore in questo disegno vuol
+        # dire "l'ho assegnato io", e il rientro non si assegna, viene da se'.
+        # Quale carroponte lo faccia si legge dai trasporti colorati che
+        # collega. Le attese non si disegnano affatto: coinciderebbero con le
+        # soste del pettine, raddoppiando le linee senza aggiungere niente.
         n_cicli = manuale.RIPETIZIONI_PREDEFINITE + 4
-        for h, segs in enumerate(self.soluzione.segments_per_hoist):
-            colore = _HOIST_COLORS[h % len(_HOIST_COLORS)]
-            ordinati = sorted(segs, key=lambda s: s.t_start)
-            impossibili = set()
-            for i, (a, b) in enumerate(zip(ordinati, ordinati[1:])):
-                if b.t_start < a.t_end - 0.05:
-                    impossibili.add(i + 1)
-            for i, s in enumerate(ordinati):
+        for segs in self.soluzione.segments_per_hoist:
+            for s in segs:
                 if s.kind != "empty":
                     continue
                 ts, xs = _sample_segment(s)
-                rotto = i in impossibili
                 for ciclo in range(n_cicli):
                     self.assi.plot(
                         ts + ciclo * T,
                         xs,
-                        color="#cc0000" if rotto else colore,
-                        linewidth=2.0 if rotto else 1.0,
+                        color=_GRIGIO,
+                        linewidth=_SOTTILE,
                         linestyle="--",
-                        alpha=1.0 if rotto else 0.55,
-                        zorder=5 if rotto else 3,
+                        zorder=3,
                     )
 
         fine = manuale.RIPETIZIONI_PREDEFINITE * T + (
@@ -899,20 +898,20 @@ class Applicazione(tk.Tk):
         from matplotlib.lines import Line2D
 
         legenda = [
-            Line2D([0], [0], color="#8a8a8a", lw=1.4, label="sosta in vasca"),
-            Line2D([0], [0], color="#999999", lw=1.1, label="trasporto non assegnato"),
-            Line2D([0], [0], color="#333333", lw=2.6, label="trasporto assegnato"),
             Line2D(
-                [0], [0], color="#333333", lw=1.0, linestyle="--",
+                [0], [0], color=_GRIGIO, lw=_SOTTILE, label="da assegnare"
+            ),
+            Line2D(
+                [0], [0], color=_GRIGIO, lw=_SOTTILE, linestyle="--",
                 label="rientro a vuoto",
             ),
             Line2D(
-                [0], [0], color="#cc0000", lw=2.0, linestyle="--",
-                label="tratto impossibile",
+                [0], [0], color="#333333", lw=_SPESSO,
+                label="assegnato a un carroponte",
             ),
         ]
         self.assi.legend(
-            handles=legenda, loc="upper left", fontsize=7, framealpha=0.9, ncol=2
+            handles=legenda, loc="upper left", fontsize=7, framealpha=0.9, ncol=3
         )
         self.figura.tight_layout()
         self.tela.draw()
@@ -1047,42 +1046,30 @@ class Applicazione(tk.Tk):
             )
 
     def _banner_disegno(self):
-        n = len(self.incoerenze)
-        if n == 0:
-            self.banner.configure(
-                text=f"DISEGNO IN CORSO   -   T = {self.T_corrente:.2f} s   -   "
-                "nessuna incoerenza; premi Verifica adesso",
-                background="#d0e0f0",
-                foreground="#1c4587",
-            )
-        else:
-            self.banner.configure(
-                text=f"DISEGNO IN CORSO   -   {n} tratti impossibili "
-                f"(evidenziati in rosso)",
-                background="#fce5cd",
-                foreground="#7f6000",
-            )
+        # Nessun allarme mentre si disegna. I controlli sono sospesi per
+        # scelta: segnalare i tratti impossibili a ogni clic vorrebbe dire
+        # rimetterli, e a meta' -- perche' il giudizio serio (collisioni,
+        # permanenze, capienze) lo da' solo 'Verifica adesso'.
+        self.banner.configure(
+            text=f"DISEGNO IN CORSO   -   T = {self.T_corrente:.2f} s   -   "
+            "premi Verifica adesso per il report",
+            background="#d0e0f0",
+            foreground="#1c4587",
+        )
         testo = [
             "Disegno manuale.",
             "",
             "Le scalinate grigie sono i pezzi: uno ogni takt time.",
-            "I trasporti colorati sono quelli gia' assegnati a un carroponte.",
+            "Fai clic su un trasporto per assegnarlo al carroponte attivo:",
+            "diventa colorato e piu' spesso.",
             "Le linee tratteggiate sono gli spostamenti a vuoto dei carroponti.",
             "",
             f"Takt time: {self.T_corrente:.2f} s",
             f"Carroponti: {self.n_carroponti_manuale}",
             "",
+            "I controlli sono sospesi: componi come vuoi, poi premi "
+            "'Verifica adesso' per il report completo.",
         ]
-        if self.incoerenze:
-            testo.append("Tratti impossibili:")
-            testo.extend("  - " + m for m in self.incoerenze)
-        else:
-            testo.append("Nessun tratto impossibile.")
-        testo.append("")
-        testo.append(
-            "I controlli sono sospesi: premi 'Verifica adesso' quando vuoi "
-            "il report completo."
-        )
         self._scrivi_riepilogo("\n".join(testo))
 
     def _verifica_adesso(self):
@@ -1114,9 +1101,16 @@ class Applicazione(tk.Tk):
                 foreground="#274e13",
             )
         else:
+            n = len(self.report.errors)
             self.banner.configure(
-                text=f"{len(self.report.errors)} ERRORI, "
-                f"{len(self.incoerenze)} tratti impossibili",
+                # Il conteggio dei tratti impossibili non compare piu': durante
+                # il disegno non si mostrano, e qui li ha gia' contati il
+                # verificatore fra i propri errori.
+                text=(
+                    f"{n} ERRORI   -   vedi la scheda Verifica"
+                    if n
+                    else "IL DISEGNO NON TORNA   -   vedi la scheda Verifica"
+                ),
                 background="#f4cccc",
                 foreground="#990000",
             )

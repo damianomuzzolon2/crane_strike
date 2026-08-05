@@ -779,7 +779,9 @@ def _check_transfers(data, plans, T, time_tol, add):
                 add(
                     "transfer",
                     "error",
-                    f"dalla mossa {k1} non si arriva in tempo alla mossa {k2}: "
+                    f"il carroponte {h + 1} non arriva in tempo dalla mossa "
+                    f"{k1} (finisce in {data.route[k1 + 1].tank_id}) alla "
+                    f"mossa {k2} (parte da {data.route[k2].tank_id}): "
                     f"pronto a {arrivo:.2f}s, prelievo a {target:.2f}s",
                     hoists=(h,),
                     move=k2,
@@ -872,6 +874,38 @@ def _max_sovrapposizioni(intervalli: list[tuple[float, float]], T: float) -> int
     return max(1, massimo)
 
 
+def _dove(data, x: float) -> str:
+    """Traduce una quota della rotaia in un riferimento che si riconosce
+    sull'impianto.
+
+    "a 11.2 m" non dice niente a chi legge: il ciclogramma si ragiona per
+    vasche. Se la quota e' praticamente quella di una vasca si nomina quella,
+    altrimenti si dice fra quali due si trova."""
+    quote = sorted({(t.position, tid) for tid, t in data.tanks.items()})
+    if not quote:
+        return f"{x:.2f} m"
+    piu_vicina = min(quote, key=lambda q: abs(q[0] - x))
+    if abs(piu_vicina[0] - x) < 0.15:
+        return f"sopra {piu_vicina[1]} ({x:.2f} m)"
+    prima = [q for q in quote if q[0] <= x]
+    dopo = [q for q in quote if q[0] >= x]
+    if prima and dopo:
+        return f"fra {prima[-1][1]} e {dopo[0][1]} ({x:.2f} m)"
+    return f"a {x:.2f} m, vicino a {piu_vicina[1]}"
+
+
+def _chi_e_dove(data, i: int, j: int, t: float, xi: float, xj: float) -> str:
+    """Frase che apre ogni rilievo di collisione: chi, quando, dove.
+
+    Senza questa, il report dice solo che due carroponti sono troppo vicini --
+    vero ma inservibile: per rimediare bisogna sapere QUALI e in che punto
+    della linea, altrimenti tocca ricostruirlo a mano dal grafico."""
+    return (
+        f"carroponti {i + 1} e {j + 1} a t={t:.1f}s: "
+        f"il {i + 1} e' {_dove(data, xi)}, il {j + 1} e' {_dove(data, xj)}"
+    )
+
+
 def _check_collisions(
     data, trajectories, T, dt, required, space_tol, warn_margin, add
 ) -> dict:
@@ -916,28 +950,34 @@ def _check_collisions(
     min_pair: Optional[tuple[int, int]] = None
     # una sola violazione riportata per coppia (la peggiore), per non
     # sommergere il report con migliaia di righe quasi identiche
-    worst: dict[tuple[int, int], tuple[float, float]] = {}
+    # per ogni coppia: (distanza, istante, posizione di i, posizione di j).
+    # Le due posizioni servono a dire DOVE succede, non solo quanto.
+    worst: dict[tuple[int, int], tuple[float, float, float, float]] = {}
 
     for i in range(n):
         for j in range(i + 1, n):
             pi, pj = pos[i], pos[j]
             best = float("inf")
             best_t = 0.0
+            best_xi = best_xj = 0.0
             for idx, t in enumerate(times):
                 sep = abs(pi[idx] - pj[idx])
                 if sep < best:
                     best, best_t = sep, t
-            worst[(i, j)] = (best, best_t)
+                    best_xi, best_xj = pi[idx], pj[idx]
+            worst[(i, j)] = (best, best_t, best_xi, best_xj)
             if best < min_sep:
                 min_sep, min_t, min_pair = best, best_t, (i, j)
 
-    for (i, j), (sep, t) in worst.items():
+    for (i, j), (sep, t, xi, xj) in worst.items():
+        chi_e_dove = _chi_e_dove(data, i, j, t, xi, xj)
         if sep < required - err_bound - space_tol:
             add(
                 "collision",
                 "error",
-                f"distanza minima {sep:.3f}m < {required:.3f}m richiesti "
-                f"(ingombro {data.hoist_extent_neg:.2f}+{data.hoist_extent_pos:.2f}"
+                f"COLLISIONE fra {chi_e_dove} -- restano {sep:.3f} m contro i "
+                f"{required:.3f} m richiesti (ingombro "
+                f"{data.hoist_extent_neg:.2f}+{data.hoist_extent_pos:.2f}"
                 f" + sicurezza {data.safety_distance:.2f})",
                 hoists=(i, j),
                 t=t,
@@ -949,9 +989,9 @@ def _check_collisions(
             add(
                 "collision",
                 "warning",
-                f"distanza minima {sep:.3f}m appena sotto i {required:.3f}m "
-                f"richiesti, ma entro la tolleranza di calcolo "
-                f"({err_bound + space_tol:.4f}m)",
+                f"{chi_e_dove} -- distanza {sep:.3f} m, appena sotto i "
+                f"{required:.3f} m richiesti ma entro la tolleranza di calcolo "
+                f"({err_bound + space_tol:.4f} m)",
                 hoists=(i, j),
                 t=t,
                 value=sep,
@@ -962,8 +1002,8 @@ def _check_collisions(
             add(
                 "collision",
                 "warning",
-                f"distanza minima {sep:.3f}m al limite: solo "
-                f"{sep - required:.3f}m di margine oltre il minimo richiesto",
+                f"{chi_e_dove} -- distanza {sep:.3f} m, al limite: solo "
+                f"{sep - required:.3f} m di margine oltre il minimo richiesto",
                 hoists=(i, j),
                 t=t,
                 value=sep,

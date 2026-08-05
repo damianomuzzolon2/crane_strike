@@ -160,6 +160,14 @@ def test_collisione_reale():
     r = verify_solution(data, rotto)
     check(not r.ok, "la soluzione viene respinta")
     check(len(kinds(r, "collision", "error")) == 1, "segnalata una collisione")
+    # Dire "c'e' una collisione" non basta a rimediarla: servono i carri e il
+    # punto della linea, dentro il messaggio, perche' e' l'unica cosa che
+    # l'interfaccia mostra.
+    msg = kinds(r, "collision", "error")[0].message
+    check(
+        "carroponti 1 e 2" in msg and "V0" in msg and "t=" in msg,
+        f"il messaggio dice chi, dove e quando: \"{msg[:70]}...\"",
+    )
     check(
         r.min_separation < r.required_separation,
         f"separazione minima misurata {r.min_separation:.3f}m sotto il minimo",

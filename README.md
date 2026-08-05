@@ -51,7 +51,7 @@ aprire una finestra, e la cinematica senza avere OR-Tools installato.
 | --- | ---: | --- |
 | `kinematics.py` | 130 | La fisica del movimento, in metri e secondi. `travel_time()` da' il tempo per percorrere una distanza con profilo trapezoidale o triangolare; `position_profile()` la posizione istante per istante; `profile_breakpoints()` gli spigoli della curva, che servono al verificatore per limitare in modo rigoroso l'errore di campionamento. Non sa nulla del resto del progetto. |
 | `model.py` | 1711 | Il cuore. Contiene le **strutture dati** (`Tank`, `StationSpec`, `HoistZone`, `ProblemData`, `Segment`, `Solution`), la costruzione e risoluzione del **modello CP-SAT** (`solve`), la scelta automatica di zone e numero di carroponti (`solve_auto_zones`, `solve_auto_hoists`), e la costruzione di un ciclogramma **senza risolvere** a partire dai suoi gradi di liberta' (`build_solution`, `estrai_gradi_di_liberta`) — quest'ultima e' cio' che rende possibile l'editor. |
-| `verify.py` | 980 | Il **verificatore indipendente**: `verify_solution()` ricontrolla una soluzione in Python puro, senza CP-SAT, campionando le posizioni reali dei carroponti. Restituisce un `VerificationReport` con l'elenco delle `Violation` divise per gravita'. E' la rete di sicurezza contro gli errori nella formulazione del modello. |
+| `verify.py` | 1020 | Il **verificatore indipendente**: `verify_solution()` ricontrolla una soluzione in Python puro, senza CP-SAT, campionando le posizioni reali dei carroponti. Restituisce un `VerificationReport` con l'elenco delle `Violation` divise per gravita'. E' la rete di sicurezza contro gli errori nella formulazione del modello. |
 | `manuale.py` | 230 | Supporto al **disegno a mano**: il "pettine" dei pezzi (`pettine`, `catena_pezzo`), la composizione libera del ciclogramma (`componi`) e il controllo che i carroponti non si scavalchino sulla rotaia (`perche_non_va`). |
 
 ### Ingresso, uscita, disegno
@@ -59,13 +59,13 @@ aprire una finestra, e la cinematica senza avere OR-Tools installato.
 | file | righe | contenuto |
 | --- | ---: | --- |
 | `excel_io.py` | 1099 | Tutto l'Excel: `scrivi_modello()` genera il file da compilare, `leggi_problema()` lo rilegge raccogliendo **tutti** gli errori di compilazione con foglio e cella, `scrivi_risultati()` produce il file dei risultati a quattro fogli. |
-| `plotting.py` | 156 | `plot_cyclogram()`: disegna il ciclogramma (posizione lungo la rotaia contro tempo) con il profilo cinematico vero, non con segmenti diritti. |
+| `plotting.py` | 155 | `plot_cyclogram()`: disegna il ciclogramma (posizione lungo la rotaia contro tempo) con il profilo cinematico vero, non con segmenti diritti. |
 
 ### Programmi da lanciare
 
 | file | righe | contenuto |
 | --- | ---: | --- |
-| `interfaccia.py` | 1574 | L'**interfaccia grafica** (tkinter). La classe `Applicazione` e' tutta la finestra: caricamento, calcolo in background, grafico incorporato, editor dei punti, disegno manuale, verifica e salvataggio. `autotest()` prova l'installazione da sola. E' il programma che usa un utente normale. |
+| `interfaccia.py` | 1595 | L'**interfaccia grafica** (tkinter). La classe `Applicazione` e' tutta la finestra: caricamento, calcolo in background, grafico incorporato, editor dei punti, disegno manuale, verifica e salvataggio. `autotest()` prova l'installazione da sola. E' il programma che usa un utente normale. |
 | `ciclogramma.py` | 170 | Lo stesso lavoro da **riga di comando**, per chi preferisce il terminale o vuole automatizzare. |
 | `esempio.py` | 195 | La linea di esempio definita **in codice** invece che in Excel, per chi vuole integrare il solutore in qualcos'altro. |
 | `costruisci_exe.py` | 119 | Costruisce l'**eseguibile autonomo** con PyInstaller. Vedi sotto. |
@@ -80,10 +80,10 @@ Non serve pytest.
 
 | file | righe | cosa verifica |
 | --- | ---: | --- |
-| `test_verify.py` | 831 | **Il verificatore.** Risponde a "chi verifica il verificatore?": venti casi, di cui uno solo corretto e tutti gli altri rotti di proposito (collisioni, permanenze fuori tolleranza, periodicita' incoerente, geometrie patologiche, capienze). Un controllore che non segnala mai nulla e' inutile, quindi ogni controllo ha un caso che DEVE farlo scattare. Non richiede OR-Tools: le soluzioni sono costruite a mano. |
+| `test_verify.py` | 839 | **Il verificatore.** Risponde a "chi verifica il verificatore?": venti casi, di cui uno solo corretto e tutti gli altri rotti di proposito (collisioni, permanenze fuori tolleranza, periodicita' incoerente, geometrie patologiche, capienze). Un controllore che non segnala mai nulla e' inutile, quindi ogni controllo ha un caso che DEVE farlo scattare. Non richiede OR-Tools: le soluzioni sono costruite a mano. |
 | `test_model.py` | 393 | **Il modello CP-SAT.** Risolve davvero e passa ogni soluzione al verificatore: vasche ravvicinate, tre carroponti, capienza, tempi verticali, e la fedelta' della ricostruzione di una soluzione dai suoi gradi di liberta'. Richiede OR-Tools. |
 | `test_excel_io.py` | 577 | **La lettura e la scrittura Excel.** Quasi tutti i casi sono file compilati male: valori mancanti o non numerici, vasche inesistenti o duplicate, righe riordinate, parametri sbagliati. Piu' la struttura del file dei risultati. Non richiede OR-Tools. |
-| `test_interfaccia.py` | 530 | **Le funzioni dell'interfaccia grafica.** La finestra viene costruita davvero e pilotata da codice — si "premono" i pulsanti chiamando i metodi e si fa girare il ciclo degli eventi con `update()` invece di `mainloop()`. Verifica che i pulsanti si abilitino al momento giusto, che il calcolo in background consegni il risultato, che le modifiche vengano riverificate, che una modifica impossibile venga rifiutata senza schiantarsi, e che il disegno manuale produca il pettine giusto. Richiede OR-Tools e un ambiente grafico. |
+| `test_interfaccia.py` | 539 | **Le funzioni dell'interfaccia grafica.** La finestra viene costruita davvero e pilotata da codice — si "premono" i pulsanti chiamando i metodi e si fa girare il ciclo degli eventi con `update()` invece di `mainloop()`. Verifica che i pulsanti si abilitino al momento giusto, che il calcolo in background consegni il risultato, che le modifiche vengano riverificate, che una modifica impossibile venga rifiutata senza schiantarsi, e che il disegno manuale produca il pettine giusto. Richiede OR-Tools e un ambiente grafico. |
 
 `kinematics.py` ha in fondo un autotest che si lancia allo stesso modo
 (`python kinematics.py`).
@@ -164,7 +164,8 @@ questo non finisce mai dentro una scheda:
   fisicamente valido e rispetta tutte le tolleranze dichiarate.
 - **rosso** — quanti errori sono stati trovati. Il dettaglio e' nella scheda
   *Verifica*.
-- **azzurro o arancio** — sei in disegno manuale, i controlli sono sospesi.
+- **azzurro** — sei in disegno manuale, i controlli sono sospesi: componi come
+  vuoi, il giudizio arriva quando premi `Verifica adesso`.
 
 ### Le quattro schede
 
@@ -231,9 +232,14 @@ le soste in vasca (tratti orizzontali) e i trasporti (tratti che salgono).
 E' il metodo con cui i ciclogrammi si tracciano a mano da sempre: prima il
 pettine dei pezzi, poi si decide quali trasporti fa ciascun carroponte.
 
+Qui il colore vuol dire una cosa sola: **l'ho assegnato io**. Tutto quello che
+non hai ancora deciso — soste in vasca, trasporti liberi, rientri a vuoto — e'
+dello stesso grigio sottile, cosi' il disegno resta uno sfondo e le tue scelte
+si vedono da lontano.
+
 - **Clic su un trasporto** per assegnarlo al carroponte attivo (si sceglie con
-  il menu `attivo`). Il trasporto assegnato prende il colore del carroponte, e
-  compaiono le linee tratteggiate dei suoi rientri a vuoto.
+  il menu `attivo`). Il trasporto prende il colore di quel carroponte e diventa
+  piu' spesso, e compaiono i suoi rientri a vuoto (tratteggiati).
 - **Doppio clic su un tempo in vasca** per cambiarlo: le scalinate si spostano
   da quel punto in poi, e magari a quel punto conviene assegnare diversamente.
   La tabella mostra accanto il minimo e il massimo di processo, ma **non
@@ -241,18 +247,25 @@ pettine dei pezzi, poi si decide quali trasporti fa ciascun carroponte.
 - **Doppio clic su una riga della tabella `Assegnazione`** per passare il
   trasporto al carroponte successivo.
 
-**Durante il disegno i controlli sono sospesi.** Si compone liberamente, e anche
-un ciclogramma impossibile viene disegnato lo stesso: i tratti che il carroponte
-non farebbe in tempo a percorrere sono **in rosso spesso** sul grafico e
-descritti uno per uno nella scheda *Riepilogo*, per esempio cosi':
+**Durante il disegno i controlli sono sospesi**, e non a meta': anche un
+ciclogramma impossibile viene disegnato senza una parola. Niente tratti in
+rosso, niente conteggi nel banner. Segnalare gli errori a ogni clic vorrebbe
+dire rimettere i controlli che si erano tolti apposta — e per giunta i piu'
+banali, visto che il giudizio serio (collisioni, permanenze, capienze) lo puo'
+dare solo il verificatore.
+
+Quello arriva quando lo chiedi, con `Verifica adesso`, e dice tutto: per
+esempio dove due carri si toccano, quali sono e in che punto della linea:
 
 ```text
-dalla mossa 3 non si fa in tempo ad arrivare alla mossa 5: il carroponte
-sarebbe pronto a 140,1 s ma il prelievo e' a 98,1 s, 42,0 s troppo tardi
+COLLISIONE fra carroponti 1 e 2 a t=61.6s: il 1 e' sopra PASSIVAZIONE
+(16.50 m), il 2 e' sopra PASSIVAZIONE (16.50 m) -- restano 0.000 m contro
+i 1.800 m richiesti (ingombro 0.70+0.50 + sicurezza 0.60)
 ```
 
-Il report completo — permanenze, collisioni, capienze, takt time — arriva
-quando si preme `Verifica adesso`.
+Quando il punto non coincide con una vasca il messaggio dice fra quali due si
+trova: `il 2 e' fra ZINCATURA e RISCIACQUO_2 (10.80 m)`. Una quota da sola non
+si riconosce sull'impianto; il nome della vasca si'.
 
 `Torna all'automatico` abbandona il disegno e fa ricalcolare tutto al solutore.
 
