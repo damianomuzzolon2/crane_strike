@@ -22,6 +22,8 @@ import tempfile
 import time
 import tkinter as tk
 
+from matplotlib.backend_bases import MouseEvent
+
 from excel_io import scrivi_modello
 
 _n_pass = 0
@@ -283,6 +285,33 @@ def test_modifica_prelievo(percorso_linea):
         app.barra_grafico.home()
         app.update()
         check(not app._zoom_utente, "'vista intera' rimette il grafico com'era")
+
+        # -- mirino --------------------------------------------------------
+        # La linea del mirino sta dentro gli assi, e ogni ridisegno comincia
+        # con assi.clear(). Se non viene ricreata, il cursore funziona finche'
+        # non si tocca niente e poi smette in silenzio: si prova DOPO una
+        # modifica, non prima.
+        def punta(t_secondi, y_metri):
+            px, py = app.assi.transData.transform((t_secondi, y_metri))
+            app.tela.callbacks.process(
+                "motion_notify_event", MouseEvent("motion_notify_event", app.tela, px, py)
+            )
+            app.update()
+
+        punta(80.0, 10.0)
+        check(
+            app._cursore is not None
+            and app._cursore.linev.get_visible()
+            and abs(app._cursore.linev.get_xdata()[0] - 80.0) < 0.5,
+            "il mirino segue il puntatore",
+        )
+        app.fasi[1] = (app.fasi[1] + 3.0) % app.T_corrente
+        app._applica("prova mirino", app._istantanea())
+        punta(150.0, 10.0)
+        check(
+            abs(app._cursore.linev.get_xdata()[0] - 150.0) < 0.5,
+            "e continua a seguirlo dopo un ridisegno",
+        )
     finally:
         chiudi(app)
 

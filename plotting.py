@@ -67,6 +67,16 @@ def math_sign(v: float) -> float:
     return 1.0 if v >= 0 else -1.0
 
 
+def lettura_coordinate(t: float, x: float) -> str:
+    """Cosa scrivere accanto al puntatore, in basso nella finestra.
+
+    Serve sovrascrivere quella predefinita perche' le etichette dell'asse Y
+    sono i nomi delle vasche: matplotlib prova a formattare la quota con lo
+    stesso formattatore e, fuori da un nome di vasca, restituisce una stringa
+    vuota -- si finisce per leggere "(x, y) = (175.0, )"."""
+    return f"t = {t:.1f} s      posizione = {x:.2f} m"
+
+
 def plot_cyclogram(
     data: ProblemData,
     solution: Solution,
@@ -155,6 +165,7 @@ def plot_cyclogram(
     ax.legend(handles=legend_elems, loc="upper right", fontsize=8, framealpha=0.9)
 
     ax.grid(axis="x", color="#f0f0f0")
+    ax.format_coord = lettura_coordinate
 
     if save_path:
         plt.tight_layout()
