@@ -34,18 +34,11 @@ from tkinter import filedialog, messagebox, ttk
 
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
 from matplotlib.figure import Figure
+from matplotlib.lines import Line2D
 from matplotlib.widgets import Cursor
 
 from excel_io import leggi_problema, scrivi_modello, scrivi_risultati
-from model import (
-    HoistZone,
-    build_solution,
-    estrai_gradi_di_liberta,
-    proposta_semplice,
-    solve,
-    solve_auto_hoists,
-    solve_auto_zones,
-)
+from model import solve, solve_auto_hoists, solve_auto_zones
 import manuale
 from plotting import (
     _HOIST_COLORS,
@@ -140,15 +133,26 @@ class Applicazione(tk.Tk):
         self._coda: queue.Queue = queue.Queue()
         self._lavoro_in_corso = False
 
-        # -- stato modificabile del ciclogramma -----------------------------
-        # Sono i soli gradi di liberta' che esistano: takt time, fase di
-        # prelievo di ogni mossa, periodi di attesa in piu' per vasca, e
-        # suddivisione delle mosse fra i carroponti. Tutto il resto e'
-        # derivato, quindi non ha senso permettere di modificarlo.
+        # -- il ciclogramma, nei termini in cui si modifica -------------------
+        # Un ciclogramma ha pochissimi gradi di liberta' reali, e sono gli
+        # stessi che si usano tracciandolo a mano su carta: il takt time, il
+        # TEMPO IN VASCA di ogni tappa, e QUALE CARROPONTE fa ogni trasporto.
+        # Istanti di prelievo, traiettorie, rientri a vuoto sono conseguenza.
+        #
+        # Vale identico per un ciclogramma calcolato dal solutore e per uno
+        # composto da zero: sono lo stesso oggetto. Il solutore ne produce
+        # uno, e i suoi tempi in vasca si rileggono dalla catena dei prelievi
+        # -- ricomporlo da li' restituisce esattamente lo stesso ciclogramma.
+        # Per questo si modificano allo stesso modo, in una pagina sola.
         self.T_corrente: float | None = None
-        self.fasi: dict[int, float] = {}
-        self.giri_extra: dict[int, int] = {}
-        self.zone_correnti: list = []
+        self.permanenze: dict[int, float] = {}
+        self.assegnazione: dict[int, int] = {}
+        self.n_carroponti = 2
+        self.carroponte_attivo = 0
+        self.incoerenze: list[str] = []
+        # da dove viene il ciclogramma che si sta guardando, per il riepilogo
+        self.origine = ""
+        self.modificato = False
         self._annulla: list = []  # pila per il ripristino
         self._trascinamento = None
         self._guida = None
@@ -157,13 +161,15 @@ class Applicazione(tk.Tk):
         self._zoom_utente = False
         self._cursore = None  # mirino verticale che segue il puntatore
 
-        # -- disegno manuale ------------------------------------------------
-        self.modo = "automatico"  # oppure "manuale"
-        self.permanenze: dict[int, float] = {}
-        self.assegnazione: dict[int, int] = {}
-        self.n_carroponti_manuale = 2
-        self.carroponte_attivo = 0
-        self.incoerenze: list[str] = []
+        # Come guardare lo stesso ciclogramma: le traiettorie dei carroponti
+        # su due cicli, oppure il pettine dei pezzi su cui si leggono i tempi
+        # in vasca. Cambia il disegno, non i comandi.
+        self.vista = "ciclogramma"  # oppure "pettine"
+        # La verifica, una volta chiesta, si tiene aggiornata da sola. Non
+        # parte da sola: comporre da zero vuol dire passare per stati
+        # dichiaratamente sbagliati, e un muro di errori rossi mentre si sceglie
+        # la prima mossa non informa nessuno.
+        self.verifica_viva = False
 
         self._costruisci_interfaccia()
         self._aggiorna_stato_pulsanti()
@@ -195,8 +201,11 @@ class Applicazione(tk.Tk):
         self.btn_auto.pack(side=tk.LEFT)
         self.btn_proposta = ttk.Button(
             barra,
-            text="Disegna a mano",
-            command=self._avvia_manuale,
+            # Non "disegna a mano": ora si modifica a mano anche il calcolato,
+            # dalla stessa pagina. Quello che questo pulsante fa di diverso e'
+            # buttare via tutto e ripartire dai tempi minimi di processo.
+            text="Componi da zero",
+            command=self._componi_da_zero,
         )
         self.btn_proposta.pack(side=tk.LEFT, padx=(6, 0))
 
@@ -224,6 +233,28 @@ class Applicazione(tk.Tk):
 
         cornice_grafico = ttk.Frame(corpo)
         corpo.add(cornice_grafico, weight=3)
+
+        # -- come guardare il ciclogramma -----------------------------------
+        # Due disegni dello stesso oggetto: le traiettorie dei carroponti su
+        # due cicli, oppure il pettine dei pezzi. Il primo dice se il piano
+        # regge, il secondo dice da dove vengono i tempi -- le pedate delle
+        # scalinate SONO i tempi in vasca. I comandi restano gli stessi.
+        scelta_vista = ttk.Frame(cornice_grafico)
+        scelta_vista.pack(side=tk.TOP, fill=tk.X, pady=(0, 4))
+        ttk.Label(scelta_vista, text="Vista:").pack(side=tk.LEFT)
+        self.var_vista = tk.StringVar(value="ciclogramma")
+        for valore, etichetta in (
+            ("ciclogramma", "ciclogramma (carroponti, 2 cicli)"),
+            ("pettine", "pettine (pezzi, tempi in vasca)"),
+        ):
+            ttk.Radiobutton(
+                scelta_vista,
+                text=etichetta,
+                value=valore,
+                variable=self.var_vista,
+                command=self._cambia_vista,
+            ).pack(side=tk.LEFT, padx=(8, 0))
+
         self.figura = Figure(figsize=(9, 6), dpi=100)
         self.assi = self.figura.add_subplot(111)
         self._grafico_vuoto()
@@ -270,15 +301,12 @@ class Applicazione(tk.Tk):
         self.testo_riepilogo.pack(fill=tk.BOTH, expand=True)
         self.testo_riepilogo.configure(state=tk.DISABLED)
 
-        # -- scheda: modifica ----------------------------------------------
-        scheda_modifica = ttk.Frame(schede, padding=6)
-        schede.add(scheda_modifica, text="Modifica")
-        self._costruisci_scheda_modifica(scheda_modifica)
-
-        # -- scheda: disegno manuale ---------------------------------------
-        scheda_disegno = ttk.Frame(schede, padding=6)
-        schede.add(scheda_disegno, text="Disegno")
-        self._costruisci_scheda_disegno(scheda_disegno)
+        # -- scheda: il ciclogramma ----------------------------------------
+        # Una sola, per il calcolato e per il composto a mano: sono lo stesso
+        # oggetto con gli stessi gradi di liberta'.
+        scheda_ciclogramma = ttk.Frame(schede, padding=6)
+        schede.add(scheda_ciclogramma, text="Ciclogramma")
+        self._costruisci_scheda_ciclogramma(scheda_ciclogramma)
 
         # -- scheda: verifica ----------------------------------------------
         scheda_verifica = ttk.Frame(schede, padding=6)
@@ -312,141 +340,40 @@ class Applicazione(tk.Tk):
             foreground="#777777",
         ).pack(anchor=tk.W, pady=(4, 0))
 
-    def _costruisci_scheda_modifica(self, cornice):
-        intestazione = ttk.Frame(cornice)
-        intestazione.pack(fill=tk.X)
-        ttk.Label(
-            intestazione,
-            text="Trascina i punti di prelievo sul grafico, oppure modifica\n"
-            "i valori qui sotto. La verifica si aggiorna a ogni modifica.",
-            foreground="#555555",
-        ).pack(anchor=tk.W)
-
-        riga = ttk.Frame(cornice)
-        riga.pack(fill=tk.X, pady=(8, 4))
-        ttk.Label(riga, text="Takt time [s]:").pack(side=tk.LEFT)
-        self.var_takt = tk.StringVar()
-        campo = ttk.Entry(riga, textvariable=self.var_takt, width=10)
-        campo.pack(side=tk.LEFT, padx=(6, 2))
-        campo.bind("<Return>", lambda e: self._modifica_takt())
-        ttk.Button(riga, text="Applica", width=8, command=self._modifica_takt).pack(
-            side=tk.LEFT
-        )
-        ttk.Label(riga, text="Carroponti:").pack(side=tk.LEFT, padx=(16, 4))
-        self.var_carroponti = tk.StringVar()
-        self.spin_carroponti = ttk.Spinbox(
-            riga,
-            from_=1,
-            to=8,
-            width=4,
-            textvariable=self.var_carroponti,
-            command=self._modifica_numero_carroponti,
-        )
-        self.spin_carroponti.pack(side=tk.LEFT)
-
-        ttk.Label(cornice, text="Mosse", font=("", 9, "bold")).pack(
-            anchor=tk.W, pady=(10, 2)
-        )
-        cornice_mosse = ttk.Frame(cornice)
-        cornice_mosse.pack(fill=tk.BOTH, expand=True)
-        self.tabella_mosse = ttk.Treeview(
-            cornice_mosse,
-            columns=("mossa", "da", "a", "carro", "prelievo", "giri"),
-            show="headings",
-        )
-        for chiave, titolo, larghezza in [
-            ("mossa", "n", 30),
-            ("da", "da vasca", 100),
-            ("a", "a vasca", 100),
-            ("carro", "carrop.", 55),
-            ("prelievo", "prelievo [s]", 80),
-            ("giri", "giri", 40),
-        ]:
-            self.tabella_mosse.heading(chiave, text=titolo)
-            self.tabella_mosse.column(
-                chiave, width=larghezza, anchor=tk.W, stretch=(chiave in ("da", "a"))
-            )
-        scorri = ttk.Scrollbar(
-            cornice_mosse, orient=tk.VERTICAL, command=self.tabella_mosse.yview
-        )
-        self.tabella_mosse.configure(yscrollcommand=scorri.set)
-        self.tabella_mosse.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        scorri.pack(side=tk.RIGHT, fill=tk.Y)
-        self.tabella_mosse.bind("<Double-1>", self._modifica_cella)
-
+    def _costruisci_scheda_ciclogramma(self, cornice):
         ttk.Label(
             cornice,
-            text="Doppio clic su 'prelievo' o 'giri' per cambiarli.\n"
-            "'giri' = periodi di attesa in vasca oltre il minimo.",
-            foreground="#777777",
-        ).pack(anchor=tk.W, pady=(4, 0))
-
-        pulsanti = ttk.Frame(cornice)
-        pulsanti.pack(fill=tk.X, pady=(8, 0))
-        self.btn_annulla = ttk.Button(
-            pulsanti, text="Annulla modifica", command=self._annulla_modifica
-        )
-        self.btn_annulla.pack(side=tk.LEFT)
-        self.btn_riottimizza = ttk.Button(
-            pulsanti,
-            # non "da qui": il solutore riparte da zero e le modifiche fatte a
-            # mano vengono perse. L'etichetta deve dirlo.
-            text="Rifai il calcolo automatico",
-            command=self._calcola_automatico,
-        )
-        self.btn_riottimizza.pack(side=tk.LEFT, padx=(6, 0))
-
-        # -- barra di stato -------------------------------------------------
-        piede = ttk.Frame(self, padding=(10, 4))
-        piede.pack(fill=tk.X)
-        self.etichetta_stato = ttk.Label(piede, text="Pronto")
-        self.etichetta_stato.pack(side=tk.LEFT)
-        self.avanzamento = ttk.Progressbar(piede, mode="indeterminate", length=180)
-        self.avanzamento.pack(side=tk.RIGHT)
-
-    def _grafico_vuoto(self, messaggio="Apri una linea per cominciare"):
-        self.assi.clear()
-        self.assi.set_xticks([])
-        self.assi.set_yticks([])
-        for lato in self.assi.spines.values():
-            lato.set_visible(False)
-        self.assi.text(
-            0.5, 0.5, messaggio, ha="center", va="center", color="#999999", fontsize=12
-        )
-
-    def _costruisci_scheda_disegno(self, cornice):
-        ttk.Label(
-            cornice,
-            text="Le scalinate grigie sono i pezzi in lavorazione: una sosta\n"
-            "per ogni vasca, ripetute a un takt time di distanza.\n"
-            "Fai clic su un trasporto per assegnarlo al carroponte attivo:\n"
-            "prende il suo colore e diventa piu' spesso.",
+            text="Il ciclogramma si regola con tre cose: il takt time, il tempo\n"
+            "in vasca di ogni tappa e quale carroponte fa ogni trasporto.\n"
+            "Tutto il resto viene da se'. Vale sia per un ciclogramma\n"
+            "calcolato sia per uno composto da zero.",
             foreground="#555555",
         ).pack(anchor=tk.W)
 
         riga = ttk.Frame(cornice)
         riga.pack(fill=tk.X, pady=(8, 2))
         ttk.Label(riga, text="Takt time [s]:").pack(side=tk.LEFT)
-        self.var_takt_manuale = tk.StringVar()
-        campo = ttk.Entry(riga, textvariable=self.var_takt_manuale, width=9)
+        self.var_takt = tk.StringVar()
+        campo = ttk.Entry(riga, textvariable=self.var_takt, width=9)
         campo.pack(side=tk.LEFT, padx=(6, 2))
-        campo.bind("<Return>", lambda e: self._ricomponi_manuale())
-        ttk.Button(riga, text="Applica", width=8, command=self._ricomponi_manuale).pack(
+        campo.bind("<Return>", lambda e: self._modifica_takt())
+        ttk.Button(riga, text="Applica", width=8, command=self._modifica_takt).pack(
             side=tk.LEFT
         )
 
         riga2 = ttk.Frame(cornice)
         riga2.pack(fill=tk.X, pady=(2, 6))
         ttk.Label(riga2, text="Carroponti:").pack(side=tk.LEFT)
-        self.var_n_carro_manuale = tk.StringVar(value="2")
-        ttk.Spinbox(
+        self.var_carroponti = tk.StringVar(value="2")
+        self.spin_carroponti = ttk.Spinbox(
             riga2,
             from_=1,
             to=8,
             width=4,
-            textvariable=self.var_n_carro_manuale,
-            command=self._cambia_carroponti_manuale,
-        ).pack(side=tk.LEFT, padx=(6, 16))
+            textvariable=self.var_carroponti,
+            command=self._cambia_carroponti,
+        )
+        self.spin_carroponti.pack(side=tk.LEFT, padx=(6, 16))
         ttk.Label(riga2, text="attivo:").pack(side=tk.LEFT)
         self.var_carro_attivo = tk.StringVar(value="1")
         self.combo_attivo = ttk.Combobox(
@@ -489,7 +416,8 @@ class Applicazione(tk.Tk):
         self.tabella_permanenze.bind("<Double-1>", self._modifica_permanenza)
         ttk.Label(
             cornice,
-            text="Doppio clic sul tempo per cambiarlo: le scalinate si spostano.",
+            text="Doppio clic sul tempo per cambiarlo. Il minimo e il massimo\n"
+            "sono di processo: si possono sforare, la verifica lo dira'.",
             foreground="#777777",
         ).pack(anchor=tk.W, pady=(2, 0))
 
@@ -516,15 +444,50 @@ class Applicazione(tk.Tk):
             )
         self.tabella_assegnazione.pack(fill=tk.BOTH, expand=True)
         self.tabella_assegnazione.bind("<Double-1>", self._assegna_da_tabella)
+        ttk.Label(
+            cornice,
+            text="Doppio clic per passare il trasporto al carroponte successivo,\n"
+            "oppure clic sul trasporto nel grafico per darlo a quello attivo.",
+            foreground="#777777",
+        ).pack(anchor=tk.W, pady=(2, 0))
 
         pulsanti = ttk.Frame(cornice)
         pulsanti.pack(fill=tk.X, pady=(8, 0))
-        ttk.Button(
+        self.btn_annulla = ttk.Button(
+            pulsanti, text="Annulla modifica", command=self._annulla_modifica
+        )
+        self.btn_annulla.pack(side=tk.LEFT)
+        self.btn_verifica = ttk.Button(
             pulsanti, text="Verifica adesso", command=self._verifica_adesso
-        ).pack(side=tk.LEFT)
-        ttk.Button(
-            pulsanti, text="Torna all'automatico", command=self._calcola_automatico
-        ).pack(side=tk.LEFT, padx=(6, 0))
+        )
+        self.btn_verifica.pack(side=tk.LEFT, padx=(6, 0))
+        self.btn_riottimizza = ttk.Button(
+            pulsanti,
+            # Non "rifai il calcolo": rifa' solo la SUDDIVISIONE, tenendo il
+            # numero di carroponti scelto qui sopra. Le modifiche fatte a mano
+            # si perdono, e l'etichetta deve dirlo abbastanza.
+            text="Ottimizza con questi carroponti",
+            command=self._modifica_numero_carroponti,
+        )
+        self.btn_riottimizza.pack(side=tk.LEFT, padx=(6, 0))
+
+        # -- barra di stato -------------------------------------------------
+        piede = ttk.Frame(self, padding=(10, 4))
+        piede.pack(fill=tk.X)
+        self.etichetta_stato = ttk.Label(piede, text="Pronto")
+        self.etichetta_stato.pack(side=tk.LEFT)
+        self.avanzamento = ttk.Progressbar(piede, mode="indeterminate", length=180)
+        self.avanzamento.pack(side=tk.RIGHT)
+
+    def _grafico_vuoto(self, messaggio="Apri una linea per cominciare"):
+        self.assi.clear()
+        self.assi.set_xticks([])
+        self.assi.set_yticks([])
+        for lato in self.assi.spines.values():
+            lato.set_visible(False)
+        self.assi.text(
+            0.5, 0.5, messaggio, ha="center", va="center", color="#999999", fontsize=12
+        )
 
     # ------------------------------------------------------------------
     # Azioni
@@ -553,6 +516,14 @@ class Applicazione(tk.Tk):
         self.dati = None
         self.soluzione = None
         self.report = None
+        self.T_corrente = None
+        self.permanenze = {}
+        self.assegnazione = {}
+        self.incoerenze = []
+        self.origine = ""
+        self.modificato = False
+        self.verifica_viva = False
+        self._annulla.clear()
         self._reimposta_grafico()  # altra linea, altre quote: si riparte da tutto
         d = self.config_linea.data
         self._mostra_percorso(percorso)
@@ -621,17 +592,6 @@ class Applicazione(tk.Tk):
             return ("nessuna", sol, None, None)
         dati = dataclasses.replace(d, zones=zone)
         return ("ok", sol, dati, verify_solution(dati, sol))
-
-    def _crea_proposta(self):
-        if not self._pronto_per_calcolare():
-            return
-        cfg = self.config_linea
-
-        def lavoro():
-            sol, dati = proposta_semplice(cfg.data)
-            return ("ok", sol, dati, verify_solution(dati, sol))
-
-        self._avvia_lavoro("Costruisco la proposta di partenza...", lavoro)
 
     def _salva(self):
         if self.soluzione is None:
@@ -717,37 +677,325 @@ class Applicazione(tk.Tk):
                 "  - aumentare il numero massimo di carroponti\n"
                 "  - aumentare i posti delle vasche piu' lente\n"
                 "  - allungare il tempo limite di calcolo\n\n"
-                "Oppure parti da una proposta semplice e aggiustala a mano: "
+                "Oppure premi 'Componi da zero' e aggiustalo a mano: "
                 "il verificatore dira' esattamente cosa manca."
             )
             self._svuota_tabella()
-            if self.zone_correnti:
-                self.var_carroponti.set(str(len(self.zone_correnti)))
             return
 
         self.soluzione, self.dati, self.report = sol, dati, report
-        if self.modo != "automatico":
-            self._reimposta_grafico()  # si torna dal pettine al ciclogramma
-        self.modo = "automatico"
         self.incoerenze = []
-        self._carica_stato_modificabile()
-        self._mostra_risultato()
+        self.origine = (
+            "calcolo automatico (ottimo)"
+            if sol.status == "OPTIMAL"
+            else "calcolo automatico (soluzione valida, non dimostrata ottima)"
+        )
+        self.modificato = False
+        # Il solutore ha gia' verificato: da qui in poi il verdetto resta vivo.
+        self.verifica_viva = True
+        self._reimposta_grafico()
+        self._stato_da_soluzione()
+        self._sincronizza_campi()
+        self._popola_tabelle()
+        self._popola_verifica()
+        self._mostra_ciclogramma()
         self._aggiorna_stato_pulsanti()
+        self._stato(f"Ciclogramma pronto - T = {sol.T:.2f} s" + self._esito_breve())
 
     # ------------------------------------------------------------------
-    # Presentazione del risultato
+    # Il ciclogramma: comporlo, modificarlo, mostrarlo
+    #
+    # Tutto passa da _ricomponi(): cambio del takt, dei tempi in vasca,
+    # dell'assegnazione, trascinamento sul grafico. Che il ciclogramma venga
+    # dal solutore o sia stato composto da zero non fa differenza -- il
+    # solutore fornisce solo lo stato di partenza, e da li' in poi e' lo
+    # stesso oggetto modificato nello stesso modo.
     # ------------------------------------------------------------------
 
-    def _mostra_risultato(self):
-        sol, dati, rep = self.soluzione, self.dati, self.report
+    def _stato_da_soluzione(self) -> bool:
+        """Rilegge dalla soluzione del solutore i tre gradi di liberta' con cui
+        la si modifica: takt time, tempi in vasca, assegnazione delle mosse.
+
+        I tempi in vasca sono le differenze della catena dei prelievi meno la
+        durata del trasporto. Ricomporre il ciclogramma da questi valori
+        restituisce esattamente lo stesso ciclogramma -- verificato: stesso
+        takt, stesso esito, nessuna incoerenza. E' il fatto che rende
+        possibile una pagina sola invece di due."""
+        d, sol = self.dati, self.soluzione
+        tempi = list(sol.actual_time)
+        if len(tempi) < d.n_moves or not d.zones:
+            return False
+        self.T_corrente = sol.T
+        self.permanenze = {
+            k: tempi[k] - (tempi[k - 1] + d.loaded_leg_seconds(k - 1))
+            for k in range(1, d.n_moves)
+        }
+        self.assegnazione = {
+            k: h for h, z in enumerate(d.zones) for k in range(z.lo, z.hi + 1)
+        }
+        self.n_carroponti = len(d.zones)
+        self.carroponte_attivo = 0
+        self._annulla.clear()
+        return True
+
+    def _componi_da_zero(self):
+        """Butta via tutto e riparte dai tempi minimi di processo."""
+        if not self._pronto_per_calcolare():
+            return
+        d = self.config_linea.data
+        self._reimposta_grafico()
+        self.T_corrente = d.takt_min
+        self.permanenze = manuale.permanenze_iniziali(d)
+        self.n_carroponti = min(2, d.n_moves)
+        self.assegnazione = manuale.assegnazione_iniziale(d, self.n_carroponti)
+        self.carroponte_attivo = 0
+        self.origine = "composto da zero"
+        self.modificato = False
+        # Si riparte da uno stato dichiaratamente provvisorio: il verdetto
+        # arriva quando lo chiedi, non prima.
+        self.verifica_viva = False
+        self.report = None
+        self._annulla.clear()
+        self.schede.select(1)
+        self._ricomponi("Composizione da zero: assegna i trasporti")
+
+    def _ricomponi(self, descrizione: str = "", prima=None):
+        """Ricostruisce il ciclogramma dallo stato e rimette tutto a schermo.
+
+        Non rifiuta mai niente: `manuale.componi` disegna anche l'impossibile.
+        Rifiutare una modifica vorrebbe dire rimettere i controlli proprio
+        dove si e' scelto di toglierli -- e il verificatore li fa meglio."""
+        if self.config_linea is None or self.T_corrente is None:
+            return
+        if prima is not None:
+            self._annulla.append(prima)
+            self.modificato = True
+        self.soluzione, self.dati, self.incoerenze = manuale.componi(
+            self.config_linea.data,
+            self.T_corrente,
+            self.permanenze,
+            self.assegnazione,
+            self.n_carroponti,
+        )
+        if self.verifica_viva:
+            self.report = verify_solution(self.dati, self.soluzione)
+            self._popola_verifica()
+        else:
+            self.report = None
+        self._sincronizza_campi()
+        self._popola_tabelle()
+        self._mostra_ciclogramma()
+        self._aggiorna_stato_pulsanti()
+        if descrizione:
+            self._stato(descrizione + self._esito_breve())
+
+    def _esito_breve(self) -> str:
+        if self.report is None:
+            return ""
+        return " - " + (
+            "verifica superata"
+            if self.report.ok
+            else f"{len(self.report.errors)} errori"
+        )
+
+    def _istantanea(self):
+        return (
+            self.T_corrente,
+            dict(self.permanenze),
+            dict(self.assegnazione),
+            self.n_carroponti,
+        )
+
+    def _annulla_modifica(self):
+        if not self._annulla:
+            self._stato("Niente da annullare")
+            return
+        (
+            self.T_corrente,
+            self.permanenze,
+            self.assegnazione,
+            self.n_carroponti,
+        ) = self._annulla.pop()
+        self._ricomponi("Modifica annullata")
+
+    # -- i tre gradi di liberta', uno per volta -------------------------
+
+    def _modifica_takt(self):
+        if self.T_corrente is None:
+            return
+        try:
+            nuovo = float(self.var_takt.get().replace(",", "."))
+        except ValueError:
+            self._stato("Il takt time deve essere un numero")
+            return
+        if nuovo <= 0:
+            self._stato("Il takt time deve essere maggiore di zero")
+            return
+        if abs(nuovo - self.T_corrente) < 1e-9:
+            return
+        prima = self._istantanea()
+        self.T_corrente = nuovo
+        self._ricomponi(f"Takt time portato a {nuovo:.2f} s", prima)
+
+    def _cambia_carroponti(self):
+        """Spinbox: ridistribuisce le mosse in blocchi contigui.
+
+        Ridistribuire sempre, anche quando si aggiunge un carroponte, e' l'unico
+        comportamento prevedibile: tenere l'assegnazione vecchia lascerebbe il
+        carroponte nuovo senza niente da fare e il grafico identico, cioe' un
+        comando che sembra non funzionare. Si annulla con 'Annulla modifica',
+        e chi vuole la suddivisione migliore ha il pulsante apposta."""
+        if self.config_linea is None or self.T_corrente is None:
+            return
+        try:
+            n = int(self.var_carroponti.get())
+        except ValueError:
+            return
+        d = self.config_linea.data
+        n = max(1, min(n, d.n_moves))
+        if n == self.n_carroponti:
+            return
+        prima = self._istantanea()
+        self.n_carroponti = n
+        self.assegnazione = manuale.assegnazione_iniziale(d, n)
+        self._ricomponi(f"Carroponti: {n}, mosse ridistribuite", prima)
+
+    def _modifica_numero_carroponti(self):
+        """Pulsante 'Ottimizza con questi carroponti': fa cercare al solutore
+        la miglior suddivisione per il numero di carroponti scelto.
+
+        Non e' una modifica come le altre -- riparte da zero e le modifiche
+        fatte a mano si perdono -- e per questo e' un pulsante e non un
+        effetto collaterale dello spinbox."""
+        if self.config_linea is None or self._lavoro_in_corso:
+            return
+        n = max(1, min(self.n_carroponti, self.config_linea.data.n_moves))
+        cfg = self.config_linea
+
+        def lavoro():
+            sol, zone = solve_auto_zones(
+                cfg.data, n_hoists=n, time_limit_per_candidate=cfg.tempo_limite_s
+            )
+            if sol.status not in ("OPTIMAL", "FEASIBLE"):
+                return ("nessuna", sol, None, None)
+            dati = dataclasses.replace(cfg.data, zones=zone)
+            return ("ok", sol, dati, verify_solution(dati, sol))
+
+        self._avvia_lavoro(f"Cerco la miglior soluzione con {n} carroponti...", lavoro)
+
+    def _modifica_permanenza(self, evento):
+        riga = self.tabella_permanenze.identify_row(evento.y)
+        colonna = self.tabella_permanenze.identify_column(evento.x)
+        if not riga or colonna != "#2":
+            return
+        indice = self.tabella_permanenze.index(riga) + 1
+        x, y, larghezza, altezza = self.tabella_permanenze.bbox(riga, colonna)
+        editore = ttk.Entry(self.tabella_permanenze)
+        editore.place(x=x, y=y, width=larghezza, height=altezza)
+        editore.insert(0, f"{self.permanenze[indice]:.1f}")
+        editore.select_range(0, tk.END)
+        editore.focus_set()
+
+        def conferma(_e=None):
+            testo = editore.get()
+            editore.destroy()
+            prima = self._istantanea()
+            try:
+                valore = max(0.0, float(testo.replace(",", ".")))
+            except ValueError:
+                self._stato("Valore non valido")
+                return
+            self.permanenze[indice] = valore
+            nome = self.config_linea.data.route[indice].tank_id
+            self._ricomponi(f"{nome}: tempo in vasca {valore:.1f} s", prima)
+
+        editore.bind("<Return>", conferma)
+        editore.bind("<FocusOut>", lambda e: editore.destroy())
+        editore.bind("<Escape>", lambda e: editore.destroy())
+
+    def _assegna(self, k: int, prima) -> bool:
+        """Da' la mossa k al carroponte attivo, se la rotaia lo consente."""
+        d = self.config_linea.data
+        if self.assegnazione.get(k) == self.carroponte_attivo:
+            self._stato(
+                f"La mossa {k} e' gia' del carroponte {self.carroponte_attivo + 1}"
+            )
+            return False
+        prova = dict(self.assegnazione)
+        prova[k] = self.carroponte_attivo
+        motivo = manuale.perche_non_va(d, prova)
+        if motivo:
+            self._stato(f"Non si puo': {motivo}")
+            return False
+        self.assegnazione = prova
+        self._ricomponi(
+            f"Mossa {k} ({d.route[k].tank_id} -> {d.route[k + 1].tank_id}) "
+            f"al carroponte {self.carroponte_attivo + 1}",
+            prima,
+        )
+        return True
+
+    def _assegna_da_tabella(self, evento):
+        riga = self.tabella_assegnazione.identify_row(evento.y)
+        if not riga:
+            return
+        k = int(self.tabella_assegnazione.item(riga, "values")[0])
+        # a ogni doppio clic si passa al carroponte successivo: e' il modo piu'
+        # rapido di correggere senza dover cambiare il carroponte attivo
+        attuale = self.assegnazione.get(k, -1)
+        d = self.config_linea.data
+        # si prova il carroponte successivo, e se scavalcherebbe si continua a
+        # girare: cosi' il doppio clic propone solo assegnazioni possibili
+        for passo in range(1, self.n_carroponti + 1):
+            candidato = (attuale + passo) % self.n_carroponti
+            prova = dict(self.assegnazione)
+            prova[k] = candidato
+            if manuale.perche_non_va(d, prova) is None:
+                prima = self._istantanea()
+                self.assegnazione = prova
+                self._ricomponi(
+                    f"Mossa {k} al carroponte {candidato + 1}", prima
+                )
+                return
+        self._stato(
+            "Nessun altro carroponte puo' fare questa mossa senza scavalcare "
+            "i vicini"
+        )
+
+    # -- presentazione --------------------------------------------------
+
+    def _cambia_vista(self):
+        nuova = self.var_vista.get()
+        if nuova == self.vista:
+            return
+        self.vista = nuova
+        # I due disegni hanno scale dei tempi diverse (2 cicli contro 14):
+        # un'inquadratura scelta sull'uno non vuol dire niente sull'altro.
+        self._reimposta_grafico()
+        self._mostra_ciclogramma()
+
+    def _mostra_ciclogramma(self):
+        if self.soluzione is None or self.dati is None:
+            self._grafico_vuoto()
+            self._ridisegna()
+            return
+        if self.vista == "pettine":
+            self._disegna_pettine()
+        else:
+            self._disegna_traiettorie()
+        self._aggiorna_banner_e_riepilogo()
+
+    def _disegna_traiettorie(self):
+        """Il ciclogramma vero e proprio: le traiettorie dei carroponti,
+        ripetute su due cicli perche' si veda che il pattern si richiude."""
         vista = self._vista_corrente()
         self.assi.clear()
         for lato in self.assi.spines.values():
             lato.set_visible(True)
         try:
             plot_cyclogram(
-                dati,
-                sol,
+                self.dati,
+                self.soluzione,
                 n_cycles=2,
                 title=f"Ciclogramma - {os.path.basename(self.percorso_file or '')}",
                 ax=self.assi,
@@ -757,145 +1005,6 @@ class Applicazione(tk.Tk):
         self.figura.tight_layout()
         self._riapplica_vista(vista)
         self._ridisegna()
-
-        origine = {
-            "OPTIMAL": "calcolo automatico (ottimo)",
-            "FEASIBLE": "calcolo automatico (soluzione valida, non dimostrata ottima)",
-            "PROPOSTA": "proposta di partenza, da aggiustare",
-            "MANUALE": "composto a mano",
-        }.get(sol.status, sol.status)
-
-        righe = [
-            f"Origine: {origine}",
-            "",
-            f"Takt time:      {sol.T:.2f} s",
-            f"Produttivita':  {3600.0 / sol.T:.1f} pezzi/ora",
-            f"Carroponti:     {len(dati.zones)}",
-        ]
-        for h, z in enumerate(dati.zones):
-            righe.append(
-                f"   {h + 1}: mosse {z.lo}-{z.hi}  "
-                f"({dati.route[z.lo].tank_id} -> {dati.route[z.hi + 1].tank_id})"
-            )
-        righe.append("")
-        if rep.min_separation != float("inf"):
-            righe.append(
-                f"Distanza minima fra carroponti: {rep.min_separation:.3f} m "
-                f"(richiesta {rep.required_separation:.3f} m)"
-            )
-        else:
-            righe.append("Un solo carroponte: nessuna coppia da controllare.")
-        righe.append("")
-        righe.append(
-            "VERIFICA: " + ("SUPERATA" if rep.ok else "NON SUPERATA")
-        )
-        righe.append(
-            f"{len(rep.errors)} errori, {len(rep.warnings)} avvisi, "
-            f"{len(rep.infos)} note"
-        )
-        self._scrivi_riepilogo("\n".join(righe))
-
-        self._svuota_tabella()
-        for v in rep.violations:
-            self.tabella.insert(
-                "",
-                tk.END,
-                values=(
-                    _ETICHETTE_GRAVITA.get(v.severity, v.severity),
-                    v.kind,
-                    v.message,
-                ),
-                tags=(v.severity,),
-            )
-        self.schede.tab(3, text=f"Verifica ({len(rep.violations)})")
-
-        if rep.ok:
-            self.banner.configure(
-                text=f"VERIFICA SUPERATA   -   T = {sol.T:.2f} s   -   "
-                f"{3600.0 / sol.T:.1f} pezzi/ora",
-                background="#d9ead3",
-                foreground="#274e13",
-            )
-        else:
-            self.banner.configure(
-                text=f"{len(rep.errors)} ERRORI   -   T = {sol.T:.2f} s   -   "
-                f"vedi la scheda Verifica",
-                background="#f4cccc",
-                foreground="#990000",
-            )
-        self._popola_tabella_mosse()
-        self._stato(
-            f"Ciclogramma pronto - T = {sol.T:.2f} s - "
-            + ("verifica superata" if rep.ok else "VERIFICA NON SUPERATA")
-        )
-
-    # ------------------------------------------------------------------
-    # Disegno manuale
-    # ------------------------------------------------------------------
-
-    def _avvia_manuale(self):
-        if not self._pronto_per_calcolare():
-            return
-        d = self.config_linea.data
-        # dal ciclogramma (2 cicli) al pettine (14): un'inquadratura scelta
-        # sull'uno non vuol dire piu' niente sull'altro
-        self._reimposta_grafico()
-        self.modo = "manuale"
-        self.permanenze = manuale.permanenze_iniziali(d)
-        self.T_corrente = d.takt_min
-        self.n_carroponti_manuale = min(2, d.n_moves)
-        self.assegnazione = manuale.assegnazione_iniziale(
-            d, self.n_carroponti_manuale
-        )
-        self.carroponte_attivo = 0
-        self.var_takt_manuale.set(f"{self.T_corrente:.2f}")
-        self.var_n_carro_manuale.set(str(self.n_carroponti_manuale))
-        self._aggiorna_elenco_carroponti()
-        self.schede.select(2)
-        self._ricomponi_manuale()
-
-    def _aggiorna_elenco_carroponti(self):
-        valori = [str(i + 1) for i in range(self.n_carroponti_manuale)]
-        self.combo_attivo.configure(values=valori)
-        if self.var_carro_attivo.get() not in valori:
-            self.var_carro_attivo.set("1")
-            self.carroponte_attivo = 0
-
-    def _cambia_carroponti_manuale(self):
-        try:
-            n = int(self.var_n_carro_manuale.get())
-        except ValueError:
-            return
-        d = self.config_linea.data
-        self.n_carroponti_manuale = max(1, min(n, d.n_moves))
-        # le mosse assegnate a carroponti che non esistono piu' tornano al primo
-        for k, c in list(self.assegnazione.items()):
-            if c >= self.n_carroponti_manuale:
-                self.assegnazione[k] = self.n_carroponti_manuale - 1
-        self._aggiorna_elenco_carroponti()
-        self._ricomponi_manuale()
-
-    def _ricomponi_manuale(self):
-        """Ricostruisce il disegno. Nessuna verifica: qui l'utente compone
-        liberamente, e anche un ciclogramma impossibile va mostrato."""
-        d = self.config_linea.data
-        try:
-            T = float(self.var_takt_manuale.get().replace(",", "."))
-            if T <= 0:
-                raise ValueError
-        except ValueError:
-            self._stato("Il takt time deve essere un numero maggiore di zero")
-            return
-        self.T_corrente = T
-        self.soluzione, self.dati, self.incoerenze = manuale.componi(
-            d, T, self.permanenze, self.assegnazione, self.n_carroponti_manuale
-        )
-        self.zone_correnti = list(self.dati.zones)
-        self.report = None
-        self._disegna_pettine()
-        self._popola_tabelle_disegno()
-        self._banner_disegno()
-        self._aggiorna_stato_pulsanti()
 
     def _disegna_pettine(self):
         d, T = self.config_linea.data, self.T_corrente
@@ -970,17 +1079,14 @@ class Applicazione(tk.Tk):
         self.assi.set_xlabel("tempo [s]")
         self.assi.set_ylabel("posizione lungo la rotaia")
         self.assi.set_title(
-            f"Disegno manuale  —  takt time T = {T:.2f} s  —  "
+            f"Pettine dei pezzi  —  takt time T = {T:.2f} s  —  "
             f"{manuale.RIPETIZIONI_PREDEFINITE} pezzi"
         )
         self.assi.grid(axis="x", color="#f0f0f0")
         self.assi.format_coord = lettura_coordinate
-        from matplotlib.lines import Line2D
 
         legenda = [
-            Line2D(
-                [0], [0], color=_GRIGIO, lw=_SOTTILE, label="da assegnare"
-            ),
+            Line2D([0], [0], color=_GRIGIO, lw=_SOTTILE, label="da assegnare"),
             Line2D(
                 [0], [0], color=_GRIGIO, lw=_SOTTILE, linestyle="--",
                 label="rientro a vuoto",
@@ -1002,7 +1108,11 @@ class Applicazione(tk.Tk):
         d = self.config_linea.data
         for k in range(d.n_moves):
             x0, x1 = d.station_position(k), d.station_position(k + 1)
-            if s.kind == "loaded" and abs(s.x_start - x0) < 1e-6 and abs(s.x_end - x1) < 1e-6:
+            if (
+                s.kind == "loaded"
+                and abs(s.x_start - x0) < 1e-6
+                and abs(s.x_end - x1) < 1e-6
+            ):
                 return k
             if s.kind == "pick" and abs(s.x_start - x0) < 1e-6:
                 return k
@@ -1010,91 +1120,20 @@ class Applicazione(tk.Tk):
                 return k
         return None
 
-    def _clic_manuale(self, evento):
-        """Assegna al carroponte attivo il trasporto piu' vicino al clic."""
-        if evento.xdata is None or self.config_linea is None:
-            return
-        d = self.config_linea.data
-        candidati = manuale.trasporti_cliccabili(d, self.T_corrente, self.permanenze)
-        clic = (evento.x, evento.y)
-        migliore, distanza_min = None, 1e9
-        for k, t0, t1, x0, x1 in candidati:
-            # distanza in pixel dal punto medio del trasporto
-            px, py = self.assi.transData.transform(((t0 + t1) / 2, (x0 + x1) / 2))
-            dist = ((px - clic[0]) ** 2 + (py - clic[1]) ** 2) ** 0.5
-            if dist < distanza_min:
-                migliore, distanza_min = k, dist
-        if migliore is None or distanza_min > 30:
-            return
-        prima = self.assegnazione.get(migliore)
-        self.assegnazione[migliore] = self.carroponte_attivo
-        motivo = manuale.perche_non_va(d, self.assegnazione)
-        if motivo:
-            if prima is None:
-                self.assegnazione.pop(migliore, None)
-            else:
-                self.assegnazione[migliore] = prima
-            self._stato(f"Non si puo': {motivo}")
-            return
-        self._stato(
-            f"Mossa {migliore} "
-            f"({d.route[migliore].tank_id} -> {d.route[migliore + 1].tank_id}) "
-            f"assegnata al carroponte {self.carroponte_attivo + 1}"
-        )
-        self._ricomponi_manuale()
+    def _sincronizza_campi(self):
+        """Riporta nei campi i valori dello stato: dopo un calcolo, un
+        annullamento o una modifica fatta dal grafico, i campi devono dire
+        quello che il ciclogramma e' davvero."""
+        if self.T_corrente is not None:
+            self.var_takt.set(f"{self.T_corrente:.2f}")
+        self.var_carroponti.set(str(self.n_carroponti))
+        valori = [str(i + 1) for i in range(self.n_carroponti)]
+        self.combo_attivo.configure(values=valori)
+        if self.var_carro_attivo.get() not in valori:
+            self.var_carro_attivo.set("1")
+            self.carroponte_attivo = 0
 
-    def _modifica_permanenza(self, evento):
-        riga = self.tabella_permanenze.identify_row(evento.y)
-        colonna = self.tabella_permanenze.identify_column(evento.x)
-        if not riga or colonna != "#2":
-            return
-        indice = self.tabella_permanenze.index(riga) + 1
-        x, y, larghezza, altezza = self.tabella_permanenze.bbox(riga, colonna)
-        editore = ttk.Entry(self.tabella_permanenze)
-        editore.place(x=x, y=y, width=larghezza, height=altezza)
-        editore.insert(0, f"{self.permanenze[indice]:.1f}")
-        editore.select_range(0, tk.END)
-        editore.focus_set()
-
-        def conferma(_e=None):
-            testo = editore.get()
-            editore.destroy()
-            try:
-                self.permanenze[indice] = max(0.0, float(testo.replace(",", ".")))
-            except ValueError:
-                self._stato("Valore non valido")
-                return
-            self._ricomponi_manuale()
-
-        editore.bind("<Return>", conferma)
-        editore.bind("<FocusOut>", lambda e: editore.destroy())
-        editore.bind("<Escape>", lambda e: editore.destroy())
-
-    def _assegna_da_tabella(self, evento):
-        riga = self.tabella_assegnazione.identify_row(evento.y)
-        if not riga:
-            return
-        k = int(self.tabella_assegnazione.item(riga, "values")[0])
-        # a ogni doppio clic si passa al carroponte successivo: e' il modo piu'
-        # rapido di correggere senza dover cambiare il carroponte attivo
-        attuale = self.assegnazione.get(k, -1)
-        d = self.config_linea.data
-        # si prova il carroponte successivo, e se scavalcherebbe si continua a
-        # girare: cosi' il doppio clic propone solo assegnazioni possibili
-        for passo in range(1, self.n_carroponti_manuale + 1):
-            candidato = (attuale + passo) % self.n_carroponti_manuale
-            prova = dict(self.assegnazione)
-            prova[k] = candidato
-            if manuale.perche_non_va(d, prova) is None:
-                self.assegnazione = prova
-                self._ricomponi_manuale()
-                return
-        self._stato(
-            "Nessun altro carroponte puo' fare questa mossa senza scavalcare "
-            "i vicini"
-        )
-
-    def _popola_tabelle_disegno(self):
+    def _popola_tabelle(self):
         d = self.config_linea.data
         for r in self.tabella_permanenze.get_children():
             self.tabella_permanenze.delete(r)
@@ -1105,7 +1144,7 @@ class Applicazione(tk.Tk):
                 tk.END,
                 values=(
                     spec.tank_id,
-                    f"{self.permanenze[k]:.1f}",
+                    f"{self.permanenze.get(k, 0.0):.1f}",
                     f"{spec.dwell_min:.0f}",
                     f"{spec.dwell_max:.0f}",
                 ),
@@ -1120,47 +1159,76 @@ class Applicazione(tk.Tk):
                     k,
                     d.route[k].tank_id,
                     d.route[k + 1].tank_id,
-                    self.assegnazione.get(k, "-") + 1
-                    if k in self.assegnazione
-                    else "-",
+                    self.assegnazione[k] + 1 if k in self.assegnazione else "-",
                 ),
             )
 
-    def _banner_disegno(self):
-        # Nessun allarme mentre si disegna. I controlli sono sospesi per
-        # scelta: segnalare i tratti impossibili a ogni clic vorrebbe dire
-        # rimetterli, e a meta' -- perche' il giudizio serio (collisioni,
-        # permanenze, capienze) lo da' solo 'Verifica adesso'.
-        self.banner.configure(
-            text=f"DISEGNO IN CORSO   -   T = {self.T_corrente:.2f} s   -   "
-            "premi Verifica adesso per il report",
-            background="#d0e0f0",
-            foreground="#1c4587",
-        )
-        testo = [
-            "Disegno manuale.",
-            "",
-            "Le scalinate grigie sono i pezzi: uno ogni takt time.",
-            "Fai clic su un trasporto per assegnarlo al carroponte attivo:",
-            "diventa colorato e piu' spesso.",
-            "Le linee tratteggiate sono gli spostamenti a vuoto dei carroponti.",
-            "",
-            f"Takt time: {self.T_corrente:.2f} s",
-            f"Carroponti: {self.n_carroponti_manuale}",
-            "",
-            "I controlli sono sospesi: componi come vuoi, poi premi "
-            "'Verifica adesso' per il report completo.",
-        ]
-        self._scrivi_riepilogo("\n".join(testo))
+    def _aggiorna_banner_e_riepilogo(self):
+        T, rep = self.T_corrente, self.report
+        if rep is None:
+            self.banner.configure(
+                text=f"IN COMPOSIZIONE   -   T = {T:.2f} s   -   "
+                "premi Verifica adesso per il verdetto",
+                background="#d0e0f0",
+                foreground="#1c4587",
+            )
+        elif rep.ok:
+            self.banner.configure(
+                text=f"VERIFICA SUPERATA   -   T = {T:.2f} s   -   "
+                f"{3600.0 / T:.1f} pezzi/ora",
+                background="#d9ead3",
+                foreground="#274e13",
+            )
+        else:
+            self.banner.configure(
+                text=f"{len(rep.errors)} ERRORI   -   vedi la scheda Verifica",
+                background="#f4cccc",
+                foreground="#990000",
+            )
 
-    def _verifica_adesso(self):
-        if self.soluzione is None or self.dati is None:
-            return
-        try:
-            self.report = verify_solution(self.dati, self.soluzione)
-        except Exception as e:
-            self._errore("Verifica non eseguibile", str(e))
-            return
+        origine = self.origine + (", poi modificato a mano" if self.modificato else "")
+        righe = [
+            f"Origine: {origine}",
+            "",
+            f"Takt time:      {T:.2f} s",
+            f"Produttivita':  {3600.0 / T:.1f} pezzi/ora",
+            f"Carroponti:     {self.n_carroponti}",
+        ]
+        for h, z in enumerate(self.dati.zones):
+            mosse = [k for k in range(z.lo, z.hi + 1) if k in self.assegnazione]
+            if not mosse:
+                continue
+            righe.append(
+                f"   {h + 1}: mosse {z.lo}-{z.hi}  "
+                f"({self.dati.route[z.lo].tank_id} -> "
+                f"{self.dati.route[z.hi + 1].tank_id})"
+            )
+        righe.append("")
+        if rep is None:
+            righe.append(
+                "I controlli sono sospesi finche' non premi 'Verifica adesso'.\n"
+                "Da quel momento in poi il verdetto si tiene aggiornato da solo\n"
+                "a ogni modifica."
+            )
+        else:
+            if rep.min_separation != float("inf"):
+                righe.append(
+                    f"Distanza minima fra carroponti: {rep.min_separation:.3f} m "
+                    f"(richiesta {rep.required_separation:.3f} m)"
+                )
+            else:
+                righe.append("Un solo carroponte: nessuna coppia da controllare.")
+            righe.append("")
+            righe.append("VERIFICA: " + ("SUPERATA" if rep.ok else "NON SUPERATA"))
+            righe.append(
+                f"{len(rep.errors)} errori, {len(rep.warnings)} avvisi, "
+                f"{len(rep.infos)} note"
+            )
+        self._scrivi_riepilogo("\n".join(righe))
+
+    # -- verifica -------------------------------------------------------
+
+    def _popola_verifica(self):
         self._svuota_tabella()
         for v in self.report.violations:
             self.tabella.insert(
@@ -1173,205 +1241,46 @@ class Applicazione(tk.Tk):
                 ),
                 tags=(v.severity,),
             )
-        self.schede.tab(3, text=f"Verifica ({len(self.report.violations)})")
-        self.schede.select(3)
-        if self.report.ok and not self.incoerenze:
-            self.banner.configure(
-                text=f"VERIFICA SUPERATA   -   T = {self.T_corrente:.2f} s",
-                background="#d9ead3",
-                foreground="#274e13",
-            )
-        else:
-            n = len(self.report.errors)
-            self.banner.configure(
-                # Il conteggio dei tratti impossibili non compare piu': durante
-                # il disegno non si mostrano, e qui li ha gia' contati il
-                # verificatore fra i propri errori.
-                text=(
-                    f"{n} ERRORI   -   vedi la scheda Verifica"
-                    if n
-                    else "IL DISEGNO NON TORNA   -   vedi la scheda Verifica"
-                ),
-                background="#f4cccc",
-                foreground="#990000",
-            )
-        self._stato(
-            "Verifica eseguita: "
-            + ("superata" if self.report.ok else f"{len(self.report.errors)} errori")
-        )
-        self._aggiorna_stato_pulsanti()
+        self.schede.tab(2, text=f"Verifica ({len(self.report.violations)})")
 
-    # ------------------------------------------------------------------
-    # Modifica del ciclogramma
-    # ------------------------------------------------------------------
-
-    def _carica_stato_modificabile(self):
-        """Estrae dalla soluzione corrente i suoi gradi di liberta'."""
-        try:
-            T, fasi, giri = estrai_gradi_di_liberta(self.dati, self.soluzione)
-        except ValueError:
-            self.T_corrente, self.fasi, self.giri_extra = None, {}, {}
+    def _verifica_adesso(self):
+        if self.soluzione is None or self.dati is None:
             return
-        self.T_corrente, self.fasi, self.giri_extra = T, fasi, giri
-        self.zone_correnti = list(self.dati.zones)
-        self._annulla.clear()
-
-    def _istantanea(self):
-        return (
-            self.T_corrente,
-            dict(self.fasi),
-            dict(self.giri_extra),
-            list(self.zone_correnti),
-        )
-
-    def _applica(self, descrizione: str, prima):
-        """Ricostruisce il ciclogramma dallo stato modificabile e lo verifica.
-        Se la disposizione non e' realizzabile, torna indietro: meglio un
-        messaggio che un grafico che sparisce."""
         try:
-            dati = dataclasses.replace(self.dati, zones=self.zone_correnti)
-            sol = build_solution(
-                dati, self.T_corrente, self.fasi, extra_periods=self.giri_extra
-            )
-            rep = verify_solution(dati, sol)
+            self.report = verify_solution(self.dati, self.soluzione)
         except Exception as e:
-            (
-                self.T_corrente,
-                self.fasi,
-                self.giri_extra,
-                self.zone_correnti,
-            ) = prima
-            self._stato(f"Modifica non applicabile: {e}")
-            self._popola_tabella_mosse()
-            return False
-        self._annulla.append(prima)
-        self.dati, self.soluzione, self.report = dati, sol, rep
-        self._mostra_risultato()
-        self._stato(
-            f"{descrizione} - T = {sol.T:.2f} s - "
-            + ("verifica superata" if rep.ok else f"{len(rep.errors)} errori")
-        )
-        return True
-
-    def _modifica_takt(self):
-        if self.soluzione is None:
+            self._errore("Verifica non eseguibile", str(e))
             return
-        try:
-            nuovo = float(self.var_takt.get().replace(",", "."))
-        except ValueError:
-            self._stato("Il takt time deve essere un numero")
-            return
-        if nuovo <= 0:
-            self._stato("Il takt time deve essere maggiore di zero")
-            return
-        prima = self._istantanea()
-        self.T_corrente = nuovo
-        # le fasi vivono in [0,T): accorciando il periodo vanno riportate dentro
-        self.fasi = {k: v % nuovo for k, v in self.fasi.items()}
-        self._applica(f"Takt time portato a {nuovo:.2f} s", prima)
+        # da adesso in poi si tiene aggiornata da sola: chi l'ha chiesta una
+        # volta la vuole anche dopo la prossima modifica
+        self.verifica_viva = True
+        self._popola_verifica()
+        self.schede.select(2)
+        self._aggiorna_banner_e_riepilogo()
+        self._aggiorna_stato_pulsanti()
+        self._stato("Verifica eseguita" + self._esito_breve())
 
-    def _modifica_numero_carroponti(self):
-        """Cambiare il numero di carroponti NON e' una modifica delle fasi: le
-        fasi attuali sono state scelte per un'altra suddivisione e quasi mai
-        restano realizzabili con una diversa. Si ricalcola quindi la migliore
-        suddivisione per quel numero di carroponti, e da li' si riprende a
-        modificare."""
-        if self.config_linea is None or self._lavoro_in_corso:
-            return
-        try:
-            n = int(self.var_carroponti.get())
-        except ValueError:
-            return
-        n = max(1, min(n, self.config_linea.data.n_moves))
-        if self.zone_correnti and n == len(self.zone_correnti):
-            return
-        cfg = self.config_linea
-
-        def lavoro():
-            sol, zone = solve_auto_zones(
-                cfg.data, n_hoists=n, time_limit_per_candidate=cfg.tempo_limite_s
-            )
-            if sol.status not in ("OPTIMAL", "FEASIBLE"):
-                return ("nessuna", sol, None, None)
-            dati = dataclasses.replace(cfg.data, zones=zone)
-            return ("ok", sol, dati, verify_solution(dati, sol))
-
-        self._avvia_lavoro(f"Cerco la miglior soluzione con {n} carroponti...", lavoro)
-
-    def _modifica_cella(self, evento):
-        if self.soluzione is None:
-            return
-        riga = self.tabella_mosse.identify_row(evento.y)
-        colonna = self.tabella_mosse.identify_column(evento.x)
-        if not riga or colonna not in ("#5", "#6"):
-            return
-        k = int(self.tabella_mosse.item(riga, "values")[0])
-        campo = "prelievo" if colonna == "#5" else "giri"
-        attuale = (
-            f"{self.fasi[k]:.2f}"
-            if campo == "prelievo"
-            else str(self.giri_extra.get(k, 0))
-        )
-        x, y, larghezza, altezza = self.tabella_mosse.bbox(riga, colonna)
-        editore = ttk.Entry(self.tabella_mosse)
-        editore.place(x=x, y=y, width=larghezza, height=altezza)
-        editore.insert(0, attuale)
-        editore.select_range(0, tk.END)
-        editore.focus_set()
-
-        def conferma(_e=None):
-            testo = editore.get()
-            editore.destroy()
-            prima = self._istantanea()
-            try:
-                if campo == "prelievo":
-                    self.fasi[k] = float(testo.replace(",", ".")) % self.T_corrente
-                else:
-                    n = max(0, int(testo))
-                    if n:
-                        self.giri_extra[k] = n
-                    else:
-                        self.giri_extra.pop(k, None)
-            except ValueError:
-                self._stato("Valore non valido")
-                return
-            self._applica(f"Mossa {k}: {campo} aggiornato", prima)
-
-        editore.bind("<Return>", conferma)
-        editore.bind("<FocusOut>", lambda e: editore.destroy())
-        editore.bind("<Escape>", lambda e: editore.destroy())
-
-    def _annulla_modifica(self):
-        if not self._annulla:
-            self._stato("Niente da annullare")
-            return
-        (
-            self.T_corrente,
-            self.fasi,
-            self.giri_extra,
-            self.zone_correnti,
-        ) = self._annulla.pop()
-        dati = dataclasses.replace(self.dati, zones=self.zone_correnti)
-        sol = build_solution(
-            dati, self.T_corrente, self.fasi, extra_periods=self.giri_extra
-        )
-        self.dati, self.soluzione = dati, sol
-        self.report = verify_solution(dati, sol)
-        self._mostra_risultato()
-        self._stato("Modifica annullata")
-
-    # -- trascinamento dei punti sul grafico ---------------------------
+    # -- clic e trascinamento sul grafico -------------------------------
 
     def _punti_prelievo(self):
-        """(mossa, tempo, posizione) di ogni prelievo disegnato, ripetuto su
-        tutti i cicli visibili."""
-        if not self.fasi or self.T_corrente is None:
+        """(mossa, istante, posizione) di ogni prelievo disegnato.
+
+        Sono gli stessi punti in tutte e due le viste, solo ripetuti in modo
+        diverso: nel pettine una volta per pezzo, nel ciclogramma riportati
+        dentro il periodo e ripetuti sui cicli visibili."""
+        if self.config_linea is None or self.T_corrente is None:
             return []
+        d, T = self.config_linea.data, self.T_corrente
+        tempi = manuale.catena_pezzo(d, self.permanenze)
         punti = []
-        for k, fase in self.fasi.items():
-            y = self.dati.station_position(k)
-            for ciclo in range(3):
-                punti.append((k, fase + ciclo * self.T_corrente, y))
+        for k in range(d.n_moves):
+            y = d.station_position(k)
+            if self.vista == "pettine":
+                for p in range(manuale.RIPETIZIONI_PREDEFINITE):
+                    punti.append((k, tempi[k] + p * T, y))
+            else:
+                for c in range(3):
+                    punti.append((k, tempi[k] % T + c * T, y))
         return punti
 
     def _su_pressione(self, evento):
@@ -1379,40 +1288,31 @@ class Applicazione(tk.Tk):
             return
         if self._navigazione_attiva():
             return  # sta navigando: il clic e' della barra, non nostro
-        if self.modo == "manuale":
-            self._clic_manuale(evento)
-            return
-        if not self.fasi:
-            return
-        # il confronto va fatto in PIXEL: in coordinate dati un secondo e un
-        # metro non sono paragonabili, e la tolleranza sarebbe assurda
-        clic = (evento.x, evento.y)
-        migliore, distanza_min = None, 1e9
-        for k, t, y in self._punti_prelievo():
-            px, py = self.assi.transData.transform((t, y))
-            d = ((px - clic[0]) ** 2 + (py - clic[1]) ** 2) ** 0.5
-            if d < distanza_min:
-                migliore, distanza_min = (k, t), d
-        if migliore is None or distanza_min > 18:
-            return
-        k, t = migliore
-        self._trascinamento = {
-            "mossa": k,
-            "t_iniziale": t,
-            "x_iniziale": evento.xdata,
-            "fase_iniziale": self.fasi[k],
-            "istantanea": self._istantanea(),
-        }
-        self._stato(
-            f"Trascino il prelievo della mossa {k} "
-            f"({self.dati.route[k].tank_id} -> {self.dati.route[k + 1].tank_id})"
-        )
-
-    def _su_movimento(self, evento):
-        if self.modo == "manuale" or self._trascinamento is None:
-            return
         if evento.xdata is None:
             return
+        migliore, distanza_min, istante = None, 1e9, 0.0
+        for k, t, y in self._punti_prelievo():
+            px, py = self.assi.transData.transform((t, y))
+            # in pixel: in coordinate dati un secondo e un metro non sono
+            # paragonabili, e la tolleranza sarebbe assurda
+            d = ((px - evento.x) ** 2 + (py - evento.y) ** 2) ** 0.5
+            if d < distanza_min:
+                migliore, distanza_min, istante = k, d, t
+        if migliore is None or distanza_min > 30:
+            return
+        self._trascinamento = {
+            "mossa": migliore,
+            "t_iniziale": istante,
+            "x_iniziale": evento.xdata,
+            "px_iniziale": evento.x,
+            "istantanea": self._istantanea(),
+        }
+
+    def _su_movimento(self, evento):
+        if self._trascinamento is None or evento.xdata is None:
+            return
+        if self._trascinamento["mossa"] == 0:
+            return  # il primo prelievo e' l'origine dei tempi: non si sposta
         delta = evento.xdata - self._trascinamento["x_iniziale"]
         nuovo = self._trascinamento["t_iniziale"] + delta
         if self._guida is not None:
@@ -1431,44 +1331,29 @@ class Applicazione(tk.Tk):
         if self._guida is not None:
             self._guida.remove()
             self._guida = None
-        if evento.xdata is None:
             self.tela.draw_idle()
+        k = trascinamento["mossa"]
+        # Clic secco o trascinamento? Si misura in PIXEL: in secondi la soglia
+        # dipenderebbe da quanto si e' ingrandito il grafico.
+        if evento.x is None or abs(evento.x - trascinamento["px_iniziale"]) < 4:
+            self._assegna(k, trascinamento["istantanea"])
+            return
+        if evento.xdata is None:
+            return
+        if k == 0:
+            self._stato(
+                "Il primo prelievo fissa l'origine dei tempi: si sposta "
+                "cambiando i tempi in vasca a valle"
+            )
             return
         delta = evento.xdata - trascinamento["x_iniziale"]
-        if abs(delta) < 1e-6:
-            self.tela.draw_idle()
-            return
-        k = trascinamento["mossa"]
-        self.fasi[k] = (trascinamento["fase_iniziale"] + delta) % self.T_corrente
-        self._applica(
-            f"Mossa {k} spostata di {delta:+.2f} s", trascinamento["istantanea"]
+        nuovo = max(0.0, self.permanenze.get(k, 0.0) + delta)
+        self.permanenze[k] = nuovo
+        nome = self.config_linea.data.route[k].tank_id
+        self._ricomponi(
+            f"{nome}: tempo in vasca {nuovo:.1f} s ({delta:+.1f})",
+            trascinamento["istantanea"],
         )
-
-    def _popola_tabella_mosse(self):
-        for riga in self.tabella_mosse.get_children():
-            self.tabella_mosse.delete(riga)
-        if not self.fasi:
-            return
-        carro_di = {}
-        for h, z in enumerate(self.zone_correnti):
-            for k in range(z.lo, z.hi + 1):
-                carro_di[k] = h + 1
-        for k in sorted(self.fasi):
-            self.tabella_mosse.insert(
-                "",
-                tk.END,
-                values=(
-                    k,
-                    self.dati.route[k].tank_id,
-                    self.dati.route[k + 1].tank_id,
-                    carro_di.get(k, "?"),
-                    f"{self.fasi[k]:.2f}",
-                    self.giri_extra.get(k, 0),
-                ),
-            )
-        if self.T_corrente is not None:
-            self.var_takt.set(f"{self.T_corrente:.2f}")
-            self.var_carroponti.set(str(len(self.zone_correnti)))
 
     def _mostra_dettaglio(self, _evento=None):
         selezione = self.tabella.selection()
@@ -1492,10 +1377,16 @@ class Applicazione(tk.Tk):
         stato = tk.NORMAL if c_e_linea else tk.DISABLED
         self.btn_auto.configure(state=stato)
         self.btn_proposta.configure(state=stato)
+        c_e_ciclogramma = self.soluzione is not None and not self._lavoro_in_corso
         self.btn_salva.configure(
-            state=tk.NORMAL
-            if (self.soluzione is not None and not self._lavoro_in_corso)
-            else tk.DISABLED
+            state=tk.NORMAL if c_e_ciclogramma else tk.DISABLED
+        )
+        self.btn_verifica.configure(
+            state=tk.NORMAL if c_e_ciclogramma else tk.DISABLED
+        )
+        self.btn_riottimizza.configure(state=stato)
+        self.btn_annulla.configure(
+            state=tk.NORMAL if (self._annulla and not self._lavoro_in_corso) else tk.DISABLED
         )
 
     # ------------------------------------------------------------------

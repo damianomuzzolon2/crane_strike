@@ -52,7 +52,7 @@ aprire una finestra, e la cinematica senza avere OR-Tools installato.
 | `kinematics.py` | 130 | La fisica del movimento, in metri e secondi. `travel_time()` da' il tempo per percorrere una distanza con profilo trapezoidale o triangolare; `position_profile()` la posizione istante per istante; `profile_breakpoints()` gli spigoli della curva, che servono al verificatore per limitare in modo rigoroso l'errore di campionamento. Non sa nulla del resto del progetto. |
 | `model.py` | 1711 | Il cuore. Contiene le **strutture dati** (`Tank`, `StationSpec`, `HoistZone`, `ProblemData`, `Segment`, `Solution`), la costruzione e risoluzione del **modello CP-SAT** (`solve`), la scelta automatica di zone e numero di carroponti (`solve_auto_zones`, `solve_auto_hoists`), e la costruzione di un ciclogramma **senza risolvere** a partire dai suoi gradi di liberta' (`build_solution`, `estrai_gradi_di_liberta`) — quest'ultima e' cio' che rende possibile l'editor. |
 | `verify.py` | 1020 | Il **verificatore indipendente**: `verify_solution()` ricontrolla una soluzione in Python puro, senza CP-SAT, campionando le posizioni reali dei carroponti. Restituisce un `VerificationReport` con l'elenco delle `Violation` divise per gravita'. E' la rete di sicurezza contro gli errori nella formulazione del modello. |
-| `manuale.py` | 230 | Supporto al **disegno a mano**: il "pettine" dei pezzi (`pettine`, `catena_pezzo`), la composizione libera del ciclogramma (`componi`) e il controllo che i carroponti non si scavalchino sulla rotaia (`perche_non_va`). |
+| `manuale.py` | 230 | Il ciclogramma nei termini in cui si modifica: il "pettine" dei pezzi (`pettine`, `catena_pezzo`), la composizione libera del ciclogramma (`componi`) e il controllo che i carroponti non si scavalchino sulla rotaia (`perche_non_va`). |
 
 ### Ingresso, uscita, disegno
 
@@ -65,7 +65,7 @@ aprire una finestra, e la cinematica senza avere OR-Tools installato.
 
 | file | righe | contenuto |
 | --- | ---: | --- |
-| `interfaccia.py` | 1796 | L'**interfaccia grafica** (tkinter). La classe `Applicazione` e' tutta la finestra: caricamento, calcolo in background, grafico incorporato, editor dei punti, disegno manuale, verifica e salvataggio. `autotest()` prova l'installazione da sola. E' il programma che usa un utente normale. |
+| `interfaccia.py` | 1687 | L'**interfaccia grafica** (tkinter). La classe `Applicazione` e' tutta la finestra: caricamento, calcolo in background, grafico incorporato (due viste), la pagina unica in cui il ciclogramma si modifica -- calcolato o composto da zero che sia -- verifica e salvataggio. `autotest()` prova l'installazione da sola. E' il programma che usa un utente normale. |
 | `ciclogramma.py` | 170 | Lo stesso lavoro da **riga di comando**, per chi preferisce il terminale o vuole automatizzare. |
 | `esempio.py` | 195 | La linea di esempio definita **in codice** invece che in Excel, per chi vuole integrare il solutore in qualcos'altro. |
 | `costruisci_exe.py` | 119 | Costruisce l'**eseguibile autonomo** con PyInstaller. Vedi sotto. |
@@ -83,7 +83,7 @@ Non serve pytest.
 | `test_verify.py` | 839 | **Il verificatore.** Risponde a "chi verifica il verificatore?": venti casi, di cui uno solo corretto e tutti gli altri rotti di proposito (collisioni, permanenze fuori tolleranza, periodicita' incoerente, geometrie patologiche, capienze). Un controllore che non segnala mai nulla e' inutile, quindi ogni controllo ha un caso che DEVE farlo scattare. Non richiede OR-Tools: le soluzioni sono costruite a mano. |
 | `test_model.py` | 393 | **Il modello CP-SAT.** Risolve davvero e passa ogni soluzione al verificatore: vasche ravvicinate, tre carroponti, capienza, tempi verticali, e la fedelta' della ricostruzione di una soluzione dai suoi gradi di liberta'. Richiede OR-Tools. |
 | `test_excel_io.py` | 577 | **La lettura e la scrittura Excel.** Quasi tutti i casi sono file compilati male: valori mancanti o non numerici, vasche inesistenti o duplicate, righe riordinate, parametri sbagliati. Piu' la struttura del file dei risultati. Non richiede OR-Tools. |
-| `test_interfaccia.py` | 612 | **Le funzioni dell'interfaccia grafica.** La finestra viene costruita davvero e pilotata da codice — si "premono" i pulsanti chiamando i metodi e si fa girare il ciclo degli eventi con `update()` invece di `mainloop()`. Verifica che i pulsanti si abilitino al momento giusto, che il calcolo in background consegni il risultato, che le modifiche vengano riverificate, che una modifica impossibile venga rifiutata senza schiantarsi, e che il disegno manuale produca il pettine giusto. Richiede OR-Tools e un ambiente grafico. |
+| `test_interfaccia.py` | 606 | **Le funzioni dell'interfaccia grafica.** La finestra viene costruita davvero e pilotata da codice — si "premono" i pulsanti chiamando i metodi e si fa girare il ciclo degli eventi con `update()` invece di `mainloop()`. Verifica che i pulsanti si abilitino al momento giusto, che il calcolo in background consegni il risultato, che una soluzione calcolata riletta come tempi in vasca e ricomposta dia esattamente lo stesso ciclogramma, che le modifiche vengano riverificate, che le due viste mostrino lo stesso oggetto, e che la composizione da zero produca il pettine giusto. Richiede OR-Tools e un ambiente grafico. |
 
 `kinematics.py` ha in fondo un autotest che si lancia allo stesso modo
 (`python kinematics.py`).
@@ -106,7 +106,7 @@ Doppio clic su **`Ciclogrammi.bat`** (oppure `python interfaccia.py`, oppure
 
 La finestra e' divisa in tre: la **barra dei comandi** in alto, il
 **ciclogramma** a sinistra, e a destra un **verdetto** sempre in vista con
-sotto quattro schede. In basso una barra di stato che dice cosa sta facendo il
+sotto tre schede. In basso una barra di stato che dice cosa sta facendo il
 programma.
 
 ### Il giro completo, in breve
@@ -115,7 +115,7 @@ programma.
    compilato con una linea di esempio.
 2. Compili il file (vedi *Come modellare il tuo caso*, piu' sotto).
 3. `Apri linea...` — lo carichi.
-4. `Calcola automaticamente` oppure `Disegna a mano`.
+4. `Calcola automaticamente` oppure `Componi da zero`.
 5. Guardi il verdetto, eventualmente ritocchi.
 6. `Salva risultati...` — esce l'Excel dei risultati e l'immagine.
 
@@ -126,7 +126,7 @@ programma.
 | `Apri linea...` | Carica un file Excel con la definizione della linea. Se il file e' compilato male non succede nulla di brutto: compare una finestra con **tutti** gli errori trovati, con foglio e cella. |
 | `Nuovo modello Excel...` | Crea il file da compilare, gia' pieno con una linea di zincatura d'esempio, e chiede se aprirlo subito. E' il modo consigliato di cominciare: si parte da qualcosa che funziona e lo si modifica. |
 | `Calcola automaticamente` | Cerca il numero minimo di carroponti, la suddivisione migliore della linea e il takt time piu' basso. Puo' durare da qualche secondo a qualche minuto: la barra in basso a destra si muove e i pulsanti restano disabilitati finche' non ha finito. La finestra **non si blocca**. |
-| `Disegna a mano` | Passa alla composizione manuale (vedi sotto). |
+| `Componi da zero` | Butta via il ciclogramma corrente e riparte dai tempi minimi di processo, per comporlo a mano (vedi sotto). |
 | `Salva risultati...` | Scrive l'Excel dei risultati e, accanto, l'immagine del ciclogramma. Si abilita solo quando c'e' qualcosa da salvare. |
 
 A destra nella stessa barra c'e' il **percorso completo** del file caricato —
@@ -137,9 +137,20 @@ scheda *Riepilogo*: se la barra e' troppo stretta per contenerlo, si legge li'.
 
 ### Come si legge il ciclogramma
 
-In orizzontale il tempo, in verticale la posizione lungo la rotaia: le vasche
-sono le righe, col nome e la quota sull'asse. Il disegno ripete **due cicli**
-di seguito, cosi' si vede a occhio che il pattern si richiude.
+Sopra al grafico ci sono **due viste dello stesso ciclogramma**:
+
+| vista | cosa disegna | a cosa serve |
+| --- | --- | --- |
+| `ciclogramma` | le traiettorie dei **carroponti**, su due cicli | dire se il piano regge: chi si muove quando, chi rischia di incontrare chi |
+| `pettine` | le scalinate dei **pezzi**, dieci, una ogni takt time | dire da dove vengono i tempi: le pedate delle scalinate **sono** i tempi in vasca |
+
+I comandi non cambiano con la vista: e' lo stesso ciclogramma guardato da due
+parti. Si passa dall'una all'altra quando serve, anche a meta' di una modifica.
+
+Nel **ciclogramma**: in orizzontale il tempo, in verticale la posizione lungo la
+rotaia: le vasche sono le righe, col nome e la quota sull'asse. Il disegno
+ripete **due cicli** di seguito, cosi' si vede a occhio che il pattern si
+richiude.
 
 Il colore dice una cosa sola: **di quale carroponte** e' la traiettoria. Il
 tratto ne dice un'altra sola:
@@ -184,8 +195,7 @@ fiducia.
 in vasca, assegni un trasporto: il grafico viene ridisegnato ma resta inquadrato
 dov'eri. Sarebbe inutile ingrandire per lavorare su un dettaglio se poi il primo
 ritocco riportasse la vista al punto di partenza. Si riparte da capo solo quando
-cambia il disegno stesso: un'altra linea, o il passaggio fra calcolo automatico
-e disegno manuale.
+cambia il disegno stesso: un'altra linea, o il passaggio fra le due viste.
 
 ### Il verdetto
 
@@ -196,18 +206,16 @@ questo non finisce mai dentro una scheda:
   fisicamente valido e rispetta tutte le tolleranze dichiarate.
 - **rosso** — quanti errori sono stati trovati. Il dettaglio e' nella scheda
   *Verifica*.
-- **azzurro** — sei in disegno manuale, i controlli sono sospesi: componi come
-  vuoi, il giudizio arriva quando premi `Verifica adesso`.
+- **azzurro** — `IN COMPOSIZIONE`: la verifica non e' ancora stata chiesta.
+  Componi come vuoi, il verdetto arriva quando premi `Verifica adesso`.
 
-### Le quattro schede
+### Le tre schede
 
-**Riepilogo** — takt time, produttivita' in pezzi/ora, quanti carroponti e che
-tratto di linea serve ciascuno, distanza minima raggiunta fra i carri contro
-quella richiesta.
+**Riepilogo** — da dove viene il ciclogramma, takt time, produttivita' in
+pezzi/ora, quanti carroponti e che tratto di linea serve ciascuno, distanza
+minima raggiunta fra i carri contro quella richiesta, esito della verifica.
 
-**Modifica** — per ritoccare un ciclogramma gia' calcolato. Vedi sotto.
-
-**Disegno** — per comporlo a mano. Vedi sotto.
+**Ciclogramma** — dove si modifica. Vedi sotto.
 
 **Verifica** — l'elenco dei rilievi del verificatore indipendente, colorati per
 gravita': rosso gli errori, arancio gli avvisi, grigio le note. Le descrizioni
@@ -220,74 +228,67 @@ che va guardato a mano. Una **nota** e' informativa: per esempio che una vasca
 lavora con due pezzi dentro contemporaneamente, il che e' normale se e' a due
 posti.
 
-### Modificare un ciclogramma calcolato
+### Modificare il ciclogramma
 
-Un ciclogramma ha pochissimi gradi di liberta' reali: il **takt time**,
-l'**istante di prelievo** di ogni mossa, quanti **periodi interi** il pezzo
-resta in vasca oltre il minimo, e **quale carroponte** fa cosa. Tutto il resto
-— traiettorie, tempi assoluti, ordine di visita — e' conseguenza. La scheda
-*Modifica* espone esattamente quelli, in tre modi:
+**Una sola scheda, per il calcolato e per il composto a mano.** Non sono due
+cose: sono lo stesso oggetto, e i gradi di liberta' sono gli stessi che si
+usano tracciando un ciclogramma su carta.
 
-- **Trascinando sul grafico.** Prendi un punto di prelievo — l'inizio di un
-  tratto colorato — e spostalo a destra o a sinistra. Mentre trascini, una guida
-  arancione mostra dove finira' e la barra di stato dice di quanti secondi lo
-  stai spostando.
-- **Dalla tabella delle mosse.** Doppio clic sulla colonna `prelievo [s]` per
-  scrivere l'istante esatto, o sulla colonna `giri` per far restare il pezzo in
-  vasca un takt in piu'.
-- **Takt time e numero di carroponti**, in alto nella scheda.
+Sono tre:
 
-**A ogni modifica il ciclogramma viene ricostruito da capo e riverificato**: il
-verdetto e l'elenco dei rilievi si aggiornano subito. Se una modifica rendesse
-il ciclogramma impossibile — per esempio il carroponte non farebbe in tempo ad
-arrivare — viene **rifiutata**, lo stato torna com'era e la barra in basso
-spiega perche'. Meglio di un grafico che sparisce.
+1. il **takt time**;
+2. il **tempo in vasca** di ogni tappa;
+3. **quale carroponte** fa ogni trasporto.
+
+Tutto il resto — istanti di prelievo, traiettorie, rientri a vuoto, ordine di
+visita — e' conseguenza. Il solutore non produce niente di piu': produce una
+scelta di questi tre, e la si rilegge cosi'. Ricomporre il ciclogramma dai
+valori riletti restituisce **esattamente** lo stesso ciclogramma — stesso takt,
+stesso esito della verifica — ed e' il motivo per cui la pagina puo' essere una
+sola invece di due. (C'e' un test che lo controlla: se un giorno smettesse di
+valere, salterebbe.)
+
+Si modifica in tre modi, tutti equivalenti:
+
+- **Doppio clic su un tempo in vasca**, nella tabella. Le soste successive si
+  spostano di conseguenza. La tabella mostra accanto il minimo e il massimo di
+  processo, ma **non impedisce** di uscirne: sara' la verifica a dirlo.
+- **Trascinando un prelievo sul grafico** — prendi l'inizio di un trasporto e
+  spostalo. Fa la stessa identica cosa: allunga o accorcia la sosta nella vasca
+  da cui il pezzo parte. Mentre trascini, una guida arancione mostra dove
+  finira'.
+- **Clic su un trasporto** per darlo al carroponte attivo (si sceglie col menu
+  `attivo`), oppure **doppio clic su una riga di `Assegnazione`** per passarlo
+  al carroponte successivo.
+
+`Takt time` e `Carroponti` stanno in alto. Lo spinbox dei carroponti
+**ridistribuisce subito** le mosse in blocchi contigui, senza far girare il
+solutore: e' istantaneo e si annulla. Se invece vuoi la suddivisione *migliore*
+per quel numero, c'e' `Ottimizza con questi carroponti`, che fa lavorare il
+solutore e **butta via le modifiche fatte a mano**.
 
 `Annulla modifica` torna indietro di un passo, e si puo' premere piu' volte.
 
-`Rifai il calcolo automatico` ricalcola tutto da zero: **le modifiche fatte a
-mano vengono perse.**
+**Niente viene mai rifiutato.** Anche una modifica che rende il ciclogramma
+impossibile viene composta e disegnata: e' il verificatore a dire cosa non va,
+non un blocco che ti impedisce di provare.
 
-Attenzione a `Carroponti`: cambiarlo non e' una modifica come le altre. Le fasi
-di prelievo erano state scelte per un'altra suddivisione della linea e quasi
-mai restano realizzabili con una diversa, quindi il programma **ricalcola** la
-miglior soluzione per quel numero di carroponti.
+#### Quando parte la verifica
 
-### Comporre un ciclogramma a mano
+- Se il ciclogramma arriva dal **calcolo automatico**, la verifica c'e' gia' e
+  da quel momento **si tiene aggiornata da sola**: cambi un tempo in vasca e il
+  verdetto e l'elenco dei rilievi si aggiornano subito.
+- Se stai **componendo da zero**, no. Si parte da uno stato dichiaratamente
+  provvisorio — nessun trasporto ancora al posto giusto — e un muro di errori
+  rossi mentre scegli la prima mossa non informerebbe nessuno. Il verdetto
+  arriva quando premi `Verifica adesso`, e **da li' in poi resta vivo** anche
+  lui.
 
-`Disegna a mano` apre il **pettine**: dieci scalinate grigie, una per ogni pezzo
-in lavorazione, distanziate esattamente di un takt time. Ogni scalinata mostra
-le soste in vasca (tratti orizzontali) e i trasporti (tratti che salgono).
+Una regola sola: *la verifica, una volta chiesta, si tiene aggiornata*.
 
-![disegno manuale](doc/disegno-manuale.png)
-
-E' il metodo con cui i ciclogrammi si tracciano a mano da sempre: prima il
-pettine dei pezzi, poi si decide quali trasporti fa ciascun carroponte.
-
-Qui il colore vuol dire una cosa sola: **l'ho assegnato io**. Tutto quello che
-non hai ancora deciso — soste in vasca, trasporti liberi, rientri a vuoto — e'
-dello stesso grigio sottile, cosi' il disegno resta uno sfondo e le tue scelte
-si vedono da lontano.
-
-- **Clic su un trasporto** per assegnarlo al carroponte attivo (si sceglie con
-  il menu `attivo`). Il trasporto prende il colore di quel carroponte e diventa
-  piu' spesso, e compaiono i suoi rientri a vuoto (tratteggiati).
-- **Doppio clic su un tempo in vasca** per cambiarlo: le scalinate si spostano
-  da quel punto in poi, e magari a quel punto conviene assegnare diversamente.
-  La tabella mostra accanto il minimo e il massimo di processo, ma **non
-  impedisce** di uscirne.
-- **Doppio clic su una riga della tabella `Assegnazione`** per passare il
-  trasporto al carroponte successivo.
-
-**Durante il disegno i controlli sono sospesi**, e non a meta': anche un
-ciclogramma impossibile viene disegnato senza una parola. Niente tratti in
-rosso, niente conteggi nel banner. Segnalare gli errori a ogni clic vorrebbe
-dire rimettere i controlli che si erano tolti apposta — e per giunta i piu'
-banali, visto che il giudizio serio (collisioni, permanenze, capienze) lo puo'
-dare solo il verificatore.
-
-Quello arriva quando lo chiedi, con `Verifica adesso`, e dice tutto: per
-esempio dove due carri si toccano, quali sono e in che punto della linea:
+Il report dice tutto — permanenze, collisioni, capienze, takt time — e dice
+**dove**. Per esempio, di due carri che si toccano, quali sono e in che punto
+della linea:
 
 ```text
 COLLISIONE fra carroponti 1 e 2 a t=61.6s: il 1 e' sopra PASSIVAZIONE
@@ -299,19 +300,39 @@ Quando il punto non coincide con una vasca il messaggio dice fra quali due si
 trova: `il 2 e' fra ZINCATURA e RISCIACQUO_2 (10.80 m)`. Una quota da sola non
 si riconosce sull'impianto; il nome della vasca si'.
 
-`Torna all'automatico` abbandona il disegno e fa ricalcolare tutto al solutore.
+#### L'unica cosa impedita
 
-L'unica cosa che resta impedita e' assegnare i trasporti in modo che due
-carroponti debbano **scavalcarsi** sulla rotaia. Non e' una regola del modello:
-e' la rotaia. Il messaggio lo dice, e il doppio clic sulla tabella propone solo
-i carroponti che possono davvero prendersi quella mossa.
+Assegnare i trasporti in modo che due carroponti debbano **scavalcarsi** sulla
+rotaia. Non e' una regola del modello: e' la rotaia. Il messaggio lo dice, e il
+doppio clic sulla tabella propone solo i carroponti che possono davvero
+prendersi quella mossa.
+
+### Comporre da zero
+
+`Componi da zero` butta via tutto e riparte dai **tempi minimi di processo**,
+col takt time piu' basso ammesso e le mosse spartite fra due carroponti. E' il
+pettine piu' stretto che il processo consenta: da li' si allarga dove serve.
+
+![composizione a mano](doc/disegno-manuale.png)
+
+Conviene passare alla vista **pettine**, dove i tempi in vasca sono le pedate
+delle scalinate e si vede subito cosa si sta cambiando. Poi si decide quali
+trasporti fa ciascun carroponte, che e' il metodo con cui i ciclogrammi si
+tracciano a mano da sempre.
+
+Nel pettine il colore vuol dire una cosa sola: **l'ho assegnato io**. Tutto
+quello che non hai ancora deciso — soste in vasca, trasporti liberi, rientri a
+vuoto — e' dello stesso grigio sottile, cosi' il disegno resta uno sfondo e le
+tue scelte si vedono da lontano.
+
+I comandi sono quelli di sopra: sono gli stessi. Cambia solo da dove parti.
 
 ### Se il calcolo non trova niente
 
 Capita, ed e' un'informazione: vuol dire che con i dati dati la linea non sta in
 piedi. Il riepilogo elenca cosa provare — allargare la tolleranza sul takt time,
 aumentare il numero massimo di carroponti, aggiungere posti alle vasche piu'
-lente, allungare il tempo limite di calcolo. In alternativa `Disegna a mano`, e
+lente, allungare il tempo limite di calcolo. In alternativa `Componi da zero`, e
 si guarda dove il conto non torna: li' non c'e' niente da trovare, si vede.
 
 ## Cosa produce

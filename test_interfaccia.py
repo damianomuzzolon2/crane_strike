@@ -113,12 +113,11 @@ def test_apertura_e_proposta(percorso_linea):
             "ora si puo' calcolare, ma non ancora salvare",
         )
 
-        app._avvia_manuale()
+        app._componi_da_zero()
         app.update()
-        check(app.modo == "manuale", "si entra in modalita' disegno")
         check(
             app.soluzione is not None and app.report is None,
-            "c'e' un ciclogramma da disegnare, ma nessuna verifica ancora",
+            "'Componi da zero' da' subito un ciclogramma, senza verifica",
         )
     finally:
         chiudi(app)
@@ -190,76 +189,97 @@ def _app_risolta(percorso_linea):
     return app
 
 
-def test_modifica_prelievo(percorso_linea):
-    print("\n[4] modifica di un punto di prelievo")
+def test_modifica_tempi_in_vasca(percorso_linea):
+    print("\n[4] modifica dei tempi in vasca su un ciclogramma calcolato")
     app = _app_risolta(percorso_linea)
     try:
+        d = app.config_linea.data
+        # Il punto della pagina unica: la soluzione del solutore si rilegge nei
+        # termini in cui la si modifica a mano. Se questa lettura fosse
+        # approssimata, la prima modifica sposterebbe anche cose non toccate.
         check(
-            len(app.fasi) == app.dati.n_moves and app.T_corrente is not None,
-            f"lo stato modificabile e' stato estratto ({len(app.fasi)} fasi)",
+            len(app.permanenze) == d.n_moves - 1
+            and len(app.assegnazione) == d.n_moves
+            and app.T_corrente is not None,
+            f"il ciclogramma calcolato si legge come {len(app.permanenze)} tempi "
+            f"in vasca + {len(app.assegnazione)} assegnazioni",
         )
         check(
-            len(app.tabella_mosse.get_children()) == app.dati.n_moves,
-            "la tabella delle mosse elenca tutte le mosse",
+            len(app.tabella_permanenze.get_children()) == d.n_moves - 1
+            and len(app.tabella_assegnazione.get_children()) == d.n_moves,
+            "le stesse tabelle del disegno a mano, gia' compilate",
         )
-        def permanenze():
-            s, d = app.soluzione, app.dati
+
+        def permanenze_disegnate():
+            s = app.soluzione
             return [
                 round(
                     s.actual_time[k]
-                    - (s.actual_time[k - 1] + d.loaded_leg_seconds(k - 1)),
+                    - (s.actual_time[k - 1] + app.dati.loaded_leg_seconds(k - 1)),
                     2,
                 )
-                for k in range(1, d.n_moves)
+                for k in range(1, app.dati.n_moves)
             ]
 
-        prima_ok = app.report.ok
-        permanenze_prima = permanenze()
-        fase_prima = app.fasi[1]
-        istantanea = app._istantanea()
-
-        # 10 s stanno dentro il margine di questa linea: la modifica deve
-        # essere accettata, ma le permanenze devono cambiare davvero -- se
-        # restassero identiche vorrebbe dire che il ciclogramma non e' stato
-        # ricostruito e la verifica sta guardando i dati vecchi
-        app.fasi[1] = (fase_prima + 10.0) % app.T_corrente
-        applicata = app._applica("prova", istantanea)
+        # Ricomporre senza cambiare niente deve dare lo stesso ciclogramma: e'
+        # la condizione che rende lecito avere una pagina sola.
+        atteso = [round(app.permanenze[k], 2) for k in range(1, d.n_moves)]
+        T_prima, ok_prima = app.soluzione.T, app.report.ok
+        app._ricomponi("")
         app.update()
-        check(applicata, "lo spostamento di 10 s viene accettato")
         check(
-            permanenze() != permanenze_prima,
-            f"le permanenze sono state ricalcolate: {permanenze_prima} -> "
-            f"{permanenze()}",
+            permanenze_disegnate() == atteso
+            and abs(app.soluzione.T - T_prima) < 1e-9
+            and app.report.ok == ok_prima
+            and not app.incoerenze,
+            f"ricomporlo da li' restituisce lo stesso ciclogramma (T={T_prima:.2f}s, "
+            f"verifica {'superata' if ok_prima else 'fallita'})",
+        )
+
+        prima_ok = app.report.ok
+        permanenze_prima = permanenze_disegnate()
+        istantanea = app._istantanea()
+        app.permanenze[1] += 10.0
+        app._ricomponi("prova", istantanea)
+        app.update()
+        check(
+            permanenze_disegnate() != permanenze_prima,
+            f"allungando un bagno di 10 s il ciclogramma cambia davvero: "
+            f"{permanenze_prima} -> {permanenze_disegnate()}",
         )
         check(
-            len(app.tabella.get_children()) == len(app.report.violations),
-            "l'elenco dei rilievi si e' aggiornato",
+            app.report is not None
+            and len(app.tabella.get_children()) == len(app.report.violations),
+            "e la verifica, gia' viva, si aggiorna da sola",
         )
-        # Il ciclogramma modificato ha stato "MANUALE": va disegnato come
-        # qualunque altro. Se il grafico si svuota, modificare i punti non
-        # serve piu' a niente -- e' proprio quello che si vuole vedere.
+        # Il ciclogramma ricomposto ha stato "MANUALE": va disegnato come
+        # qualunque altro. Se il grafico si svuota, modificarlo non serve piu'
+        # a niente -- e' proprio quello che si vuole vedere.
         check(
             len(app.assi.lines) > 0 and not app.assi.texts,
             f"il grafico continua a mostrare il ciclogramma "
             f"({len(app.assi.lines)} linee, stato {app.soluzione.status})",
         )
 
-        # uno spostamento grande invece non e' realizzabile: il carroponte non
-        # farebbe in tempo. Deve essere rifiutato, non prodotto e basta.
+        # Niente viene mai rifiutato: anche una modifica impossibile si compone
+        # e si guarda. E' il verificatore a dire che non va.
         istantanea2 = app._istantanea()
-        app.fasi[1] = (app.fasi[1] + 30.0) % app.T_corrente
+        app.permanenze = {k: 0.0 for k in range(1, d.n_moves)}
+        app._ricomponi("prova impossibile", istantanea2)
+        app.update()
         check(
-            not app._applica("prova grande", istantanea2),
-            "uno spostamento troppo grande viene rifiutato",
+            app.soluzione is not None and len(app.report.errors) > 0,
+            f"una modifica impossibile si disegna lo stesso, e la verifica "
+            f"segnala {len(app.report.errors)} errori",
         )
 
         app._annulla_modifica()
         app.update()
+        app._annulla_modifica()
+        app.update()
         check(
-            abs(app.fasi[1] - fase_prima) < 1e-6
-            and app.report.ok == prima_ok
-            and permanenze() == permanenze_prima,
-            "l'annullamento riporta esattamente alla soluzione di prima",
+            permanenze_disegnate() == permanenze_prima and app.report.ok == prima_ok,
+            "due annullamenti riportano esattamente alla soluzione calcolata",
         )
 
         # -- zoom ----------------------------------------------------------
@@ -270,11 +290,14 @@ def test_modifica_prelievo(percorso_linea):
         prima = larghezza()
         app._su_rotella(Rotella(app.assi, "up", 60.0, 5.0))
         app.update()
-        check(larghezza() < prima * 0.95, f"la rotella zooma ({prima:.0f} -> {larghezza():.0f} s)")
+        check(
+            larghezza() < prima * 0.95,
+            f"la rotella zooma ({prima:.0f} -> {larghezza():.0f} s)",
+        )
 
         zoomata = app.assi.get_xlim()
-        app.fasi[1] = (app.fasi[1] + 5.0) % app.T_corrente
-        app._applica("prova zoom", app._istantanea())
+        app.permanenze[1] += 5.0
+        app._ricomponi("prova zoom", app._istantanea())
         app.update()
         check(
             abs(app.assi.get_xlim()[0] - zoomata[0]) < 1e-6
@@ -294,7 +317,8 @@ def test_modifica_prelievo(percorso_linea):
         def punta(t_secondi, y_metri):
             px, py = app.assi.transData.transform((t_secondi, y_metri))
             app.tela.callbacks.process(
-                "motion_notify_event", MouseEvent("motion_notify_event", app.tela, px, py)
+                "motion_notify_event",
+                MouseEvent("motion_notify_event", app.tela, px, py),
             )
             app.update()
 
@@ -305,8 +329,8 @@ def test_modifica_prelievo(percorso_linea):
             and abs(app._cursore.linev.get_xdata()[0] - 80.0) < 0.5,
             "il mirino segue il puntatore",
         )
-        app.fasi[1] = (app.fasi[1] + 3.0) % app.T_corrente
-        app._applica("prova mirino", app._istantanea())
+        app.permanenze[1] += 3.0
+        app._ricomponi("prova mirino", app._istantanea())
         punta(150.0, 10.0)
         check(
             abs(app._cursore.linev.get_xdata()[0] - 150.0) < 0.5,
@@ -316,8 +340,51 @@ def test_modifica_prelievo(percorso_linea):
         chiudi(app)
 
 
-def test_modifica_takt_e_carroponti(percorso_linea):
-    print("\n[5] modifica del takt time e del numero di carroponti")
+def test_due_viste(percorso_linea):
+    print("\n[5] due viste dello stesso ciclogramma, stessi comandi")
+    app = _app_risolta(percorso_linea)
+    try:
+        d = app.config_linea.data
+        check(app.vista == "ciclogramma", "si parte dal ciclogramma")
+        linee_ciclogramma = len(app.assi.lines)
+        titolo_ciclogramma = app.assi.get_title()
+
+        app.var_vista.set("pettine")
+        app._cambia_vista()
+        app.update()
+        check(
+            app.vista == "pettine"
+            and "Pettine" in app.assi.get_title()
+            and len(app.assi.lines) > linee_ciclogramma,
+            f"il pettine mostra i 10 pezzi ({len(app.assi.lines)} linee contro "
+            f"{linee_ciclogramma})",
+        )
+        # I comandi non cambiano con la vista: e' tutto il punto della pagina
+        # unica. Una modifica fatta guardando il pettine e' la stessa modifica.
+        istantanea = app._istantanea()
+        app.permanenze[1] += 20.0
+        app._ricomponi("prova dal pettine", istantanea)
+        app.update()
+        check(
+            app.soluzione is not None and app.vista == "pettine",
+            "si modifica dal pettine con gli stessi comandi",
+        )
+        app.var_vista.set("ciclogramma")
+        app._cambia_vista()
+        app.update()
+        check(
+            app.vista == "ciclogramma"
+            and app.assi.get_title() == titolo_ciclogramma,
+            "e tornando al ciclogramma la modifica c'e'",
+        )
+        app._annulla_modifica()
+        app.update()
+    finally:
+        chiudi(app)
+
+
+def test_takt_e_carroponti(percorso_linea):
+    print("\n[6] takt time, numero di carroponti, riottimizzazione")
     app = _app_risolta(percorso_linea)
     try:
         T0 = app.T_corrente
@@ -337,85 +404,34 @@ def test_modifica_takt_e_carroponti(percorso_linea):
             "un valore non numerico non cambia nulla e non schianta",
         )
 
-        n0 = len(app.zone_correnti)
+        # Lo spinbox ridistribuisce subito, senza risolvere: deve vedersi.
+        n0 = app.n_carroponti
         app.var_carroponti.set(str(n0 + 1))
-        app._modifica_numero_carroponti()
-        check(pompa(app), "il ricalcolo con piu' carroponti termina")
-        check(
-            len(app.dati.zones) == n0 + 1,
-            f"carroponti portati da {n0} a {len(app.dati.zones)} "
-            f"(T={app.soluzione.T:.2f}s)",
-        )
-        check(app.report.ok, "e la nuova soluzione supera la verifica")
-        check(
-            len(app.tabella_mosse.get_children()) == app.dati.n_moves,
-            "la tabella mostra la nuova assegnazione",
-        )
-    finally:
-        chiudi(app)
-
-
-def test_modifica_impossibile(percorso_linea):
-    print("\n[6] modifica non realizzabile: si torna indietro, non si schianta")
-    app = _app_risolta(percorso_linea)
-    try:
-        stato_prima = (app.T_corrente, dict(app.fasi))
-        soluzione_prima = app.soluzione
-        # tutti i prelievi nello stesso istante: il carroponte dovrebbe essere
-        # in piu' posti insieme, quindi il ciclogramma non esiste
-        istantanea = app._istantanea()
-        for k in app.fasi:
-            app.fasi[k] = 0.0
-        applicata = app._applica("prova impossibile", istantanea)
+        app._cambia_carroponti()
         app.update()
-        check(not applicata, "la modifica viene rifiutata")
         check(
-            app.soluzione is soluzione_prima
-            and app.T_corrente == stato_prima[0]
-            and app.fasi == stato_prima[1],
-            "lo stato torna esattamente com'era",
+            app.n_carroponti == n0 + 1
+            and len(set(app.assegnazione.values())) == n0 + 1,
+            f"lo spinbox ridistribuisce subito le mosse su {app.n_carroponti} "
+            f"carroponti, senza risolvere",
         )
-        check(
-            "non applicabile" in app.etichetta_stato["text"],
-            f"l'utente viene avvisato: \"{app.etichetta_stato['text'][:60]}...\"",
-        )
-    finally:
-        chiudi(app)
 
-
-def test_proposta_modificabile(percorso_linea):
-    print("\n[7] anche la proposta di partenza si puo' modificare")
-    from interfaccia import Applicazione
-
-    app = Applicazione(percorso_linea)
-    try:
-        for _ in range(50):
-            app.update()
-            if app.config_linea is not None:
-                break
-            time.sleep(0.02)
-        app._crea_proposta()
-        pompa(app)
-        check(len(app.fasi) == app.dati.n_moves, "la proposta e' modificabile")
-        errori_prima = len(app.report.errors)
-        # da un carroponte a tre: e' la mossa naturale per rendere fattibile
-        # una proposta che con un carroponte solo non sta nelle tolleranze
-        app.var_carroponti.set("3")
+        # Il pulsante invece fa lavorare il solutore su quel numero.
         app._modifica_numero_carroponti()
-        check(pompa(app), "il ricalcolo termina")
+        check(pompa(app), "'Ottimizza con questi carroponti' termina")
         check(
-            len(app.dati.zones) == 3 and app.report.ok,
-            f"da 1 carroponte con {errori_prima} problemi a 3 carroponti "
-            f"verificati (T={app.soluzione.T:.2f}s)",
+            len(app.dati.zones) == n0 + 1 and app.report.ok,
+            f"suddivisione ottimizzata per {len(app.dati.zones)} carroponti, "
+            f"verificata (T={app.soluzione.T:.2f}s)",
         )
     finally:
         chiudi(app)
 
 
-def test_disegno_manuale(percorso_linea):
-    print("\n[7] disegno manuale: pettine, assegnazione, verifica su richiesta")
+def test_composizione_da_zero(percorso_linea):
+    print("\n[7] composizione da zero: stessa pagina, verifica su richiesta")
     from interfaccia import Applicazione
-    import manuale
+    import manuale as m
 
     app = Applicazione(percorso_linea)
     try:
@@ -424,7 +440,7 @@ def test_disegno_manuale(percorso_linea):
             if app.config_linea is not None:
                 break
             time.sleep(0.02)
-        app._avvia_manuale()
+        app._componi_da_zero()
         app.update()
         d = app.config_linea.data
 
@@ -437,58 +453,32 @@ def test_disegno_manuale(percorso_linea):
             "si parte dai tempi in vasca minimi di processo",
         )
         check(
-            len(app.tabella_permanenze.get_children()) == d.n_moves - 1
-            and len(app.tabella_assegnazione.get_children()) == d.n_moves,
-            "le tabelle di disegno sono compilate",
+            app.report is None and not app.verifica_viva,
+            "nessuna verifica finche' non la si chiede",
         )
-        pettine = manuale.pettine(d, app.T_corrente, app.permanenze)
-        check(
-            len(pettine) == 10,
-            f"il pettine ha {len(pettine)} scalinate, una per pezzo",
-        )
-        # le scalinate devono essere distanziate esattamente di un takt time
+
+        pettine = m.pettine(d, app.T_corrente, app.permanenze)
+        check(len(pettine) == 10, f"il pettine ha {len(pettine)} scalinate")
         scarti = {
             round(pettine[p + 1][0].t_start - pettine[p][0].t_start, 6)
             for p in range(len(pettine) - 1)
         }
         check(
             scarti == {round(app.T_corrente, 6)},
-            f"distanziate di un takt time esatto ({scarti.pop():.2f} s)",
+            f"distanziate di un takt time esatto ({app.T_corrente:.2f} s)",
         )
-        # forma a gradini: la scalinata sale dalla prima all'ultima vasca
-        quote = [s.x_end for s in pettine[0]]
-        check(
-            min(quote) == d.station_position(0)
-            and max(quote) == d.station_position(d.n_stations - 1),
-            "ogni scalinata va dalla prima all'ultima vasca",
-        )
-
-        # -- i controlli sono sospesi ---------------------------------------
-        check(app.report is None, "nessuna verifica durante il disegno")
 
         # -- cambiare un tempo in vasca sposta le scalinate ------------------
-        prima = manuale.catena_pezzo(d, app.permanenze)
+        prima = m.catena_pezzo(d, app.permanenze)
         app.permanenze[1] += 40.0
-        app._ricomponi_manuale()
+        app._ricomponi("prova")
         app.update()
-        dopo = manuale.catena_pezzo(d, app.permanenze)
+        dopo = m.catena_pezzo(d, app.permanenze)
         check(
             dopo[2] - prima[2] == 40.0 and dopo[0] == prima[0],
             f"allungando il bagno di 40 s la scalinata si sposta da quel punto "
             f"in poi ({prima[2]:.1f} -> {dopo[2]:.1f} s)",
         )
-
-        # -- spostare il confine fra i carroponti ---------------------------
-        import manuale as m
-        confine = max(k for k, c in app.assegnazione.items() if c == 0)
-        app.assegnazione[confine] = 1
-        check(
-            m.perche_non_va(d, app.assegnazione) is None,
-            f"la mossa {confine} puo' passare al carroponte successivo",
-        )
-        app._ricomponi_manuale()
-        app.update()
-        check(app.soluzione is not None, "il ciclogramma viene ridisegnato")
 
         # -- un'assegnazione che farebbe scavalcare i carroponti -------------
         prova = dict(app.assegnazione)
@@ -504,36 +494,37 @@ def test_disegno_manuale(percorso_linea):
         for k in range(d.n_moves):
             app.assegnazione[k] = 0
         app.permanenze = {k: 0.0 for k in range(1, d.n_moves)}
-        app._ricomponi_manuale()
+        app._ricomponi("prova impossibile")
         app.update()
         check(
-            app.soluzione is not None,
-            "con un solo carroponte e nessuna sosta il disegno esiste comunque",
+            app.soluzione is not None and len(app.incoerenze) > 0,
+            f"con un solo carroponte e nessuna sosta il disegno esiste comunque, "
+            f"con {len(app.incoerenze)} incoerenze descritte",
         )
-        check(
-            len(app.incoerenze) > 0,
-            f"e le {len(app.incoerenze)} incoerenze sono descritte",
-        )
-        check(
-            app.report is None,
-            "ma restano incoerenze di disegno, non violazioni: niente verifica",
-        )
+        check(app.report is None, "e ancora nessuna verifica: non l'ho chiesta")
 
-        # -- il report arriva solo quando lo si chiede ----------------------
+        # -- il report arriva quando lo si chiede, e poi resta vivo ----------
         app._verifica_adesso()
         app.update()
-        check(app.report is not None, "'Verifica adesso' produce il report")
         check(
-            len(app.tabella.get_children()) == len(app.report.violations)
-            and len(app.report.errors) > 0,
-            f"il report elenca {len(app.report.errors)} errori",
+            app.report is not None and len(app.report.errors) > 0,
+            f"'Verifica adesso' produce il report ({len(app.report.errors)} errori)",
+        )
+        n_errori = len(app.report.errors)
+        app.permanenze[1] = d.route[1].dwell_min
+        app._ricomponi("dopo la verifica")
+        app.update()
+        check(
+            app.report is not None and len(app.report.errors) != n_errori,
+            "e da li' in poi si aggiorna da sola a ogni modifica "
+            f"({n_errori} -> {len(app.report.errors)} errori)",
         )
     finally:
         chiudi(app)
 
 
-def test_manuale_poi_automatico(percorso_linea):
-    print("\n[8] dal disegno manuale si torna al calcolo automatico")
+def test_da_zero_poi_automatico(percorso_linea):
+    print("\n[8] dalla composizione a mano si torna al calcolo automatico")
     from interfaccia import Applicazione
 
     app = Applicazione(percorso_linea)
@@ -543,17 +534,20 @@ def test_manuale_poi_automatico(percorso_linea):
             if app.config_linea is not None:
                 break
             time.sleep(0.02)
-        app._avvia_manuale()
+        app._componi_da_zero()
         app.update()
-        check(app.modo == "manuale", "in disegno manuale")
+        check(app.origine == "composto da zero", "composizione da zero avviata")
         app._calcola_automatico()
         check(pompa(app), "il calcolo automatico parte e termina")
-        check(app.modo == "automatico", "si torna in modalita' automatica")
         check(
             app.report is not None and app.report.ok,
             "e la soluzione automatica e' verificata",
         )
-        check(len(app.incoerenze) == 0, "nessuna incoerenza residua dal disegno")
+        check(
+            not app.modificato and app.origine.startswith("calcolo automatico"),
+            f"il riepilogo dice da dove viene: \"{app.origine}\"",
+        )
+        check(len(app.incoerenze) == 0, "nessuna incoerenza residua")
     finally:
         chiudi(app)
 
@@ -593,11 +587,11 @@ def main():
     try:
         test_apertura_e_proposta(linea)
         test_calcolo_automatico(linea)
-        test_modifica_prelievo(linea)
-        test_modifica_takt_e_carroponti(linea)
-        test_modifica_impossibile(linea)
-        test_disegno_manuale(linea)
-        test_manuale_poi_automatico(linea)
+        test_modifica_tempi_in_vasca(linea)
+        test_due_viste(linea)
+        test_takt_e_carroponti(linea)
+        test_composizione_da_zero(linea)
+        test_da_zero_poi_automatico(linea)
         test_file_illeggibile()
     finally:
         os.unlink(linea)
