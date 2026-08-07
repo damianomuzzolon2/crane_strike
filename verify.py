@@ -134,13 +134,13 @@ class VerificationReport:
         if self.min_separation_pair is not None:
             i, j = self.min_separation_pair
             lines.append(
-                f"  separazione minima         : {self.min_separation:.3f} m "
-                f"(richiesta {self.required_separation:.3f} m) "
+                f"  separazione minima         : {self.min_separation:.0f} mm "
+                f"(richiesta {self.required_separation:.0f} mm) "
                 f"fra carroponti {i + 1} e {j + 1} a t={self.min_separation_t:.2f} s"
             )
             lines.append(
                 f"  margine spaziale residuo   : "
-                f"{self.min_separation - self.required_separation:+.3f} m"
+                f"{self.min_separation - self.required_separation:+.0f} mm"
             )
         else:
             lines.append(
@@ -149,7 +149,7 @@ class VerificationReport:
             )
         lines.append(
             f"  campionamento              : dt={self.sampling_dt * 1000:.0f} ms, "
-            f"{self.n_samples} istanti, errore <= {self.sampling_error_bound * 1000:.3f} mm"
+            f"{self.n_samples} istanti, errore <= {self.sampling_error_bound:.4f} mm"
         )
         if self.dwell_slack:
             st, (smin, smax) = min(
@@ -242,7 +242,7 @@ def verify_solution(
     solution: Solution,
     dt: Optional[float] = None,
     time_tol: Optional[float] = None,
-    space_tol: float = 1e-3,
+    space_tol: float = 1.0,
     warn_margin: float = 0.0,
 ) -> VerificationReport:
     """Ricontrolla la soluzione senza passare da CP-SAT.
@@ -251,7 +251,7 @@ def verify_solution(
                 (default: un tick, cioe' 1/data.time_scale)
     time_tol    tolleranza sui confronti temporali [s]
                 (default: data.eps_seconds, la stessa usata dal modello)
-    space_tol   tolleranza assoluta sui confronti di distanza [m]
+    space_tol   tolleranza assoluta sui confronti di distanza [mm]
     warn_margin se > 0, segnala come avviso anche le separazioni che superano
                 il minimo richiesto per meno di questo margine [m]
 
@@ -508,7 +508,7 @@ def _check_per_hoist(data, solution, plans, T, time_tol, add) -> list[_Trajector
                 "periodicity",
                 "error",
                 f"il carroponte non torna al punto di partenza "
-                f"({segs[0].x_start:.3f} -> {segs[-1].x_end:.3f} m)",
+                f"({segs[0].x_start:.0f} -> {segs[-1].x_end:.0f} mm)",
                 hoists=(h,),
             )
 
@@ -537,7 +537,7 @@ def _check_per_hoist(data, solution, plans, T, time_tol, add) -> list[_Trajector
                     add(
                         "order",
                         "error",
-                        f"tratto a carico da {s.x_start:.2f} a {s.x_end:.2f} m "
+                        f"tratto a carico da {s.x_start:.0f} a {s.x_end:.0f} mm "
                         f"che non corrisponde a nessuna mossa della zona",
                         hoists=(h,),
                         t=s.t_start,
@@ -878,20 +878,20 @@ def _dove(data, x: float) -> str:
     """Traduce una quota della rotaia in un riferimento che si riconosce
     sull'impianto.
 
-    "a 11.2 m" non dice niente a chi legge: il ciclogramma si ragiona per
+    "a 11200 mm" non dice niente a chi legge: il ciclogramma si ragiona per
     vasche. Se la quota e' praticamente quella di una vasca si nomina quella,
     altrimenti si dice fra quali due si trova."""
     quote = sorted({(t.position, tid) for tid, t in data.tanks.items()})
     if not quote:
-        return f"{x:.2f} m"
+        return f"{x:.0f} mm"
     piu_vicina = min(quote, key=lambda q: abs(q[0] - x))
-    if abs(piu_vicina[0] - x) < 0.15:
-        return f"sopra {piu_vicina[1]} ({x:.2f} m)"
+    if abs(piu_vicina[0] - x) < 150.0:
+        return f"sopra {piu_vicina[1]} ({x:.0f} mm)"
     prima = [q for q in quote if q[0] <= x]
     dopo = [q for q in quote if q[0] >= x]
     if prima and dopo:
-        return f"fra {prima[-1][1]} e {dopo[0][1]} ({x:.2f} m)"
-    return f"a {x:.2f} m, vicino a {piu_vicina[1]}"
+        return f"fra {prima[-1][1]} e {dopo[0][1]} ({x:.0f} mm)"
+    return f"a {x:.0f} mm, vicino a {piu_vicina[1]}"
 
 
 def _chi_e_dove(data, i: int, j: int, t: float, xi: float, xj: float) -> str:
@@ -975,10 +975,10 @@ def _check_collisions(
             add(
                 "collision",
                 "error",
-                f"COLLISIONE fra {chi_e_dove} -- restano {sep:.3f} m contro i "
-                f"{required:.3f} m richiesti (ingombro "
-                f"{data.hoist_extent_neg:.2f}+{data.hoist_extent_pos:.2f}"
-                f" + sicurezza {data.safety_distance:.2f})",
+                f"COLLISIONE fra {chi_e_dove} -- restano {sep:.0f} mm contro i "
+                f"{required:.0f} mm richiesti (ingombro "
+                f"{data.hoist_extent_neg:.0f}+{data.hoist_extent_pos:.0f}"
+                f" + sicurezza {data.safety_distance:.0f})",
                 hoists=(i, j),
                 t=t,
                 value=sep,
@@ -989,9 +989,9 @@ def _check_collisions(
             add(
                 "collision",
                 "warning",
-                f"{chi_e_dove} -- distanza {sep:.3f} m, appena sotto i "
-                f"{required:.3f} m richiesti ma entro la tolleranza di calcolo "
-                f"({err_bound + space_tol:.4f} m)",
+                f"{chi_e_dove} -- distanza {sep:.0f} mm, appena sotto i "
+                f"{required:.0f} mm richiesti ma entro la tolleranza di calcolo "
+                f"({err_bound + space_tol:.2f} mm)",
                 hoists=(i, j),
                 t=t,
                 value=sep,
@@ -1002,8 +1002,8 @@ def _check_collisions(
             add(
                 "collision",
                 "warning",
-                f"{chi_e_dove} -- distanza {sep:.3f} m, al limite: solo "
-                f"{sep - required:.3f} m di margine oltre il minimo richiesto",
+                f"{chi_e_dove} -- distanza {sep:.0f} mm, al limite: solo "
+                f"{sep - required:.0f} mm di margine oltre il minimo richiesto",
                 hoists=(i, j),
                 t=t,
                 value=sep,

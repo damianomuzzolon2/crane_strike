@@ -74,7 +74,7 @@ def lettura_coordinate(t: float, x: float) -> str:
     sono i nomi delle vasche: matplotlib prova a formattare la quota con lo
     stesso formattatore e, fuori da un nome di vasca, restituisce una stringa
     vuota -- si finisce per leggere "(x, y) = (175.0, )"."""
-    return f"t = {t:.1f} s      posizione = {x:.2f} m"
+    return f"t = {t:.1f} s      posizione = {x:.0f} mm"
 
 
 def plot_cyclogram(
@@ -102,7 +102,7 @@ def plot_cyclogram(
     # I nomi vanno messi COME etichette dell'asse, non come testo accanto:
     # scritti a mano finirebbero sopra i valori numerici, e su una finestra
     # stretta diventano illeggibili. Chi legge un ciclogramma cerca la vasca,
-    # non la quota in metri.
+    # non la quota in millimetri.
     etichette: dict[float, list[str]] = {}
     for st in data.route:
         y = data.tanks[st.tank_id].position
@@ -114,7 +114,7 @@ def plot_cyclogram(
     quote = sorted(etichette)
     ax.set_yticks(quote)
     ax.set_yticklabels(
-        [f"{' / '.join(etichette[y])}\n{y:.2f} m" for y in quote], fontsize=8
+        [f"{' / '.join(etichette[y])}\n{y:.0f} mm" for y in quote], fontsize=8
     )
 
     # -- traiettorie di ciascun carroponte, ripetute su n_cycles periodi ----

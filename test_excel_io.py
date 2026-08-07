@@ -80,19 +80,19 @@ def test_andata_e_ritorno():
             (d.takt_min, d.takt_max) == (110.0, 150.0), "banda di takt time 110-150 s"
         )
         check(
-            (d.kin_empty.v_max, d.kin_loaded.a_max) == (1.6, 0.4),
+            (d.kin_empty.v_max, d.kin_loaded.a_max) == (1600, 400),
             "cinematiche vuoto e carico",
         )
         check(
-            (d.lift_height, d.engage_time, d.disengage_time) == (0.8, 2.0, 1.0),
+            (d.lift_height, d.engage_time, d.disengage_time) == (800, 2.0, 1.0),
             "corsa verticale e tempi di aggancio/sgancio",
         )
         check(
-            (d.kin_lift_empty.v_max, d.kin_lift_loaded.a_max) == (0.5, 0.5),
+            (d.kin_lift_empty.v_max, d.kin_lift_loaded.a_max) == (500, 500),
             "cinematiche di sollevamento",
         )
         check(
-            d.tanks["ZINCATURA"].lift_height == 1.1
+            d.tanks["ZINCATURA"].lift_height == 1100
             and d.tanks["SGRASSO"].lift_height is None,
             "corsa verticale per vasca solo dove indicata",
         )
@@ -133,11 +133,38 @@ def test_virgola_decimale():
     print("\n[3] numeri scritti con la virgola decimale")
     p = modello_temporaneo()
     try:
-        modifica(p, FOGLIO_VASCHE, "B3", "2,5")
-        modifica(p, FOGLIO_PARAMETRI, "B4", "0,9")
+        modifica(p, FOGLIO_VASCHE, "B3", "2500,5")
+        modifica(p, FOGLIO_PARAMETRI, "B4", "1650,5")
         cfg = leggi_problema(p)
-        check(cfg.data.tanks["SGRASSO"].position == 2.5, "'2,5' letto come 2.5")
-        check(cfg.data.kin_empty.a_max == 0.9, "'0,9' letto come 0.9")
+        check(cfg.data.tanks["SGRASSO"].position == 2500.5, "'2500,5' letto come 2500.5")
+        check(
+            cfg.data.kin_empty.v_max == 1650.5,
+            "'1650,5' letto come 1650.5 (B4 e' v_max_vuoto_mm_s)",
+        )
+    finally:
+        os.unlink(p)
+
+
+def test_file_in_metri():
+    print("\n[3b] un file della versione in metri viene riconosciuto")
+    # E' il caso pericoloso: le colonne si leggono per posizione, non per
+    # intestazione, quindi una posizione di 9.5 verrebbe presa per 9.5 mm.
+    # Deve fermarsi, e deve dire perche' -- non sommergere di "parametro non
+    # riconosciuto" senza mai nominare l'unita'.
+    p = modello_temporaneo()
+    try:
+        modifica(p, FOGLIO_PARAMETRI, "A4", "v_max_vuoto_m_s")
+        modifica(p, FOGLIO_PARAMETRI, "A8", "ingombro_lato_positivo_m")
+        msg = errore_leggendo(p)
+        check("METRI" in msg and "MILLIMETRI" in msg, "l'unita' viene nominata")
+        check(
+            "v_max_vuoto_mm_s" in msg and "1000" in msg,
+            "dice come si chiama adesso e che va moltiplicato per 1000",
+        )
+        check(
+            msg.count("versione in METRI") == 2,
+            "segnala tutti i parametri vecchi, non solo il primo",
+        )
     finally:
         os.unlink(p)
 
@@ -248,7 +275,7 @@ def test_sollevamento_incoerente():
             nome = str(ws.cell(riga, 1).value or "")
             if nome.startswith(("v_max_sollevamento", "a_max_sollevamento")):
                 ws.cell(riga, 2).value = None
-            elif nome == "altezza_sollevamento_m":
+            elif nome == "altezza_sollevamento_mm":
                 ws.cell(riga, 2).value = 0
         ws2 = wb[FOGLIO_VASCHE]
         for riga in range(2, ws2.max_row + 1):
@@ -515,7 +542,7 @@ def test_risultati_verifica():
     rotto.segments_per_hoist = [
         solution.segments_per_hoist[0],
         [
-            dataclasses.replace(s, x_start=s.x_start - 10.0, x_end=s.x_end - 10.0)
+            dataclasses.replace(s, x_start=s.x_start - 10000, x_end=s.x_end - 10000)
             for s in solution.segments_per_hoist[1]
         ],
     ]
@@ -552,6 +579,7 @@ def main():
     test_andata_e_ritorno()
     test_valori_mancanti_e_sbagliati()
     test_virgola_decimale()
+    test_file_in_metri()
     test_vasca_inesistente()
     test_vasca_duplicata()
     test_percorso_riordinato()

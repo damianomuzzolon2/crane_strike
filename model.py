@@ -96,12 +96,12 @@ from kinematics import Kinematics, travel_time as _travel_time_seconds
 @dataclass(frozen=True)
 class Tank:
     id: str
-    position: float  # [m] posizione lungo la rotaia
+    position: float  # [mm] posizione lungo la rotaia
     # Posti simultanei nella vasca. E' una proprieta' della VASCA FISICA, non
     # della singola tappa del percorso: se la ricetta passa due volte dalla
     # stessa vasca, i pezzi delle due tappe si contendono gli stessi posti.
     capacity: int = 1
-    # Corsa verticale [m] fra la quota di trasporto e quella di immersione.
+    # Corsa verticale [mm] fra la quota di trasporto e quella di immersione.
     # None = si usa il valore generale di ProblemData.lift_height: si valorizza
     # solo per le vasche piu' profonde (o piu' basse) della media.
     lift_height: Optional[float] = None
@@ -146,9 +146,9 @@ class ProblemData:
     # e' detto sia simmetrico rispetto al gancio, quindi i due lati si
     # dichiarano separatamente: `pos` verso le posizioni crescenti, `neg`
     # verso quelle decrescenti.
-    hoist_extent_pos: float  # [m]
-    hoist_extent_neg: float  # [m]
-    safety_distance: float  # [m] distanza di sicurezza minima fra due carroponti
+    hoist_extent_pos: float  # [mm]
+    hoist_extent_neg: float  # [mm]
+    safety_distance: float  # [mm] distanza di sicurezza minima fra due carroponti
     zones: Optional[list[HoistZone]] = None  # una per carroponte; None = da
     # scegliere automaticamente con
     # solve_auto_zones(...)
@@ -165,7 +165,7 @@ class ProblemData:
     # I tempi non si dichiarano: si ricavano dalla corsa verticale e dalle
     # cinematiche di sollevamento, con lo stesso profilo trapezoidale usato
     # per il moto orizzontale.
-    lift_height: float = 0.0  # [m] corsa verticale, valore generale
+    lift_height: float = 0.0  # [mm] corsa verticale, valore generale
     kin_lift_empty: Optional[Kinematics] = None  # sollevamento a gancio scarico
     kin_lift_loaded: Optional[Kinematics] = None  # sollevamento col telaio
     engage_time: float = 0.0  # [s] aggancio del telaio, prima del sollevamento
@@ -515,7 +515,7 @@ def zone_layout_conflicts(
         ):
             problemi.append(
                 f"attorno alla stazione di confine {b} "
-                f"('{data.route[b].tank_id}', a {x_b:.2f} m) le due zone non "
+                f"('{data.route[b].tank_id}', a {x_b:.0f} mm) le due zone non "
                 f"stanno su lati opposti: la zona {h + 1} occupa "
                 f"[{min(xs_l):.2f},{max(xs_l):.2f}] e la zona {h + 2} occupa "
                 f"[{min(xs_r):.2f},{max(xs_r):.2f}]. Serve che le posizioni "
@@ -535,8 +535,8 @@ def zone_layout_conflicts(
                 problemi.append(
                     f"le zone {i + 1} e {j + 1} non sono adiacenti ma i loro "
                     f"tratti di rotaia [{lo_i:.2f},{hi_i:.2f}] e "
-                    f"[{lo_j:.2f},{hi_j:.2f}] distano solo {gap:.2f} m "
-                    f"(servono {required:.2f} m): il modello non le vincola "
+                    f"[{lo_j:.0f},{hi_j:.0f}] distano solo {gap:.0f} mm "
+                    f"(servono {required:.0f} mm): il modello non le vincola "
                     f"fra loro"
                 )
     return problemi
@@ -597,7 +597,7 @@ def solve(
 
     def escape_ticks(x: float) -> int:
         """Limite SUPERIORE al tempo che serve a un carroponte per coprire i
-        primi (o gli ultimi) `x` metri di uno spostamento che parte da fermo a
+        primi (o gli ultimi) `x` millimetri di uno spostamento che parte da fermo a
         una stazione. Il caso peggiore e' uno spostamento lungo esattamente x,
         che deve anche decelerare: piu' lento di un tratto iniziale di uno
         spostamento piu' lungo, dove il carroponte accelera e basta. Si prende
@@ -923,7 +923,7 @@ def solve(
 
     def near_boundary(zd, x_b: float, radius: float):
         """Intervalli (start, end, lit) in cui il carroponte della zona `zd`
-        puo' trovarsi a meno di `radius` metri dalla stazione in x_b.
+        puo' trovarsi a meno di `radius` millimetri dalla stazione in x_b.
 
         La traiettoria di un periodo e' partizionata in blocchi: una mossa
         (sosta di presa, traslazione a carico, sosta di rilascio) e un

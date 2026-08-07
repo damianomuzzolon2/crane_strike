@@ -29,8 +29,8 @@ from model import (
 )
 from verify import verify_solution
 
-KIN_EMPTY = Kinematics(v_max=1.6, a_max=0.9)
-KIN_LOADED = Kinematics(v_max=1.0, a_max=0.4)
+KIN_EMPTY = Kinematics(v_max=1600, a_max=900)
+KIN_LOADED = Kinematics(v_max=1000, a_max=400)
 
 _n_pass = 0
 _n_fail = 0
@@ -72,9 +72,9 @@ def linea(
         takt_max=takt_max,
         kin_empty=KIN_EMPTY,
         kin_loaded=KIN_LOADED,
-        hoist_extent_pos=0.5,
-        hoist_extent_neg=0.7,
-        safety_distance=0.6,
+        hoist_extent_pos=500,
+        hoist_extent_neg=700,
+        safety_distance=600,
         zones=zones,
         time_scale=100,
     )
@@ -115,37 +115,55 @@ def _esito(sol, r, atteso: str) -> str:
 
 def test_vasche_ravvicinate():
     print("\n[1] vasche piu' vicine della distanza di sicurezza")
-    D = 1.2 + 0.6
-    for spacing in (1.0, 1.4, 1.8, 2.5):
+    D = 1200 + 600
+    for spacing in (1000, 1400, 1800, 2500):
         data = linea(4, spacing, [HoistZone(0, 1), HoistZone(2, 3)])
         sol, r = risolvi_e_verifica(data, f"spaziatura {spacing}")
         if r is None:
-            print(f"  --   spaziatura {spacing:.1f} m: {sol.status}")
+            # Il vincolo di non collisione discretizza la fascia di esclusione
+            # in `clearance_steps` gradini, ed e' cautelativo: puo' dichiarare
+            # infattibile un caso che una griglia piu' fine risolve. Non e' un
+            # difetto da nascondere con un "continue" -- e' la manopola che
+            # l'utente deve conoscere, quindi qui la si prova davvero.
+            data = linea(
+                4, spacing, [HoistZone(0, 1), HoistZone(2, 3)], clearance_steps=12
+            )
+            sol, r = risolvi_e_verifica(data, f"spaziatura {spacing}, griglia fine")
+            check(
+                r is not None and r.ok and r.min_separation >= D - 1.0,
+                f"spaziatura {spacing:.0f} mm: troppo stretta per la griglia "
+                f"predefinita, risolta con passi_fascia_sicurezza=12 "
+                + (
+                    f"(T={sol.T:.2f}s, separazione {r.min_separation:.0f} mm)"
+                    if r is not None
+                    else f"({sol.status})"
+                ),
+            )
             continue
         check(
-            r.ok and r.min_separation >= D - 1e-3,
-            f"spaziatura {spacing:.1f} m (< {D} m di sicurezza): T={sol.T:.2f}s, "
-            f"separazione minima {r.min_separation:.3f} m",
+            r.ok and r.min_separation >= D - 1.0,
+            f"spaziatura {spacing:.0f} mm (< {D} mm di sicurezza): T={sol.T:.2f}s, "
+            f"separazione minima {r.min_separation:.0f} mm",
         )
 
 
 def test_troppo_stretto_infattibile():
     print("\n[2] vasche cosi' vicine che due carroponti non ci stanno")
-    # passo 0.8 m: mentre uno e' sul confine, l'altro non ha nessuna stazione
+    # passo 800 mm: mentre uno e' sul confine, l'altro non ha nessuna stazione
     # abbastanza lontana in cui sostare -> deve risultare infattibile, non
     # produrre una soluzione con collisioni
-    data = linea(4, 0.8, [HoistZone(0, 1), HoistZone(2, 3)])
+    data = linea(4, 800, [HoistZone(0, 1), HoistZone(2, 3)])
     sol = solve(data, time_limit_s=20.0)
     if sol.status in ("OPTIMAL", "FEASIBLE"):
         r = verify_solution(data, sol)
-        check(r.ok, f"se una soluzione c'e', deve essere valida (sep {r.min_separation:.3f})")
+        check(r.ok, f"se una soluzione c'e', deve essere valida (sep {r.min_separation:.0f} mm)")
     else:
         check(True, f"riconosciuto infattibile ({sol.status}), invece di sbagliare")
 
 
 def test_un_carroponte():
     print("\n[3] un solo carroponte: nessun confine, nessun vincolo di coppia")
-    data = linea(4, 1.0, [HoistZone(0, 3)], takt_max=120.0)
+    data = linea(4, 1000, [HoistZone(0, 3)], takt_max=120.0)
     sol, r = risolvi_e_verifica(data, "carroponte singolo")
     check(r is not None and r.ok, _esito(sol, r, "soluzione valida"))
     check(
@@ -158,7 +176,7 @@ def test_tre_carroponti():
     print("\n[4] tre carroponti, due confini")
     data = linea(
         6,
-        1.5,
+        1500,
         [HoistZone(0, 1), HoistZone(2, 3), HoistZone(4, 5)],
         takt_min=10.0,
         takt_max=60.0,
@@ -168,9 +186,9 @@ def test_tre_carroponti():
     check(r is not None and r.ok, _esito(sol, r, "soluzione valida"))
     if r is not None:
         check(
-            r.min_separation >= r.required_separation - 1e-3,
-            f"separazione minima {r.min_separation:.3f} m >= "
-            f"{r.required_separation:.3f} m",
+            r.min_separation >= r.required_separation - 1.0,
+            f"separazione minima {r.min_separation:.0f} mm >= "
+            f"{r.required_separation:.0f} mm",
         )
 
 
@@ -178,13 +196,13 @@ def test_fasi_verticali_e_capienza():
     print("\n[5] tempi verticali e capienza attivi insieme")
     data = linea(
         4,
-        1.2,
+        1200,
         [HoistZone(0, 1), HoistZone(2, 3)],
         dwell=(40, 120),
         capacity=2,
-        lift_height=0.8,
-        kin_lift_empty=Kinematics(v_max=0.5, a_max=0.8),
-        kin_lift_loaded=Kinematics(v_max=0.3, a_max=0.5),
+        lift_height=800,
+        kin_lift_empty=Kinematics(v_max=500, a_max=800),
+        kin_lift_loaded=Kinematics(v_max=300, a_max=500),
         engage_time=2.0,
         disengage_time=1.0,
         takt_min=25.0,
@@ -203,7 +221,7 @@ def test_clearance_steps():
     for steps in (2, 4, 8):
         data = linea(
             4,
-            1.5,
+            1500,
             [HoistZone(0, 1), HoistZone(2, 3)],
             takt_max=40.0,
             clearance_steps=steps,
@@ -215,7 +233,7 @@ def test_clearance_steps():
         risultati[steps] = (sol.T, r.min_separation, r.ok)
         check(
             r.ok,
-            f"passi={steps}: T={sol.T:.2f}s, separazione {r.min_separation:.3f} m",
+            f"passi={steps}: T={sol.T:.2f}s, separazione {r.min_separation:.0f} mm",
         )
     validi = {k: v for k, v in risultati.items() if v}
     if len(validi) >= 2:
@@ -228,7 +246,7 @@ def test_clearance_steps():
 
 def test_scelta_automatica():
     print("\n[7] scelta automatica su linea compatta")
-    data = linea(6, 1.2, None, takt_min=10.0, takt_max=60.0)
+    data = linea(6, 1200, None, takt_min=10.0, takt_max=60.0)
     sol, zones, n = solve_auto_hoists(
         data, max_hoists=3, time_limit_per_candidate=15.0
     )
@@ -270,9 +288,9 @@ def test_vasca_ripetuta():
             takt_max=200.0,
             kin_empty=KIN_EMPTY,
             kin_loaded=KIN_LOADED,
-            hoist_extent_pos=0.5,
-        hoist_extent_neg=0.7,
-            safety_distance=0.6,
+            hoist_extent_pos=500,
+        hoist_extent_neg=700,
+            safety_distance=600,
             zones=[HoistZone(0, 3)],
             time_scale=100,
         )
@@ -319,7 +337,7 @@ def test_ricostruzione_fedele():
     # ciclogramma viene rimesso insieme da li'. Se il solo rimetterlo insieme
     # -- senza toccare nulla -- gia' cambiasse le permanenze, ogni modifica
     # partirebbe da una base sbagliata.
-    for spacing, zone in ((2.5, [HoistZone(0, 1), HoistZone(2, 3)]), (1.5, None)):
+    for spacing, zone in ((2500, [HoistZone(0, 1), HoistZone(2, 3)]), (1500, None)):
         data = linea(
             4,
             spacing,
@@ -328,9 +346,9 @@ def test_ricostruzione_fedele():
             capacity=3,
             takt_min=20.0,
             takt_max=120.0,
-            lift_height=0.6,
-            kin_lift_empty=Kinematics(v_max=0.5, a_max=0.8),
-            kin_lift_loaded=Kinematics(v_max=0.3, a_max=0.5),
+            lift_height=600,
+            kin_lift_empty=Kinematics(v_max=500, a_max=800),
+            kin_lift_loaded=Kinematics(v_max=300, a_max=500),
             engage_time=2.0,
             disengage_time=1.0,
             drain_time=3.0,

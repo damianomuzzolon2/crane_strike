@@ -6,7 +6,7 @@ carroponte che si muove con un profilo trapezoidale (accelerazione costante,
 velocita' di crociera, decelerazione costante) oppure triangolare se la
 distanza e' troppo breve per raggiungere la velocita' massima.
 
-Tutte le funzioni lavorano in unita' fisiche "naturali" (metri, m/s, m/s^2,
+Tutte le funzioni lavorano nelle unita' del progetto (millimetri, mm/s, mm/s^2,
 secondi). La conversione in "tick" interi per CP-SAT avviene altrove.
 """
 
@@ -19,8 +19,8 @@ from dataclasses import dataclass
 class Kinematics:
     """Limiti cinematici di un carroponte in una data condizione (vuoto o carico)."""
 
-    v_max: float  # m/s
-    a_max: float  # m/s^2 (si assume accelerazione = decelerazione)
+    v_max: float  # mm/s
+    a_max: float  # mm/s^2 (si assume accelerazione = decelerazione)
 
     def __post_init__(self):
         if self.v_max <= 0 or self.a_max <= 0:

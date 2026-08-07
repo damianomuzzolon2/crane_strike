@@ -676,6 +676,9 @@ class Applicazione(tk.Tk):
                 "  - allargare la tolleranza sul takt time\n"
                 "  - aumentare il numero massimo di carroponti\n"
                 "  - aumentare i posti delle vasche piu' lente\n"
+                "  - alzare passi_fascia_sicurezza (il vincolo di non\n"
+                "    collisione e' cautelativo: con vasche molto vicine puo'\n"
+                "    scartare soluzioni che esistono davvero)\n"
                 "  - allungare il tempo limite di calcolo\n\n"
                 "Oppure premi 'Componi da zero' e aggiustalo a mano: "
                 "il verificatore dira' esattamente cosa manca."
@@ -1024,7 +1027,7 @@ class Applicazione(tk.Tk):
         quote = sorted(etichette)
         self.assi.set_yticks(quote)
         self.assi.set_yticklabels(
-            [f"{' / '.join(etichette[y])}\n{y:.2f} m" for y in quote], fontsize=8
+            [f"{' / '.join(etichette[y])}\n{y:.0f} mm" for y in quote], fontsize=8
         )
 
         # -- il pettine: un pezzo per scalinata ----------------------------
@@ -1213,8 +1216,8 @@ class Applicazione(tk.Tk):
         else:
             if rep.min_separation != float("inf"):
                 righe.append(
-                    f"Distanza minima fra carroponti: {rep.min_separation:.3f} m "
-                    f"(richiesta {rep.required_separation:.3f} m)"
+                    f"Distanza minima fra carroponti: {rep.min_separation:.0f} mm "
+                    f"(richiesta {rep.required_separation:.0f} mm)"
                 )
             else:
                 righe.append("Un solo carroponte: nessuna coppia da controllare.")

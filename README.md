@@ -49,7 +49,7 @@ aprire una finestra, e la cinematica senza avere OR-Tools installato.
 
 | file | righe | contenuto |
 | --- | ---: | --- |
-| `kinematics.py` | 130 | La fisica del movimento, in metri e secondi. `travel_time()` da' il tempo per percorrere una distanza con profilo trapezoidale o triangolare; `position_profile()` la posizione istante per istante; `profile_breakpoints()` gli spigoli della curva, che servono al verificatore per limitare in modo rigoroso l'errore di campionamento. Non sa nulla del resto del progetto. |
+| `kinematics.py` | 130 | La fisica del movimento, in millimetri e secondi. `travel_time()` da' il tempo per percorrere una distanza con profilo trapezoidale o triangolare; `position_profile()` la posizione istante per istante; `profile_breakpoints()` gli spigoli della curva, che servono al verificatore per limitare in modo rigoroso l'errore di campionamento. Non sa nulla del resto del progetto. |
 | `model.py` | 1711 | Il cuore. Contiene le **strutture dati** (`Tank`, `StationSpec`, `HoistZone`, `ProblemData`, `Segment`, `Solution`), la costruzione e risoluzione del **modello CP-SAT** (`solve`), la scelta automatica di zone e numero di carroponti (`solve_auto_zones`, `solve_auto_hoists`), e la costruzione di un ciclogramma **senza risolvere** a partire dai suoi gradi di liberta' (`build_solution`, `estrai_gradi_di_liberta`) — quest'ultima e' cio' che rende possibile l'editor. |
 | `verify.py` | 1020 | Il **verificatore indipendente**: `verify_solution()` ricontrolla una soluzione in Python puro, senza CP-SAT, campionando le posizioni reali dei carroponti. Restituisce un `VerificationReport` con l'elenco delle `Violation` divise per gravita'. E' la rete di sicurezza contro gli errori nella formulazione del modello. |
 | `manuale.py` | 230 | Il ciclogramma nei termini in cui si modifica: il "pettine" dei pezzi (`pettine`, `catena_pezzo`), la composizione libera del ciclogramma (`componi`) e il controllo che i carroponti non si scavalchino sulla rotaia (`perche_non_va`). |
@@ -58,14 +58,14 @@ aprire una finestra, e la cinematica senza avere OR-Tools installato.
 
 | file | righe | contenuto |
 | --- | ---: | --- |
-| `excel_io.py` | 1099 | Tutto l'Excel: `scrivi_modello()` genera il file da compilare, `leggi_problema()` lo rilegge raccogliendo **tutti** gli errori di compilazione con foglio e cella, `scrivi_risultati()` produce il file dei risultati a quattro fogli. |
+| `excel_io.py` | 1122 | Tutto l'Excel: `scrivi_modello()` genera il file da compilare, `leggi_problema()` lo rilegge raccogliendo **tutti** gli errori di compilazione con foglio e cella, `scrivi_risultati()` produce il file dei risultati a quattro fogli. |
 | `plotting.py` | 175 | `plot_cyclogram()`: disegna il ciclogramma (posizione lungo la rotaia contro tempo) con il profilo cinematico vero, non con segmenti diritti. |
 
 ### Programmi da lanciare
 
 | file | righe | contenuto |
 | --- | ---: | --- |
-| `interfaccia.py` | 1687 | L'**interfaccia grafica** (tkinter). La classe `Applicazione` e' tutta la finestra: caricamento, calcolo in background, grafico incorporato (due viste), la pagina unica in cui il ciclogramma si modifica -- calcolato o composto da zero che sia -- verifica e salvataggio. `autotest()` prova l'installazione da sola. E' il programma che usa un utente normale. |
+| `interfaccia.py` | 1690 | L'**interfaccia grafica** (tkinter). La classe `Applicazione` e' tutta la finestra: caricamento, calcolo in background, grafico incorporato (due viste), la pagina unica in cui il ciclogramma si modifica -- calcolato o composto da zero che sia -- verifica e salvataggio. `autotest()` prova l'installazione da sola. E' il programma che usa un utente normale. |
 | `ciclogramma.py` | 170 | Lo stesso lavoro da **riga di comando**, per chi preferisce il terminale o vuole automatizzare. |
 | `esempio.py` | 195 | La linea di esempio definita **in codice** invece che in Excel, per chi vuole integrare il solutore in qualcos'altro. |
 | `costruisci_exe.py` | 119 | Costruisce l'**eseguibile autonomo** con PyInstaller. Vedi sotto. |
@@ -81,8 +81,8 @@ Non serve pytest.
 | file | righe | cosa verifica |
 | --- | ---: | --- |
 | `test_verify.py` | 839 | **Il verificatore.** Risponde a "chi verifica il verificatore?": venti casi, di cui uno solo corretto e tutti gli altri rotti di proposito (collisioni, permanenze fuori tolleranza, periodicita' incoerente, geometrie patologiche, capienze). Un controllore che non segnala mai nulla e' inutile, quindi ogni controllo ha un caso che DEVE farlo scattare. Non richiede OR-Tools: le soluzioni sono costruite a mano. |
-| `test_model.py` | 393 | **Il modello CP-SAT.** Risolve davvero e passa ogni soluzione al verificatore: vasche ravvicinate, tre carroponti, capienza, tempi verticali, e la fedelta' della ricostruzione di una soluzione dai suoi gradi di liberta'. Richiede OR-Tools. |
-| `test_excel_io.py` | 577 | **La lettura e la scrittura Excel.** Quasi tutti i casi sono file compilati male: valori mancanti o non numerici, vasche inesistenti o duplicate, righe riordinate, parametri sbagliati. Piu' la struttura del file dei risultati. Non richiede OR-Tools. |
+| `test_model.py` | 411 | **Il modello CP-SAT.** Risolve davvero e passa ogni soluzione al verificatore: vasche ravvicinate, tre carroponti, capienza, tempi verticali, e la fedelta' della ricostruzione di una soluzione dai suoi gradi di liberta'. Richiede OR-Tools. |
+| `test_excel_io.py` | 605 | **La lettura e la scrittura Excel.** Quasi tutti i casi sono file compilati male: valori mancanti o non numerici, vasche inesistenti o duplicate, righe riordinate, parametri sbagliati, o un file scritto per la vecchia versione in metri. Piu' la struttura del file dei risultati. Non richiede OR-Tools. |
 | `test_interfaccia.py` | 606 | **Le funzioni dell'interfaccia grafica.** La finestra viene costruita davvero e pilotata da codice — si "premono" i pulsanti chiamando i metodi e si fa girare il ciclo degli eventi con `update()` invece di `mainloop()`. Verifica che i pulsanti si abilitino al momento giusto, che il calcolo in background consegni il risultato, che una soluzione calcolata riletta come tempi in vasca e ricomposta dia esattamente lo stesso ciclogramma, che le modifiche vengano riverificate, che le due viste mostrino lo stesso oggetto, e che la composizione da zero produca il pettine giusto. Richiede OR-Tools e un ambiente grafico. |
 
 `kinematics.py` ha in fondo un autotest che si lancia allo stesso modo
@@ -186,7 +186,7 @@ le rilasci.
 
 Mentre muovi il mouse sul grafico una **linea verticale grigia** segue il
 puntatore, e in basso si legge l'istante e la quota esatti
-(`t = 175.0 s   posizione = 10.00 m`). Serve a confrontare a occhio cosa
+(`t = 175.0 s   posizione = 10000 mm`). Serve a confrontare a occhio cosa
 succede nello stesso istante su carroponti diversi: senza un riferimento
 verticale, incolonnare due tratti distanti mezzo schermo e' un esercizio di
 fiducia.
@@ -292,12 +292,12 @@ della linea:
 
 ```text
 COLLISIONE fra carroponti 1 e 2 a t=61.6s: il 1 e' sopra PASSIVAZIONE
-(16.50 m), il 2 e' sopra PASSIVAZIONE (16.50 m) -- restano 0.000 m contro
-i 1.800 m richiesti (ingombro 0.70+0.50 + sicurezza 0.60)
+(16500 mm), il 2 e' sopra PASSIVAZIONE (16500 mm) -- restano 0 mm contro
+i 1800 mm richiesti (ingombro 700+500 + sicurezza 600)
 ```
 
 Quando il punto non coincide con una vasca il messaggio dice fra quali due si
-trova: `il 2 e' fra ZINCATURA e RISCIACQUO_2 (10.80 m)`. Una quota da sola non
+trova: `il 2 e' fra ZINCATURA e RISCIACQUO_2 (10800 mm)`. Una quota da sola non
 si riconosce sull'impianto; il nome della vasca si'.
 
 #### L'unica cosa impedita
@@ -365,7 +365,19 @@ Il file 'linea.xlsx' non e' compilato correttamente:
   - [Parametri!A2] parametro 'takt_minimo' non riconosciuto. Quelli ammessi sono: ...
 ```
 
-I numeri scritti con la virgola decimale (`2,5`) vengono accettati.
+I numeri scritti con la virgola decimale (`2500,5`) vengono accettati.
+
+**Tutte le lunghezze sono in millimetri**, e le cinematiche di conseguenza in
+`mm/s` e `mm/s^2`. Il nome di ogni parametro lo dice (`posizione_mm`,
+`v_max_carico_mm_s`), e il foglio `Parametri` ha una colonna con l'unita'.
+
+Un file della versione precedente, che lavorava in metri, **non viene letto**:
+i parametri hanno nomi diversi e il programma lo riconosce, dicendo come si
+chiama adesso ciascuno e che il valore va moltiplicato per 1000. Serve perche'
+le colonne dei fogli si leggono per posizione e non per intestazione: senza
+questo controllo, una vasca a 9,5 m verrebbe presa per una a 9,5 mm senza che
+nessuno se ne accorga. Il modo piu' rapido di aggiornare un file vecchio e'
+rigenerare il modello e ricopiarci dentro i dati, moltiplicati.
 
 ## Altri modi di usarlo
 
@@ -384,7 +396,7 @@ fogli:
 | foglio | contenuto |
 | --- | --- |
 | `Istruzioni` | come compilare gli altri fogli |
-| `Vasche` | id, posizione lungo la rotaia, numero di posti, corsa verticale, sgocciolamento |
+| `Vasche` | id, posizione lungo la rotaia **in millimetri**, numero di posti, corsa verticale, sgocciolamento |
 | `Percorso` | sequenza di vasche attraversate, con le permanenze |
 | `Parametri` | takt time, cinematiche, ingombri, tempi verticali, opzioni |
 | `Zone` | facoltativo: suddivisione manuale delle mosse fra i carroponti. **Lasciandolo vuoto** numero di carroponti e zone vengono scelti automaticamente |
@@ -604,7 +616,7 @@ carroponte:
   geometria del pezzo: sulla zincatura e' lungo, su un risciacquo quasi nullo.
 
 Lasciandole vuote si usa il valore generale. Nell'esempio ZINCATURA ha corsa
-1,1 m contro 0,8 m e sgocciolamento 8 s contro 2 s: la sua presa vale 17,09 s
+1100 mm contro 800 mm e sgocciolamento 8 s contro 2 s: la sua presa vale 17,09 s
 contro i 9,49 s delle altre vasche.
 
 Con `lift_height = 0` le cinematiche di sollevamento non servono e restano solo
@@ -775,13 +787,15 @@ monotona, il che rende il calcolo esatto.
 
 Conseguenze pratiche:
 
-- **le vasche possono stare vicine quanto si vuole.** Con passo 1,0 m e
-  `D = 1,80 m` il modello trova soluzioni in cui i due carroponti sostano uno
-  alla stazione precedente e uno alla successiva del confine: 2,0 m di
+- **le vasche possono stare vicine quanto si vuole.** Con passo 1000 mm e
+  `D = 1800 mm` il modello trova soluzioni in cui i due carroponti sostano uno
+  alla stazione precedente e uno alla successiva del confine: 2000 mm di
   separazione, sicuri. E' proprio la configurazione che il modello precedente
-  non sapeva rappresentare;
+  non sapeva rappresentare. (Con la griglia predefinita a 6 passi questo caso
+  cade appena oltre il limite della conservativita' e viene dichiarato
+  infattibile: basta alzare `passi_fascia_sicurezza` a 12. Vedi sotto.)
 - **se davvero non ci stanno, esce INFEASIBLE**, non una soluzione sbagliata.
-  Con passo 0,80 m, mentre un carroponte e' sul confine l'altro non ha nessuna
+  Con passo 800 mm, mentre un carroponte e' sul confine l'altro non ha nessuna
   stazione abbastanza lontana in cui sostare: corretto;
 - il vincolo e' anche **meno cautelativo del precedente**, che garantiva
   `hoist_length + 2·safety_distance` invece dei richiesti
@@ -792,16 +806,23 @@ Conseguenze pratiche:
 Regola la finezza della griglia di soglie (default 6). La distanza garantita
 e' sempre quella richiesta: alzarlo riduce la **conservativita'**, cioe'
 permette takt time piu' bassi, al prezzo di un modello piu' grande. Misurato
-su una linea a 4 mosse con passo 1,5 m:
+su una linea a 4 mosse con passo 1500 mm:
 
 | `clearance_steps` | takt time | separazione reale |
 | ---: | ---: | ---: |
-| 2 | 18,86 s | 3,000 m |
-| 4 | 14,39 s | 2,985 m |
-| 8 | 13,45 s | 2,545 m |
+| 2 | 18,86 s | 3000 mm |
+| 4 | 14,39 s | 2985 mm |
+| 8 | 13,45 s | 2545 mm |
 
 Sotto i 4 passi la conservativita' si vede, sopra i 12 il modello cresce senza
 gran guadagno.
+
+La conservativita' non e' solo una questione di takt time: puo' arrivare a
+dichiarare **infattibile** un caso che una griglia piu' fine risolve. Succede
+quando le vasche sono cosi' vicine che la soluzione sta tutta dentro un
+gradino della griglia. Se una linea con vasche ravvicinate esce INFEASIBLE,
+alzare questo parametro e' la prima cosa da provare, prima di aggiungere
+carroponti.
 
 **Attenzione alla larghezza della banda di takt time.** Il numero di copie
 traslate da generare e' calcolato sul caso peggiore `T = takt_min`, quindi una
@@ -878,12 +899,12 @@ python esempio.py           # risoluzione reale + verifica + grafico
 ```
 
 Ognuno stampa cosa ha provato e finisce con `RISULTATO: n ok, m falliti`.
-Nessuna dipendenza da pytest. Stato attuale: **65, 54, 24 e 50 asserzioni,
+Nessuna dipendenza da pytest. Stato attuale: **66, 57, 24 e 51 asserzioni,
 zero fallimenti**.
 
 **La risoluzione CP-SAT e' eseguita e verificata end-to-end.** Sull'esempio
 fornito il solver trova `T = 131,88 s` con 2 carroponti, separazione minima
-3,50 m contro 1,80 m richiesti, e il verificatore indipendente conferma la
+3500 mm contro 1800 mm richiesti, e il verificatore indipendente conferma la
 soluzione senza errori.
 
 I quattro file rispondono a domande diverse e si completano:
@@ -894,10 +915,10 @@ I quattro file rispondono a domande diverse e si completano:
   patologiche). Le soluzioni sono costruite a mano, quindi non serve OR-Tools.
 - `test_model.py` — 9 casi. *Il modello produce soluzioni fisicamente valide?*
   Risolve davvero e passa ogni risultato al verificatore.
-- `test_excel_io.py` — 18 casi. *Un file compilato male viene respinto con un
+- `test_excel_io.py` — 19 casi. *Un file compilato male viene respinto con un
   messaggio utile, e i risultati escono corretti?* In ingresso: valori mancanti
   o non numerici, vasche inesistenti o duplicate, righe riordinate, parametri
-  sbagliati, zone incomplete. In uscita: struttura dei fogli, corrispondenza
+  sbagliati, zone incomplete, e un file della vecchia versione in metri. In uscita: struttura dei fogli, corrispondenza
   fra tratti e vasche, somma delle durate pari al takt time.
 - `test_interfaccia.py` — 8 casi. *L'interfaccia si comporta come deve?* La
   finestra viene costruita davvero e pilotata da codice. E' l'unico modo per
@@ -907,7 +928,7 @@ I quattro file rispondono a domande diverse e si completano:
   funzioni di calcolo non vedrebbe.
 
 In piu', il vincolo di non collisione e' stato validato su uno **sweep di 288
-configurazioni** (numero di mosse, spaziatura da 1,0 a 3,0 m, tempi verticali,
+configurazioni** (numero di mosse, spaziatura da 1000 a 3000 mm, tempi verticali,
 `clearance_steps`, punto di taglio delle zone): 146 risolte e verificate,
 **zero errori**. Come controllo di sensibilita', lo stesso sweep con il vincolo
 disattivato produce 159 soluzioni con collisioni reali — se ci fosse un buco
@@ -920,7 +941,7 @@ reali, tutti invisibili guardando solo lo stato `OPTIMAL` del solver.
 
 1. **Collisioni con vasche ravvicinate** — con spaziatura inferiore a
    `hoist_length + safety_distance`, CP-SAT restituiva soluzioni `OPTIMAL`
-   con i carroponti a 1,24 m invece di 1,80 m, perche' il vincolo copriva solo
+   con i carroponti a 1240 mm invece di 1800 mm, perche' il vincolo copriva solo
    la stazione di confine. **Corretto** riformulando la non collisione sulla
    fascia di esclusione (vedi sopra): ora quelle geometrie si risolvono, e
    correttamente.
@@ -929,7 +950,7 @@ reali, tutti invisibili guardando solo lo stato `OPTIMAL` del solver.
    finestre ai confini non fossero state estese per coprire le fasi verticali
    (il carroponte e' fermo sopra la vasca di confine anche mentre immerge o
    ripesca il pezzo). Su uno sweep di 108 configurazioni, la versione priva di
-   quella correzione produce 58 soluzioni con collisioni — fino a 0,00 m di
+   quella correzione produce 58 soluzioni con collisioni — fino a 0 mm di
    separazione; con la correzione, zero errori.
 3. **Segmenti degeneri di durata nulla** — quando due mosse consecutive
    condividono la stazione, la ricostruzione della traiettoria emetteva uno

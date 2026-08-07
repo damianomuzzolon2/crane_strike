@@ -33,10 +33,10 @@ from model import (
 from model import build_solution as costruisci
 from verify import verify_solution
 
-KIN_EMPTY = Kinematics(v_max=1.6, a_max=0.9)
-KIN_LOADED = Kinematics(v_max=1.0, a_max=0.4)
-KIN_LIFT_EMPTY = Kinematics(v_max=0.5, a_max=0.8)
-KIN_LIFT_LOADED = Kinematics(v_max=0.3, a_max=0.5)
+KIN_EMPTY = Kinematics(v_max=1600, a_max=900)
+KIN_LOADED = Kinematics(v_max=1000, a_max=400)
+KIN_LIFT_EMPTY = Kinematics(v_max=500, a_max=800)
+KIN_LIFT_LOADED = Kinematics(v_max=300, a_max=500)
 
 _n_pass = 0
 _n_fail = 0
@@ -79,9 +79,9 @@ def make_data(positions, dwells, zones, **kw) -> ProblemData:
         takt_max=200.0,
         kin_empty=KIN_EMPTY,
         kin_loaded=KIN_LOADED,
-        hoist_extent_pos=0.5,
-        hoist_extent_neg=0.7,
-        safety_distance=0.6,
+        hoist_extent_pos=500,
+        hoist_extent_neg=700,
+        safety_distance=600,
         zones=zones,
         time_scale=100,
     )
@@ -110,7 +110,7 @@ def build_solution(
 def reference_case():
     """Due carroponti su 4 mosse, vasche ben distanziate, tutto regolare."""
     data = make_data(
-        positions=[0.0, 5.0, 10.0, 15.0, 20.0],
+        positions=[0, 5000, 10000, 15000, 20000],
         dwells=[(0, 0), (30, 90), (30, 90), (30, 90), (0, 0)],
         zones=[HoistZone(0, 1), HoistZone(2, 3)],
     )
@@ -135,13 +135,13 @@ def test_caso_corretto():
     check(r.ok, "nessun errore su una soluzione valida")
     check(
         r.min_separation >= r.required_separation,
-        f"separazione minima {r.min_separation:.3f}m >= "
-        f"{r.required_separation:.3f}m richiesti",
+        f"separazione minima {r.min_separation:.0f}mm >= "
+        f"{r.required_separation:.0f}mm richiesti",
     )
     check(r.n_samples > 1000, f"campionamento fitto ({r.n_samples} istanti)")
     check(
-        r.sampling_error_bound < 1e-3,
-        f"errore di campionamento trascurabile ({r.sampling_error_bound:.2e} m)",
+        r.sampling_error_bound < 1.0,
+        f"errore di campionamento trascurabile ({r.sampling_error_bound:.2e} mm)",
     )
 
 
@@ -153,7 +153,7 @@ def test_collisione_reale():
     rotto.segments_per_hoist = [
         sol.segments_per_hoist[0],
         [
-            dataclasses.replace(s, x_start=s.x_start - 10.0, x_end=s.x_end - 10.0)
+            dataclasses.replace(s, x_start=s.x_start - 10000, x_end=s.x_end - 10000)
             for s in sol.segments_per_hoist[1]
         ],
     ]
@@ -170,37 +170,37 @@ def test_collisione_reale():
     )
     check(
         r.min_separation < r.required_separation,
-        f"separazione minima misurata {r.min_separation:.3f}m sotto il minimo",
+        f"separazione minima misurata {r.min_separation:.0f}mm sotto il minimo",
     )
 
 
 def test_collisione_solo_in_transito():
     print("\n[3] collisione che si vede SOLO campionando dentro il movimento")
-    # I due carroponti stanno sempre a >= 1.8 m se si guardano solo gli
+    # I due carroponti stanno sempre a >= 1800 mm se si guardano solo gli
     # estremi dei segmenti, ma si incrociano a meta' di uno spostamento.
     data = make_data(
-        positions=[0.0, 5.0, 10.0, 15.0, 20.0],
+        positions=[0, 5000, 10000, 15000, 20000],
         dwells=[(0, 0), (30, 90), (30, 90), (30, 90), (0, 0)],
         zones=[HoistZone(0, 1), HoistZone(2, 3)],
     )
     T = 100.0
     segs_a = [
-        Segment("empty", 0.0, 20.0, 0.0, 10.0, KIN_EMPTY),
-        Segment("wait", 20.0, 100.0, 10.0, 10.0, None),
+        Segment("empty", 0.0, 20.0, 0, 10000, KIN_EMPTY),
+        Segment("wait", 20.0, 100.0, 10000, 10000, None),
     ]
     segs_b = [
-        Segment("wait", 0.0, 10.0, 12.0, 12.0, None),
-        Segment("empty", 10.0, 30.0, 12.0, 2.0, KIN_EMPTY),
-        Segment("wait", 30.0, 100.0, 2.0, 2.0, None),
+        Segment("wait", 0.0, 10.0, 12000, 12000, None),
+        Segment("empty", 10.0, 30.0, 12000, 2000, KIN_EMPTY),
+        Segment("wait", 30.0, 100.0, 2000, 2000, None),
     ]
-    # agli estremi dei segmenti la distanza e' sempre >= 2 m; a meta' i due si
+    # agli estremi dei segmenti la distanza e' sempre >= 2000 mm; a meta' i due si
     # incrociano davvero
     sol = Solution(status="OPTIMAL", T=T, segments_per_hoist=[segs_a, segs_b])
     r = verify_solution(data, sol)
     check(len(kinds(r, "collision", "error")) >= 1, "l'incrocio in transito viene visto")
     check(
-        r.min_separation < 0.5,
-        f"separazione minima {r.min_separation:.3f}m (i due si attraversano)",
+        r.min_separation < 500,
+        f"separazione minima {r.min_separation:.0f}mm (i due si attraversano)",
     )
     check(
         0.0 < r.min_separation_t < T,
@@ -254,7 +254,7 @@ def test_discontinuita():
     data, sol = reference_case()
     rotto = dataclasses.replace(sol)
     segs = list(sol.segments_per_hoist[0])
-    segs[0] = dataclasses.replace(segs[0], x_end=segs[0].x_end + 2.0)
+    segs[0] = dataclasses.replace(segs[0], x_end=segs[0].x_end + 2000)
     rotto.segments_per_hoist = [segs, sol.segments_per_hoist[1]]
     r = verify_solution(data, rotto)
     check(
@@ -281,11 +281,11 @@ def test_durata_tratta_sbagliata():
 
 def test_layout_stretto():
     print("\n[9] vasche ravvicinate: gestite, non rifiutate")
-    # 10.0 e 11.0 distano 1.0 m, meno di hoist_length + safety_distance = 1.8:
+    # 10000 e 11000 distano 1000 mm, meno di hoist_length + safety_distance = 1800:
     # una geometria che il vecchio modello non sapeva rappresentare e che ora
     # e' coperta dal vincolo a fascia
     data = make_data(
-        positions=[0.0, 5.0, 10.0, 11.0, 20.0],
+        positions=[0, 5000, 10000, 11000, 20000],
         dwells=[(0, 0), (30, 90), (30, 90), (30, 90), (0, 0)],
         zones=[HoistZone(0, 1), HoistZone(2, 3)],
     )
@@ -305,7 +305,7 @@ def test_layout_stretto():
     # deve essere trovata dal controllo che conta davvero
     check(
         len(kinds(r, "collision", "error")) >= 1,
-        f"la collisione reale viene trovata (sep_min={r.min_separation:.3f} m)",
+        f"la collisione reale viene trovata (sep_min={r.min_separation:.0f} mm)",
     )
 
 
@@ -314,7 +314,7 @@ def test_layout_patologico():
     # zone adiacenti che NON stanno su lati opposti del confine: le posizioni
     # delle vasche non seguono l'ordine del percorso
     data_lati = make_data(
-        positions=[0.0, 10.0, 5.0, 15.0, 20.0],
+        positions=[0, 10000, 5000, 15000, 20000],
         dwells=[(0, 0), (30, 90), (30, 90), (30, 90), (0, 0)],
         zones=[HoistZone(0, 1), HoistZone(2, 3)],
     )
@@ -335,7 +335,7 @@ def test_layout_patologico():
     # zone NON adiacenti che si sovrappongono nello spazio: il vincolo a
     # fascia e' costruito per coppie adiacenti, quindi non le copre
     data_nm = make_data(
-        positions=[0.0, 6.0, 12.0, 1.0, 7.0, 13.0],
+        positions=[0, 6000, 12000, 1000, 7000, 13000],
         dwells=[(0, 0)] + [(30, 90)] * 4 + [(0, 0)],
         zones=[HoistZone(0, 0), HoistZone(1, 2), HoistZone(3, 4)],
     )
@@ -349,7 +349,7 @@ def test_layout_patologico():
 
     # una linea ordinata e ravvicinata non deve dare falsi allarmi
     data_ok = make_data(
-        positions=[i * 1.0 for i in range(5)],
+        positions=[i * 1000.0 for i in range(5)],
         dwells=[(0, 0), (30, 90), (30, 90), (30, 90), (0, 0)],
         zones=[HoistZone(0, 1), HoistZone(2, 3)],
     )
@@ -361,7 +361,7 @@ def test_layout_patologico():
 
 def test_ingombro_asimmetrico():
     print("\n[11] ingombro asimmetrico: conta solo la somma dei due lati")
-    posizioni = [0.0, 5.0, 10.0, 15.0, 20.0]
+    posizioni = [0, 5000, 10000, 15000, 20000]
     dwells = [(0, 0), (30, 90), (30, 90), (30, 90), (0, 0)]
     zone = [HoistZone(0, 1), HoistZone(2, 3)]
 
@@ -380,17 +380,17 @@ def test_ingombro_asimmetrico():
     # il bordo destro del carroponte di sinistra sta in p+pos, il bordo
     # sinistro di quello di destra in q-neg: lo spazio libero vale
     # q-p-(pos+neg), quindi dove sta il gancio dentro il carrello non conta
-    valori = [richiesta(0.6, 0.6), richiesta(0.2, 1.0), richiesta(1.1, 0.1)]
+    valori = [richiesta(600, 600), richiesta(200, 1000), richiesta(1100, 100)]
     check(
-        all(abs(v[0] - 1.2) < 1e-9 for v in valori),
-        "ingombro totale sempre 1.20 m, comunque ripartito",
+        all(abs(v[0] - 1200) < 1e-9 for v in valori),
+        "ingombro totale sempre 1200 mm, comunque ripartito",
     )
     check(
         len({round(v[1], 9) for v in valori}) == 1,
-        f"distanza richiesta identica nei tre casi: {valori[0][1]:.3f} m",
+        f"distanza richiesta identica nei tre casi: {valori[0][1]:.0f} mm",
     )
     check(
-        abs(valori[0][1] - (1.2 + 0.6)) < 1e-9,
+        abs(valori[0][1] - (1200 + 600)) < 1e-9,
         "distanza richiesta = ingombro totale + distanza di sicurezza",
     )
 
@@ -398,11 +398,11 @@ def test_ingombro_asimmetrico():
         positions=posizioni,
         dwells=dwells,
         zones=zone,
-        hoist_extent_pos=0.0,
-        hoist_extent_neg=0.0,
+        hoist_extent_pos=0,
+        hoist_extent_neg=0,
     )
     check(d.hoist_length == 0.0, "ingombro nullo ammesso (carroponte puntiforme)")
-    for pos, neg in ((-0.1, 0.5), (0.5, -0.1)):
+    for pos, neg in ((-100, 500), (500, -100)):
         try:
             make_data(
                 positions=posizioni,
@@ -426,7 +426,7 @@ def test_takt_fuori_banda():
 
 def test_capienza_vasca():
     print("\n[13] capienza della vasca (posti simultanei)")
-    positions = [0.0, 5.0, 10.0, 15.0, 20.0]
+    positions = [0, 5000, 10000, 15000, 20000]
     zones = [HoistZone(0, 1), HoistZone(2, 3)]
     T = 100.0
 
@@ -469,7 +469,7 @@ def test_capienza_vasca():
         positions=positions,
         dwells=[(0, 0), (30, 90), (30, 90), (30, 90), (0, 0)],
         zones=zones,
-        lift_height=0.8,
+        lift_height=800,
         kin_lift_empty=KIN_LIFT_EMPTY,
         kin_lift_loaded=KIN_LIFT_LOADED,
         engage_time=2.0,
@@ -485,7 +485,7 @@ def test_capienza_vasca():
 def test_capienza_validazione():
     print("\n[14] validazione della capienza in ProblemData")
     base = dict(
-        positions=[0.0, 5.0, 10.0],
+        positions=[0, 5000, 10000],
         zones=[HoistZone(0, 1)],
     )
     try:
@@ -527,10 +527,10 @@ def _linea_vasca_ripetuta(cap_lav: int, dwell=(20, 200)) -> ProblemData:
     l'unica capienza sotto esame e' quella di LAV."""
     return ProblemData(
         tanks={
-            "CAR": Tank("CAR", 0.0),
-            "LAV": Tank("LAV", 5.0, capacity=cap_lav),
-            "SEC": Tank("SEC", 10.0, capacity=20),
-            "SCA": Tank("SCA", 15.0),
+            "CAR": Tank("CAR", 0),
+            "LAV": Tank("LAV", 5000, capacity=cap_lav),
+            "SEC": Tank("SEC", 10000, capacity=20),
+            "SCA": Tank("SCA", 15000),
         },
         route=[
             StationSpec("CAR", 0, 0),
@@ -543,9 +543,9 @@ def _linea_vasca_ripetuta(cap_lav: int, dwell=(20, 200)) -> ProblemData:
         takt_max=200.0,
         kin_empty=KIN_EMPTY,
         kin_loaded=KIN_LOADED,
-        hoist_extent_pos=0.5,
-        hoist_extent_neg=0.7,
-        safety_distance=0.6,
+        hoist_extent_pos=500,
+        hoist_extent_neg=700,
+        safety_distance=600,
         zones=[HoistZone(0, 3)],
         time_scale=100,
     )
@@ -589,10 +589,10 @@ def test_vasca_ripetuta():
 def test_fasi_verticali():
     print("\n[16] tempi di presa/rilascio (immersione verticale)")
     data = make_data(
-        positions=[0.0, 5.0, 10.0, 15.0, 20.0],
+        positions=[0, 5000, 10000, 15000, 20000],
         dwells=[(0, 0), (30, 90), (30, 90), (30, 90), (0, 0)],
         zones=[HoistZone(0, 1), HoistZone(2, 3)],
-        lift_height=0.8,
+        lift_height=800,
         kin_lift_empty=KIN_LIFT_EMPTY,
         kin_lift_loaded=KIN_LIFT_LOADED,
         engage_time=2.0,
@@ -601,8 +601,8 @@ def test_fasi_verticali():
     )
     # i tempi verticali non sono dichiarati: si ricavano dalla corsa e dalle
     # cinematiche di sollevamento (una tratta a vuoto + una a carico)
-    t_vuoto = kinematics_travel_time(0.8, KIN_LIFT_EMPTY)
-    t_carico = kinematics_travel_time(0.8, KIN_LIFT_LOADED)
+    t_vuoto = kinematics_travel_time(800, KIN_LIFT_EMPTY)
+    t_carico = kinematics_travel_time(800, KIN_LIFT_LOADED)
     check(
         abs(data.pick_time_at(0) - (t_vuoto + 2.0 + t_carico + 4.0)) < 1e-9,
         f"presa = discesa a vuoto + aggancio + risalita a carico + "
@@ -640,7 +640,7 @@ def test_fasi_verticali():
     profonda = dataclasses.replace(
         data,
         tanks={
-            k: (dataclasses.replace(v, lift_height=1.6) if k == "V2" else v)
+            k: (dataclasses.replace(v, lift_height=1600) if k == "V2" else v)
             for k, v in data.tanks.items()
         },
     )
@@ -707,7 +707,7 @@ def test_fasi_verticali():
 def test_zero_verticale_non_regressione():
     print("\n[17] con tempi verticali nulli non cambia nulla")
     data_zero = make_data(
-        positions=[0.0, 5.0, 10.0, 15.0, 20.0],
+        positions=[0, 5000, 10000, 15000, 20000],
         dwells=[(0, 0), (30, 90), (30, 90), (30, 90), (0, 0)],
         zones=[HoistZone(0, 1), HoistZone(2, 3)],
     )
@@ -742,10 +742,10 @@ def test_stazione_condivisa():
     # il carroponte consegna in V2 e riparte subito da V2: non c'e' nessuno
     # spostamento a vuoto, e non deve comparire un segmento degenere
     data = make_data(
-        positions=[0.0, 5.0, 10.0, 15.0],
+        positions=[0, 5000, 10000, 15000],
         dwells=[(0, 0), (30, 90), (0, 90), (0, 0)],
         zones=[HoistZone(0, 0), HoistZone(1, 2)],
-        lift_height=0.4,
+        lift_height=400,
         kin_lift_empty=KIN_LIFT_EMPTY,
         kin_lift_loaded=KIN_LIFT_LOADED,
     )

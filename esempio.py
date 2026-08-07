@@ -34,15 +34,15 @@ def main():
     #    2 posti. Se fosse a posto singolo il takt time non potrebbe scendere
     #    sotto la permanenza.
     tanks = {
-        "CARICO": Tank("CARICO", 0.0),
-        "SGRASSO": Tank("SGRASSO", 2.5),
-        "RISCIACQUO_1": Tank("RISCIACQUO_1", 5.5),
+        "CARICO": Tank("CARICO", 0),
+        "SGRASSO": Tank("SGRASSO", 2500),
+        "RISCIACQUO_1": Tank("RISCIACQUO_1", 5500),
         # vasca piu' profonda e con sgocciolamento lungo: il bagno di zinco
         # cola parecchio, e lasciarlo cadere fuori dalla vasca e' uno spreco
-        "ZINCATURA": Tank("ZINCATURA", 9.5, capacity=2, lift_height=1.1, drain_time=8.0),
-        "RISCIACQUO_2": Tank("RISCIACQUO_2", 13.0),
-        "PASSIVAZIONE": Tank("PASSIVAZIONE", 16.5),
-        "SCARICO": Tank("SCARICO", 20.0),
+        "ZINCATURA": Tank("ZINCATURA", 9500, capacity=2, lift_height=1100, drain_time=8.0),
+        "RISCIACQUO_2": Tank("RISCIACQUO_2", 13000),
+        "PASSIVAZIONE": Tank("PASSIVAZIONE", 16500),
+        "SCARICO": Tank("SCARICO", 20000),
     }
 
     # ---------------------------------------------------------------
@@ -62,8 +62,8 @@ def main():
     # ---------------------------------------------------------------
     # 3) Cinematica dei carroponti (vuoto / carico)
     # ---------------------------------------------------------------
-    kin_empty = Kinematics(v_max=1.6, a_max=0.9)  # piu' veloce senza pezzo
-    kin_loaded = Kinematics(v_max=1.0, a_max=0.4)  # piu' lento/dolce con il pezzo
+    kin_empty = Kinematics(v_max=1600, a_max=900)  # piu' veloce senza pezzo
+    kin_loaded = Kinematics(v_max=1000, a_max=400)  # piu' lento/dolce con il pezzo
 
     # ---------------------------------------------------------------
     # 4) Takt time target con tolleranza, ingombro carroponte, sicurezza
@@ -74,9 +74,9 @@ def main():
     # Ingombro del carrello lungo la rotaia, misurato dal gancio: i due lati
     # si dichiarano separatamente perche' il carrello non e' detto sia
     # simmetrico. Qui il gancio e' spostato verso le posizioni decrescenti.
-    hoist_extent_pos = 0.5  # [m] verso le posizioni crescenti
-    hoist_extent_neg = 0.7  # [m] verso le posizioni decrescenti
-    safety_distance = 0.6  # [m] distanza minima aggiuntiva fra due carroponti
+    hoist_extent_pos = 500  # [mm] verso le posizioni crescenti
+    hoist_extent_neg = 700  # [mm] verso le posizioni decrescenti
+    safety_distance = 600  # [mm] distanza minima aggiuntiva fra due carroponti
 
     # ---------------------------------------------------------------
     # 4-bis) Movimentazione verticale del pezzo. Il carroponte non si
@@ -89,9 +89,9 @@ def main():
     #    EFFETTIVO in bagno, misurato da fine immersione a inizio
     #    emersione; le fasi verticali si sommano a parte.
     # ---------------------------------------------------------------
-    lift_height = 0.8  # [m] corsa fra quota di trasporto e quota di immersione
-    kin_lift_empty = Kinematics(v_max=0.5, a_max=0.8)  # gancio scarico
-    kin_lift_loaded = Kinematics(v_max=0.3, a_max=0.5)  # col telaio
+    lift_height = 800  # [mm] corsa fra quota di trasporto e quota di immersione
+    kin_lift_empty = Kinematics(v_max=500, a_max=800)  # gancio scarico
+    kin_lift_loaded = Kinematics(v_max=300, a_max=500)  # col telaio
     engage_time = 2.0  # [s] aggancio del telaio, prima del sollevamento
     disengage_time = 1.0  # [s] sgancio, dopo l'immersione
     # Sgocciolamento: il telaio resta sospeso sopra la vasca a lasciar scolare

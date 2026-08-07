@@ -6,7 +6,7 @@ modello da cui partire, e scrittura dei risultati in un secondo file Excel.
 
 Il file ha quattro fogli:
 
-  Vasche     id della vasca, posizione lungo la rotaia, numero di posti
+  Vasche     id della vasca, posizione lungo la rotaia [mm], numero di posti
   Percorso   sequenza di vasche attraversate dal pezzo, con le permanenze
   Parametri  takt time, cinematiche, ingombri, tempi verticali, opzioni
   Zone       (facoltativo) suddivisione manuale delle mosse fra i carroponti
@@ -38,55 +38,55 @@ FOGLIO_ZONE = "Zone"
 _PARAMETRI = {
     "takt_min_s": ("s", True, None, "takt time minimo accettabile"),
     "takt_max_s": ("s", True, None, "takt time massimo accettabile"),
-    "v_max_vuoto_m_s": ("m/s", True, None, "velocita' max del carroponte scarico"),
-    "a_max_vuoto_m_s2": ("m/s^2", True, None, "accelerazione max del carroponte scarico"),
-    "v_max_carico_m_s": ("m/s", True, None, "velocita' max del carroponte col pezzo"),
-    "a_max_carico_m_s2": ("m/s^2", True, None, "accelerazione max col pezzo"),
-    "ingombro_lato_positivo_m": (
-        "m",
+    "v_max_vuoto_mm_s": ("mm/s", True, None, "velocita' max del carroponte scarico"),
+    "a_max_vuoto_mm_s2": ("mm/s^2", True, None, "accelerazione max del carroponte scarico"),
+    "v_max_carico_mm_s": ("mm/s", True, None, "velocita' max del carroponte col pezzo"),
+    "a_max_carico_mm_s2": ("mm/s^2", True, None, "accelerazione max col pezzo"),
+    "ingombro_lato_positivo_mm": (
+        "mm",
         True,
         None,
         "quanto sporge il carrello dal gancio verso le posizioni crescenti",
     ),
-    "ingombro_lato_negativo_m": (
-        "m",
+    "ingombro_lato_negativo_mm": (
+        "mm",
         True,
         None,
         "quanto sporge il carrello dal gancio verso le posizioni decrescenti",
     ),
-    "distanza_sicurezza_m": (
-        "m",
+    "distanza_sicurezza_mm": (
+        "mm",
         True,
         None,
         "margine minimo aggiuntivo fra due carroponti",
     ),
-    "altezza_sollevamento_m": (
-        "m",
+    "altezza_sollevamento_mm": (
+        "mm",
         True,
         None,
         "corsa verticale fra quota di trasporto e quota di immersione "
         "(0 per ignorare la movimentazione verticale)",
     ),
-    "v_max_sollevamento_vuoto_m_s": (
-        "m/s",
+    "v_max_sollevamento_vuoto_mm_s": (
+        "mm/s",
         False,
         None,
         "velocita' max di sollevamento a gancio scarico",
     ),
-    "a_max_sollevamento_vuoto_m_s2": (
-        "m/s^2",
+    "a_max_sollevamento_vuoto_mm_s2": (
+        "mm/s^2",
         False,
         None,
         "accelerazione max di sollevamento a gancio scarico",
     ),
-    "v_max_sollevamento_carico_m_s": (
-        "m/s",
+    "v_max_sollevamento_carico_mm_s": (
+        "mm/s",
         False,
         None,
         "velocita' max di sollevamento col telaio",
     ),
-    "a_max_sollevamento_carico_m_s2": (
-        "m/s^2",
+    "a_max_sollevamento_carico_mm_s2": (
+        "mm/s^2",
         False,
         None,
         "accelerazione max di sollevamento col telaio",
@@ -137,6 +137,13 @@ _PARAMETRI = {
 }
 
 _INTERI = {"risoluzione_tick_per_s", "passi_fascia_sicurezza", "max_carroponti"}
+
+# Come si chiamavano gli stessi parametri quando il progetto lavorava in metri.
+# Servono solo a riconoscere un file vecchio e dirlo chiaramente: leggerlo
+# com'e' vorrebbe dire interpretare 9.5 m come 9.5 mm.
+_NOMI_IN_METRI = {
+    nome.replace("_mm", "_m"): nome for nome in _PARAMETRI if "_mm" in nome
+}
 
 
 @dataclass
@@ -246,8 +253,8 @@ def leggi_problema(percorso_file: str) -> Configurazione:
     errori.solleva_se_presenti()
 
     def _kin_sollevamento(prefisso: str) -> Optional[Kinematics]:
-        v = par.get(f"v_max_sollevamento_{prefisso}_m_s")
-        a = par.get(f"a_max_sollevamento_{prefisso}_m_s2")
+        v = par.get(f"v_max_sollevamento_{prefisso}_mm_s")
+        a = par.get(f"a_max_sollevamento_{prefisso}_mm_s2")
         if v is None or a is None:
             return None
         return Kinematics(v_max=v, a_max=a)
@@ -259,17 +266,17 @@ def leggi_problema(percorso_file: str) -> Configurazione:
             takt_min=par["takt_min_s"],
             takt_max=par["takt_max_s"],
             kin_empty=Kinematics(
-                v_max=par["v_max_vuoto_m_s"], a_max=par["a_max_vuoto_m_s2"]
+                v_max=par["v_max_vuoto_mm_s"], a_max=par["a_max_vuoto_mm_s2"]
             ),
             kin_loaded=Kinematics(
-                v_max=par["v_max_carico_m_s"], a_max=par["a_max_carico_m_s2"]
+                v_max=par["v_max_carico_mm_s"], a_max=par["a_max_carico_mm_s2"]
             ),
-            hoist_extent_pos=par["ingombro_lato_positivo_m"],
-            hoist_extent_neg=par["ingombro_lato_negativo_m"],
-            safety_distance=par["distanza_sicurezza_m"],
+            hoist_extent_pos=par["ingombro_lato_positivo_mm"],
+            hoist_extent_neg=par["ingombro_lato_negativo_mm"],
+            safety_distance=par["distanza_sicurezza_mm"],
             zones=zone,
             time_scale=par["risoluzione_tick_per_s"],
-            lift_height=par["altezza_sollevamento_m"],
+            lift_height=par["altezza_sollevamento_mm"],
             kin_lift_empty=_kin_sollevamento("vuoto"),
             kin_lift_loaded=_kin_sollevamento("carico"),
             engage_time=par["tempo_aggancio_s"],
@@ -402,6 +409,22 @@ def _leggi_parametri(ws, errori: _Errori) -> dict:
         nome = _testo(ws.cell(riga, 1).value)
         if not nome:
             continue
+        if nome in _NOMI_IN_METRI:
+            # Un file della versione precedente. Va intercettato con un
+            # messaggio suo: senza, si leggerebbero venti "parametro non
+            # riconosciuto" e nessuno capirebbe che il problema e' l'unita' --
+            # con il rischio, peggiore, di ricompilarlo a occhio sbagliando di
+            # mille volte.
+            errori.aggiungi(
+                FOGLIO_PARAMETRI,
+                f"A{riga}",
+                f"'{nome}' e' un nome della versione in METRI. Adesso si "
+                f"lavora in MILLIMETRI: il parametro si chiama "
+                f"'{_NOMI_IN_METRI[nome]}' e il valore va moltiplicato per "
+                f"1000. Il modo piu' rapido e' rigenerare il file con "
+                f"'Nuovo modello Excel...' e ricopiarci i dati",
+            )
+            continue
         if nome not in _PARAMETRI:
             errori.aggiungi(
                 FOGLIO_PARAMETRI,
@@ -515,19 +538,19 @@ def scrivi_modello(percorso_file: str) -> str:
         (f"Foglio {FOGLIO_VASCHE}", titolo_par),
         ("Una riga per vasca fisica.", None),
         ("  id            nome della vasca, usato nel foglio Percorso", None),
-        ("  posizione_m   distanza lungo la rotaia, in metri", None),
+        ("  posizione_mm  distanza lungo la rotaia, in MILLIMETRI", None),
         (
             "  posti         quanti pezzi ci stanno dentro contemporaneamente "
             "(vuoto = 1)",
             None,
         ),
         (
-            "  corsa_verticale_m   solo per le vasche piu' profonde o piu' basse "
+            "  corsa_verticale_mm   solo per le vasche piu' profonde o piu' basse "
             "della media;",
             None,
         ),
         (
-            "                lasciando vuoto si usa altezza_sollevamento_m del "
+            "                lasciando vuoto si usa altezza_sollevamento_mm del "
             "foglio Parametri",
             None,
         ),
@@ -615,17 +638,17 @@ def scrivi_modello(percorso_file: str) -> str:
     ws = wb.create_sheet(FOGLIO_VASCHE)
     prepara(
         ws,
-        ["id", "posizione_m", "posti", "corsa_verticale_m", "sgocciolamento_s"],
+        ["id", "posizione_mm", "posti", "corsa_verticale_mm", "sgocciolamento_s"],
         [22, 14, 8, 20, 20],
     )
     for tid, pos, posti, corsa, scolo in [
-        ("CARICO", 0.0, 1, None, None),
-        ("SGRASSO", 2.5, 1, None, None),
-        ("RISCIACQUO_1", 5.5, 1, None, None),
-        ("ZINCATURA", 9.5, 2, 1.1, 8),
-        ("RISCIACQUO_2", 13.0, 1, None, None),
-        ("PASSIVAZIONE", 16.5, 1, None, None),
-        ("SCARICO", 20.0, 1, None, None),
+        ("CARICO", 0, 1, None, None),
+        ("SGRASSO", 2500, 1, None, None),
+        ("RISCIACQUO_1", 5500, 1, None, None),
+        ("ZINCATURA", 9500, 2, 1100, 8),
+        ("RISCIACQUO_2", 13000, 1, None, None),
+        ("PASSIVAZIONE", 16500, 1, None, None),
+        ("SCARICO", 20000, 1, None, None),
     ]:
         ws.append([tid, pos, posti, corsa, scolo])
 
@@ -656,18 +679,18 @@ def scrivi_modello(percorso_file: str) -> str:
     valori_esempio = {
         "takt_min_s": 110,
         "takt_max_s": 150,
-        "v_max_vuoto_m_s": 1.6,
-        "a_max_vuoto_m_s2": 0.9,
-        "v_max_carico_m_s": 1.0,
-        "a_max_carico_m_s2": 0.4,
-        "ingombro_lato_positivo_m": 0.5,
-        "ingombro_lato_negativo_m": 0.7,
-        "distanza_sicurezza_m": 0.6,
-        "altezza_sollevamento_m": 0.8,
-        "v_max_sollevamento_vuoto_m_s": 0.5,
-        "a_max_sollevamento_vuoto_m_s2": 0.8,
-        "v_max_sollevamento_carico_m_s": 0.3,
-        "a_max_sollevamento_carico_m_s2": 0.5,
+        "v_max_vuoto_mm_s": 1600,
+        "a_max_vuoto_mm_s2": 900,
+        "v_max_carico_mm_s": 1000,
+        "a_max_carico_mm_s2": 400,
+        "ingombro_lato_positivo_mm": 500,
+        "ingombro_lato_negativo_mm": 700,
+        "distanza_sicurezza_mm": 600,
+        "altezza_sollevamento_mm": 800,
+        "v_max_sollevamento_vuoto_mm_s": 500,
+        "a_max_sollevamento_vuoto_mm_s2": 800,
+        "v_max_sollevamento_carico_mm_s": 300,
+        "a_max_sollevamento_carico_mm_s2": 500,
         "tempo_aggancio_s": 2,
         "tempo_sgancio_s": 1,
         "tempo_sgocciolamento_s": 2,
@@ -770,8 +793,8 @@ def _righe_movimenti(data: ProblemData, solution) -> list[list]:
                     round(seg.t_start, 2),
                     round(seg.t_end, 2),
                     round(seg.t_end - seg.t_start, 2),
-                    round(seg.x_start, 3),
-                    round(seg.x_end, 3),
+                    round(seg.x_start, 1),
+                    round(seg.x_end, 1),
                 ]
             )
     return righe
@@ -864,21 +887,21 @@ def scrivi_risultati(
     sezione("Sicurezza")
     voce(
         "Distanza minima fra carroponti",
-        round(report.min_separation, 3) if report.min_separation != float("inf") else "-",
-        "m, misurata campionando le posizioni reali",
-        "0.000",
+        round(report.min_separation, 1) if report.min_separation != float("inf") else "-",
+        "mm, misurata campionando le posizioni reali",
+        "0.0",
     )
-    voce("Distanza richiesta", round(report.required_separation, 3), "m", "0.000")
+    voce("Distanza richiesta", round(report.required_separation, 1), "mm", "0.0")
     if report.min_separation != float("inf"):
         voce(
             "Margine residuo",
-            round(report.min_separation - report.required_separation, 3),
-            f"m, all'istante {report.min_separation_t:.2f} s",
-            "0.000",
+            round(report.min_separation - report.required_separation, 1),
+            f"mm, all'istante {report.min_separation_t:.2f} s",
+            "0.0",
         )
 
     sezione("Movimentazione verticale")
-    voce("Corsa (valore generale)", round(data.lift_height, 3), "m", "0.000")
+    voce("Corsa (valore generale)", round(data.lift_height, 1), "mm", "0.0")
     presa = {round(data.pick_time_at(s), 2) for s in range(1, data.n_moves)}
     rilascio = {round(data.release_time_at(s), 2) for s in range(1, data.n_moves)}
     voce(
@@ -901,7 +924,7 @@ def scrivi_risultati(
 
     sezione("Carroponti")
     ws.append(
-        ["carroponte", "mosse servite", "da vasca", "a vasca", "tratto rotaia [m]", "utilizzo"]
+        ["carroponte", "mosse servite", "da vasca", "a vasca", "tratto rotaia [mm]", "utilizzo"]
     )
     for col in range(1, 7):
         ws.cell(ws.max_row, col).font = grassetto
@@ -935,8 +958,8 @@ def scrivi_risultati(
             "inizio [s]",
             "fine [s]",
             "durata [s]",
-            "da [m]",
-            "a [m]",
+            "da [mm]",
+            "a [mm]",
         ],
         [12, 24, 20, 20, 12, 12, 12, 10, 10],
         _righe_movimenti(data, solution),
@@ -972,7 +995,7 @@ def scrivi_risultati(
             [
                 s,
                 spec.tank_id,
-                round(data.station_position(s), 3),
+                round(data.station_position(s), 1),
                 round(arrivo, 2),
                 round(partenza, 2),
                 round(permanenza, 2),
@@ -982,7 +1005,7 @@ def scrivi_risultati(
                 round(spec.dwell_max - permanenza, 2) if 0 < s < data.n_moves else "",
                 report.tank_occupancy.get(spec.tank_id, 1),
                 cap,
-                round(data.lift_height_at(s), 3),
+                round(data.lift_height_at(s), 1),
                 round(data.drain_time_at(s), 2),
                 round(data.pick_time_at(s), 2),
                 round(data.release_time_at(s), 2),
@@ -993,7 +1016,7 @@ def scrivi_risultati(
         [
             "n",
             "vasca",
-            "posizione [m]",
+            "posizione [mm]",
             "ingresso [s]",
             "uscita [s]",
             "permanenza [s]",
@@ -1003,7 +1026,7 @@ def scrivi_risultati(
             "margine sul max [s]",
             "posti usati",
             "posti disponibili",
-            "corsa verticale [m]",
+            "corsa verticale [mm]",
             "sgocciolamento [s]",
             "presa [s]",
             "rilascio [s]",
