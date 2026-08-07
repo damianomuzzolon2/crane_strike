@@ -120,22 +120,22 @@ def test_vasche_ravvicinate():
         data = linea(4, spacing, [HoistZone(0, 1), HoistZone(2, 3)])
         sol, r = risolvi_e_verifica(data, f"spaziatura {spacing}")
         if r is None:
-            # Il vincolo di non collisione e' cautelativo di
-            # clearance_margin_pct: puo' dichiarare infattibile un caso che una
-            # tolleranza piu' stretta risolve. Non e' un difetto da nascondere
+            # Fra una verifica di distanza e la successiva il modello sta
+            # dal lato sicuro, quindi puo' dichiarare infattibile un caso che
+            # verifiche piu' fitte risolvono. Non e' un difetto da nascondere
             # con un "continue" -- e' la manopola che l'utente deve conoscere,
             # quindi qui la si prova davvero.
             data = linea(
                 4,
                 spacing,
                 [HoistZone(0, 1), HoistZone(2, 3)],
-                clearance_margin_pct=8.0,
+                clearance_step_mm=100.0,
             )
             sol, r = risolvi_e_verifica(data, f"spaziatura {spacing}, griglia fine")
             check(
                 r is not None and r.ok and r.min_separation >= D - 1.0,
                 f"spaziatura {spacing:.0f} mm: troppo stretta per la griglia "
-                f"predefinita, risolta con margine_calcolo_percento=8 "
+                f"predefinita, risolta con passo_controllo_distanza_mm=100 "
                 + (
                     f"(T={sol.T:.2f}s, separazione {r.min_separation:.0f} mm)"
                     if r is not None
@@ -183,7 +183,7 @@ def test_tre_carroponti():
         [HoistZone(0, 1), HoistZone(2, 3), HoistZone(4, 5)],
         takt_min=10.0,
         takt_max=60.0,
-        clearance_margin_pct=25.0,  # due confini: modello di dimensioni sane
+        clearance_step_mm=450.0,  # due confini: modello di dimensioni sane
     )
     sol, r = risolvi_e_verifica(data, "tre carroponti", time_limit=120.0)
     check(r is not None and r.ok, _esito(sol, r, "soluzione valida"))
@@ -218,38 +218,37 @@ def test_fasi_verticali_e_capienza():
         check(occ_ok, f"capienza rispettata: {r.tank_occupancy}")
 
 
-def test_margine_calcolo():
-    print("\n[6] margine di calcolo: piu' stretto = meno cautelativo, sempre sicuro")
+def test_passo_controllo():
+    print("\n[6] passo di controllo: piu' fitto = meno cautelativo, sempre sicuro")
     risultati = {}
-    for margine in (50.0, 25.0, 12.5):
+    for passo in (900.0, 450.0, 225.0):
         data = linea(
             4,
             1500,
             [HoistZone(0, 1), HoistZone(2, 3)],
             takt_max=40.0,
-            clearance_margin_pct=margine,
+            clearance_step_mm=passo,
         )
-        sol, r = risolvi_e_verifica(data, f"margine={margine}%", time_limit=60.0)
+        sol, r = risolvi_e_verifica(data, f"passo={passo:.0f} mm", time_limit=60.0)
         if r is None:
-            risultati[margine] = None
+            risultati[passo] = None
             continue
-        risultati[margine] = (sol.T, r.min_separation, r.ok)
+        risultati[passo] = (sol.T, r.min_separation, r.ok)
         # La promessa e' che la distanza GARANTITA resti quella richiesta
-        # qualunque sia il margine: il parametro puo' solo far scartare
-        # soluzioni buone, mai accettarne di pericolose.
+        # qualunque sia il passo: il parametro puo' solo far scartare soluzioni
+        # buone, mai accettarne di pericolose.
         check(
             r.ok and r.min_separation >= r.required_separation - 1.0,
-            f"margine={margine}%: T={sol.T:.2f}s, separazione "
+            f"passo={passo:.0f} mm: T={sol.T:.2f}s, separazione "
             f"{r.min_separation:.0f} mm >= {r.required_separation:.0f} richiesti",
         )
     validi = {k: v for k, v in risultati.items() if v}
     if len(validi) >= 2:
-        # ordinati per margine decrescente: stringendo, il takt time non
-        # peggiora mai
+        # ordinati per passo decrescente: infittendo, il takt time non peggiora
         ts = [v[0] for _, v in sorted(validi.items(), reverse=True)]
         check(
             all(a >= b - 1e-6 for a, b in zip(ts, ts[1:])),
-            f"il takt time non peggiora stringendo il margine: "
+            f"il takt time non peggiora infittendo le verifiche: "
             f"{[round(t, 2) for t in ts]}",
         )
 
@@ -407,7 +406,7 @@ def main():
     test_un_carroponte()
     test_tre_carroponti()
     test_fasi_verticali_e_capienza()
-    test_margine_calcolo()
+    test_passo_controllo()
     test_scelta_automatica()
     test_vasca_ripetuta()
     test_ricostruzione_fedele()

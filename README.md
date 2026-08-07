@@ -50,7 +50,7 @@ aprire una finestra, e la cinematica senza avere OR-Tools installato.
 | file | righe | contenuto |
 | --- | ---: | --- |
 | `kinematics.py` | 130 | La fisica del movimento, in millimetri e secondi. `travel_time()` da' il tempo per percorrere una distanza con profilo trapezoidale o triangolare; `position_profile()` la posizione istante per istante; `profile_breakpoints()` gli spigoli della curva, che servono al verificatore per limitare in modo rigoroso l'errore di campionamento. Non sa nulla del resto del progetto. |
-| `model.py` | 1735 | Il cuore. Contiene le **strutture dati** (`Tank`, `StationSpec`, `HoistZone`, `ProblemData`, `Segment`, `Solution`), la costruzione e risoluzione del **modello CP-SAT** (`solve`), la scelta automatica di zone e numero di carroponti (`solve_auto_zones`, `solve_auto_hoists`), e la costruzione di un ciclogramma **senza risolvere** a partire dai suoi gradi di liberta' (`build_solution`, `estrai_gradi_di_liberta`) — quest'ultima e' cio' che rende possibile l'editor. |
+| `model.py` | 1737 | Il cuore. Contiene le **strutture dati** (`Tank`, `StationSpec`, `HoistZone`, `ProblemData`, `Segment`, `Solution`), la costruzione e risoluzione del **modello CP-SAT** (`solve`), la scelta automatica di zone e numero di carroponti (`solve_auto_zones`, `solve_auto_hoists`), e la costruzione di un ciclogramma **senza risolvere** a partire dai suoi gradi di liberta' (`build_solution`, `estrai_gradi_di_liberta`) — quest'ultima e' cio' che rende possibile l'editor. |
 | `verify.py` | 1020 | Il **verificatore indipendente**: `verify_solution()` ricontrolla una soluzione in Python puro, senza CP-SAT, campionando le posizioni reali dei carroponti. Restituisce un `VerificationReport` con l'elenco delle `Violation` divise per gravita'. E' la rete di sicurezza contro gli errori nella formulazione del modello. |
 | `manuale.py` | 230 | Il ciclogramma nei termini in cui si modifica: il "pettine" dei pezzi (`pettine`, `catena_pezzo`), la composizione libera del ciclogramma (`componi`) e il controllo che i carroponti non si scavalchino sulla rotaia (`perche_non_va`). |
 
@@ -58,7 +58,7 @@ aprire una finestra, e la cinematica senza avere OR-Tools installato.
 
 | file | righe | contenuto |
 | --- | ---: | --- |
-| `excel_io.py` | 1150 | Tutto l'Excel: `scrivi_modello()` genera il file da compilare, `leggi_problema()` lo rilegge raccogliendo **tutti** gli errori di compilazione con foglio e cella, `scrivi_risultati()` produce il file dei risultati a quattro fogli. |
+| `excel_io.py` | 1164 | Tutto l'Excel: `scrivi_modello()` genera il file da compilare, `leggi_problema()` lo rilegge raccogliendo **tutti** gli errori di compilazione con foglio e cella, `scrivi_risultati()` produce il file dei risultati a quattro fogli. |
 | `plotting.py` | 175 | `plot_cyclogram()`: disegna il ciclogramma (posizione lungo la rotaia contro tempo) con il profilo cinematico vero, non con segmenti diritti. |
 
 ### Programmi da lanciare
@@ -81,8 +81,8 @@ Non serve pytest.
 | file | righe | cosa verifica |
 | --- | ---: | --- |
 | `test_verify.py` | 839 | **Il verificatore.** Risponde a "chi verifica il verificatore?": venti casi, di cui uno solo corretto e tutti gli altri rotti di proposito (collisioni, permanenze fuori tolleranza, periodicita' incoerente, geometrie patologiche, capienze). Un controllore che non segnala mai nulla e' inutile, quindi ogni controllo ha un caso che DEVE farlo scattare. Non richiede OR-Tools: le soluzioni sono costruite a mano. |
-| `test_model.py` | 421 | **Il modello CP-SAT.** Risolve davvero e passa ogni soluzione al verificatore: vasche ravvicinate, tre carroponti, capienza, tempi verticali, e la fedelta' della ricostruzione di una soluzione dai suoi gradi di liberta'. Richiede OR-Tools. |
-| `test_excel_io.py` | 622 | **La lettura e la scrittura Excel.** Quasi tutti i casi sono file compilati male: valori mancanti o non numerici, vasche inesistenti o duplicate, righe riordinate, parametri sbagliati, o un file scritto per la vecchia versione in metri. Piu' la struttura del file dei risultati. Non richiede OR-Tools. |
+| `test_model.py` | 420 | **Il modello CP-SAT.** Risolve davvero e passa ogni soluzione al verificatore: vasche ravvicinate, tre carroponti, capienza, tempi verticali, e la fedelta' della ricostruzione di una soluzione dai suoi gradi di liberta'. Richiede OR-Tools. |
+| `test_excel_io.py` | 625 | **La lettura e la scrittura Excel.** Quasi tutti i casi sono file compilati male: valori mancanti o non numerici, vasche inesistenti o duplicate, righe riordinate, parametri sbagliati, o un file scritto per la vecchia versione in metri. Piu' la struttura del file dei risultati. Non richiede OR-Tools. |
 | `test_interfaccia.py` | 606 | **Le funzioni dell'interfaccia grafica.** La finestra viene costruita davvero e pilotata da codice — si "premono" i pulsanti chiamando i metodi e si fa girare il ciclo degli eventi con `update()` invece di `mainloop()`. Verifica che i pulsanti si abilitino al momento giusto, che il calcolo in background consegni il risultato, che una soluzione calcolata riletta come tempi in vasca e ricomposta dia esattamente lo stesso ciclogramma, che le modifiche vengano riverificate, che le due viste mostrino lo stesso oggetto, e che la composizione da zero produca il pettine giusto. Richiede OR-Tools e un ambiente grafico. |
 
 `kinematics.py` ha in fondo un autotest che si lancia allo stesso modo
@@ -774,9 +774,10 @@ mai contemporaneamente   a(t) < r   e   c(t) <= D - r
 Vieta solo configurazioni con `a + c < D`, quindi non taglia mai nulla di
 sicuro. Imponendola su una griglia di soglie abbastanza fitta si copre l'intera
 condizione: se `a + c < D` basta una soglia nell'intervallo `(a, D - c]`, che e'
-lungo piu' del passo della griglia. Usando passo `δ = D · margine/100` e
-portando il bersaglio a `D + δ`, **la distanza garantita torna esattamente D**,
-e `δ` e' tutto e solo l'eccesso di severita' -- cioe' quella percentuale.
+lungo piu' del passo della griglia. Usando passo `δ = passo_controllo_distanza_mm`
+e portando il bersaglio a `D + δ`, **la distanza garantita torna esattamente D**,
+e `δ` e' tutto e solo l'eccesso di severita' -- cioe' lo stesso passo, letto
+dall'altro lato.
 
 "`a(t) < r`" e' un'unione di intervalli temporali calcolabile dal modello: il
 carroponte e' dentro la fascia mentre sosta su una stazione a distanza `< r`,
@@ -794,7 +795,7 @@ Conseguenze pratiche:
   separazione, sicuri. E' proprio la configurazione che il modello precedente
   non sapeva rappresentare. (Con la griglia predefinita a 6 passi questo caso
   cade appena oltre il limite della conservativita' e viene dichiarato
-  infattibile: basta abbassare `margine_calcolo_percento` a 8. Vedi sotto.)
+  infattibile: basta infittire `passo_controllo_distanza_mm` a 100. Vedi sotto.)
 - **se davvero non ci stanno, esce INFEASIBLE**, non una soluzione sbagliata.
   Con passo 800 mm, mentre un carroponte e' sul confine l'altro non ha nessuna
   stazione abbastanza lontana in cui sostare: corretto;
@@ -802,71 +803,75 @@ Conseguenze pratiche:
   `hoist_length + 2·safety_distance` invece dei richiesti
   `hoist_length + safety_distance`.
 
-### Il margine di calcolo (`margine_calcolo_percento`)
+### Il passo di controllo (`passo_controllo_distanza_mm`)
 
-**Di quanto il vincolo di non collisione e' piu' severo del necessario, in
-percentuale della distanza richiesta.** Con il valore predefinito, 15%, il
-modello puo' arrivare a pretendere `D x 1,15` — su `D = 1800 mm` sono
-2070 mm — pur garantendo sempre e solo i 1800 mm dichiarati.
+**Ogni quanti millimetri viene verificata la distanza fra due carroponti**,
+attorno al confine fra le loro zone. Col valore predefinito, 200 mm: la prima
+verifica a 200 mm dal confine, la seconda a 400, la terza a 600, e cosi' via
+fino a coprire tutta la distanza richiesta.
+
+Lo stesso numero si legge in due modi, ed e' la stessa quantita':
+
+- **quanto sono fitte le verifiche** — il verso in cui lo si imposta;
+- **di quanto il calcolo puo' essere piu' severo del dovuto** — la
+  conseguenza. Fra una verifica e la successiva il modello non sa distinguere
+  e sta dal lato sicuro, quindi con `D = 1800 mm` e passo 200 mm puo' arrivare
+  a pretendere 2000 mm.
 
 **Non e' un margine di sicurezza.** Se vuoi tenere i carroponti piu' lontani,
-alza `distanza_sicurezza_mm`: quella e' una scelta di impianto, entra nella
-distanza richiesta e compare nei risultati. Questa percentuale e' invece il
-prezzo di un'approssimazione, e infatti si abbassa quando da' fastidio.
+alza `distanza_sicurezza_mm`: quella e' una scelta d'impianto, entra nella
+distanza richiesta e compare nei risultati. Questo e' il prezzo di
+un'approssimazione, e infatti si infittisce quando da' fastidio.
 
-Da dove viene: la condizione vera `a(t) + c(t) >= D` non e' esprimibile in
-CP-SAT, e viene coperta con una scalinata di divieti costruita su soglie
-distanti `delta = D x percentuale/100`. La scalinata contiene per intero la
-regione vietata — quindi **la distanza garantita e' sempre `D`, qualunque
-valore si metta** — ma la deborda di al massimo `delta`. Abbassare la
-percentuale infittisce le soglie e fa aderire la scalinata alla condizione
-vera.
+**La distanza garantita e' sempre `D`, qualunque passo si metta.** Il
+parametro puo' solo far scartare soluzioni buone, mai accettarne di
+pericolose: non esiste un valore imprudente. L'unico costo e' la dimensione
+del modello, perche' le verifiche sono `D / passo`.
 
-Il numero di soglie, e con esso la dimensione del modello, cresce come
-`100/percentuale`: e' l'unico costo.
+Misurato su una linea a 4 mosse con vasche ogni 1500 mm (`D = 1800 mm`):
 
-Misurato su una linea a 4 mosse con vasche ogni 1500 mm:
+| passo | verifiche | pretende fino a | vincoli | calcolo | takt time | separazione reale |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 900 mm | 3 | 2700 mm | 696 | 1,6 s | 18,86 s | 3000 mm |
+| 450 mm | 5 | 2250 mm | 928 | 0,9 s | 14,39 s | 2985 mm |
+| 300 mm | 7 | 2100 mm | 1276 | 1,5 s | 13,79 s | 2699 mm |
+| **200 mm** (default) | 10 | 2000 mm | 1740 | 2,1 s | 13,33 s | 2488 mm |
+| 100 mm | 19 | 1900 mm | 3132 | 4,5 s | 12,85 s | 2297 mm |
+| 50 mm | 37 | 1850 mm | 5916 | 7,0 s | 12,58 s | 2193 mm |
 
-| margine | pretende al massimo | vincoli | calcolo | takt time | separazione reale |
-| ---: | ---: | ---: | ---: | ---: | ---: |
-| 50% | 2700 mm | 696 | 0,4 s | 18,86 s | 3000 mm |
-| 25% | 2250 mm | 928 | 1,0 s | 14,39 s | 2985 mm |
-| 15% (default) | 2070 mm | ~1300 | 1,6 s | 13,79 s | 2699 mm |
-| 12,5% | 2025 mm | 1624 | 1,9 s | 13,45 s | 2545 mm |
-| 8% | 1944 mm | 2204 | 3,0 s | 13,06 s | 2372 mm |
-| 4% | 1872 mm | 4060 | 6,2 s | 12,71 s | 2241 mm |
+Il rendimento cala in fretta: da 900 a 200 mm si guadagnano 5,5 s di takt
+time, da 200 a 50 mm altri 0,7 s al triplo del costo.
 
-Il rendimento cala in fretta: da 50% a 12,5% si guadagnano 5,4 s di takt time,
-da 12,5% a 4% altri 0,7 s al doppio del costo.
+**Zero non e' ammesso**, e non per prudenza: il numero di verifiche e'
+`D / passo`, che a zero e' infinito. Il valore viene rifiutato prima di
+calcolare, con un messaggio che lo dice.
 
-**"Pretende al massimo" e' un limite superiore, non una formula esatta.** Il
+**"Pretende fino a" e' un limite superiore, non una formula esatta.** Il
 vincolo agisce su intervalli di TEMPO, non sulle sole posizioni di sosta:
 comprende anche i tratti in cui un carroponte entra o esce dalla fascia
-muovendosi. Che una linea passi o no dipende quindi anche da come le soglie
-cadono rispetto alle traiettorie, non solo dal confronto fra `D x (1+p/100)` e
-lo spazio disponibile. Su una linea con vasche a 1000 mm — dove due carroponti
-ai lati del confine ottengono al massimo 2000 mm — la soglia misurata sta fra
-il 12,5% (infattibile) e l'11,5% (fattibile), mentre il conto sul solo limite
-superiore la darebbe all'11,1%.
+muovendosi. Che una linea passi o no dipende quindi anche da come le verifiche
+cadono rispetto alle traiettorie, non solo dal confronto fra `D + passo` e lo
+spazio disponibile.
 
 **Come regolarlo:**
 
-- **lascialo a 15** finche' il calcolo trova soluzioni e il takt time e'
-  ragionevole. Su una linea normale, dove le vasche stanno molto piu' larghe di
-  `D`, quel 15% non tocca niente;
-- **portalo a 8** se una linea con vasche ravvicinate esce INFEASIBLE. E' la
+- **lascialo a 200** finche' il calcolo trova soluzioni e il takt time e'
+  ragionevole. Su una linea normale, dove le vasche stanno molto piu' larghe
+  di `D`, quei 200 mm non toccano niente;
+- **portalo a 100** se una linea con vasche ravvicinate esce INFEASIBLE. E' la
   prima cosa da provare, prima di aggiungere un carroponte: costa qualche
   secondo di calcolo e potrebbe non esserci nessun problema reale;
-- **portalo a 8-10** se il takt time trovato sembra piu' alto di quanto la
+- **portalo a 100-50** se il takt time trovato sembra piu' alto di quanto la
   linea dovrebbe reggere e i carroponti si aspettano a vicenda vicino a un
   confine;
-- **sotto il 4% non ha senso**: il modello cresce e il guadagno e' nell'ordine
-  dei decimi di secondo.
+- **sotto i 50 mm non ha senso**: il modello cresce e il guadagno e'
+  nell'ordine dei decimi di secondo. Su una linea con piu' confini fra
+  carroponti il costo si moltiplica ancora.
 
 Il modo rapido di capire se ti riguarda: guarda la **separazione minima** nel
 riepilogo. Se e' molto piu' grande di quella richiesta, i carroponti hanno
 spazio da vendere e questo parametro non c'entra. Se e' appiccicata al minimo,
-e' la scalinata che sta stringendo.
+sono le verifiche che stanno stringendo.
 
 **Attenzione alla larghezza della banda di takt time.** Il numero di copie
 traslate da generare e' calcolato sul caso peggiore `T = takt_min`, quindi una
@@ -916,7 +921,7 @@ fa scelte di modellazione precise, in particolare:
   contigue). Il vincolo tiene conto della posizione reale nel tempo e funziona
   con qualunque spaziatura fra le vasche, ma resta leggermente conservativo:
   puo' scartare soluzioni "al limite" che in pratica sarebbero fattibili.
-  Quanto, lo regola `margine_calcolo_percento` (vedi "Non collisione").
+  Quanto, lo regola `passo_controllo_distanza_mm` (vedi "Non collisione").
 - **Posizione di attesa non scelta dal solver**: per convenzione un carroponte
   che ha consegnato riparte subito e attende alla stazione della mossa
   successiva. Poterlo far attendere altrove gli darebbe piu' modo di
@@ -973,7 +978,7 @@ I quattro file rispondono a domande diverse e si completano:
 
 In piu', il vincolo di non collisione e' stato validato su uno **sweep di 288
 configurazioni** (numero di mosse, spaziatura da 1000 a 3000 mm, tempi verticali,
-margine di calcolo, punto di taglio delle zone): 146 risolte e verificate,
+passo di controllo, punto di taglio delle zone): 146 risolte e verificate,
 **zero errori**. Come controllo di sensibilita', lo stesso sweep con il vincolo
 disattivato produce 159 soluzioni con collisioni reali — se ci fosse un buco
 nella formulazione, lo sweep lo avrebbe visto.

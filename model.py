@@ -42,10 +42,10 @@ APPROCCIO SCELTO E SUE ASSUNZIONI (importante leggere prima di usare il codice)
    posizione REALE nel tempo -- soste comprese, non solo sulla stazione di
    confine ma su qualunque stazione cada abbastanza vicino. Funziona quindi
    anche con vasche molto ravvicinate. Il vincolo e' costruito su una
-   griglia di soglie: la distanza garantita e' sempre quella richiesta D,
-   mentre il modello si comporta come se pretendesse D * (1 +
-   clearance_margin_pct/100) -- abbassare la percentuale avvicina le due
-   cose. L'unica geometria non rappresentabile e' quella patologica (vasche
+   griglia di verifiche piazzate ogni clearance_step_mm lungo la rotaia:
+   la distanza garantita e' sempre quella richiesta D, mentre il modello puo'
+   arrivare a pretendere D + clearance_step_mm -- infittire le verifiche
+   avvicina le due cose. L'unica geometria non rappresentabile e' quella patologica (vasche
    non ordinate lungo la rotaia, zone che si scavalcano): la rileva
    zone_layout_conflicts() e la rifiuta solve().
 
@@ -172,22 +172,24 @@ class ProblemData:
     engage_time: float = 0.0  # [s] aggancio del telaio, prima del sollevamento
     disengage_time: float = 0.0  # [s] sgancio, dopo l'immersione
     drain_time: float = 0.0  # [s] sgocciolamento sopra la vasca, valore generale
-    # Di quanto il vincolo di non collisione e' piu' severo del necessario,
-    # in PERCENTUALE della distanza richiesta D = hoist_length +
-    # safety_distance. Il modello si comporta come se pretendesse
-    # D * (1 + clearance_margin_pct/100).
+    # Ogni quanti millimetri viene verificata la distanza fra due carroponti
+    # attorno al confine fra le loro zone. La condizione a(t) + c(t) >= D non
+    # e' esprimibile in CP-SAT, e viene coperta con una serie di verifiche
+    # piazzate a distanza crescente dal confine: la prima a clearance_step_mm,
+    # la seconda al doppio, e cosi' via (vedi solve()).
     #
-    # Non e' un margine di sicurezza dichiarato -- per quello c'e'
-    # safety_distance, che finisce nei risultati come requisito. Questo e' il
-    # prezzo dell'approssimazione: la condizione a(t) + c(t) >= D non e'
-    # esprimibile in CP-SAT e viene coperta con una scalinata di divieti, che
-    # aderisce alla condizione vera a meno di questa percentuale (vedi solve()).
+    # Lo stesso numero si legge in due modi, ed e' la stessa quantita':
+    #   - quanto sono fitte le verifiche;
+    #   - di quanto il modello puo' essere piu' severo del necessario, perche'
+    #     fra una verifica e l'altra non sa distinguere e sta dal lato sicuro.
+    #     Il modello puo' arrivare a pretendere D + clearance_step_mm.
     #
-    # La distanza GARANTITA resta D qualunque valore si metta: abbassarlo puo'
-    # solo far accettare soluzioni buone che prima venivano scartate, mai
-    # accettarne di pericolose. Costa pero' un modello piu' grande, perche' il
-    # numero di soglie della scalinata cresce come 100/percentuale.
-    clearance_margin_pct: float = 15.0
+    # NON e' un margine di sicurezza: per quello c'e' safety_distance, che
+    # entra in D ed e' un requisito dichiarato. Qui la distanza GARANTITA resta
+    # D qualunque valore si metta -- infittire puo' solo far accettare
+    # soluzioni buone che prima venivano scartate, mai accettarne di
+    # pericolose. Costa un modello piu' grande: le verifiche sono D/passo.
+    clearance_step_mm: float = 200.0
 
     def __post_init__(self):
         n_moves = len(self.route) - 1
@@ -235,11 +237,11 @@ class ProblemData:
                 "cinematiche di sollevamento: servono sia kin_lift_empty sia "
                 "kin_lift_loaded per calcolare i tempi di presa e rilascio."
             )
-        if self.clearance_margin_pct <= 0:
+        if self.clearance_step_mm <= 0:
             raise ValueError(
-                "clearance_margin_pct deve essere > 0: e' la tolleranza con cui "
-                "il vincolo di non collisione approssima la condizione esatta, "
-                "e a zero servirebbero infinite soglie"
+                "clearance_step_mm deve essere > 0: e' ogni quanti millimetri "
+                "viene verificata la distanza fra i carroponti, e a zero "
+                "servirebbero infinite verifiche"
             )
         if self.hoist_extent_pos < 0 or self.hoist_extent_neg < 0:
             raise ValueError(
@@ -906,9 +908,9 @@ def solve(
     # nulla di sicuro. Imponendola su una griglia di soglie fitta abbastanza
     # si copre tutta la condizione: se a + c < D basta una soglia
     # nell'intervallo (a, D - c], lungo piu' del passo della griglia. Usando
-    # passo delta = D * clearance_margin_pct/100 e portando il bersaglio a
-    # D + delta, la distanza GARANTITA torna esattamente D, e delta e' tutto e
-    # solo l'eccesso di severita' -- cioe' quella percentuale.
+    # passo delta = clearance_step_mm e portando il bersaglio a D + delta, la
+    # distanza GARANTITA torna esattamente D, e delta e' tutto e solo l'eccesso
+    # di severita' -- cioe' lo stesso passo, letto dall'altro lato.
     #
     # "a(t) < r" e' un'unione di intervalli temporali calcolabile: il
     # carroponte e' entro r da b mentre sosta su una stazione a distanza < r,
@@ -1005,12 +1007,12 @@ def solve(
         assert z_left.hi + 1 == z_right.lo, "le zone devono essere contigue"
         x_b = data.station_position(z_right.lo)
 
-        # delta e' l'eccesso di severita' che ci si concede, e viene dichiarato
-        # in percentuale: il numero di soglie e' una conseguenza, non un
-        # ingresso. Al contrario (soglie dichiarate, delta derivato) il valore
-        # che conta -- quanto il modello e' piu' severo del necessario --
-        # sarebbe rimasto implicito e per giunta non impostabile con esattezza.
-        delta = required_sep * data.clearance_margin_pct / 100.0
+        # delta e' la distanza fra una verifica e la successiva, dichiarata in
+        # millimetri: il numero di verifiche e' una conseguenza, non un
+        # ingresso. Al contrario (numero dichiarato, delta derivato) la
+        # grandezza che si capisce -- ogni quanto si controlla, e quindi di
+        # quanto si puo' sbagliare per eccesso -- resterebbe implicita.
+        delta = data.clearance_step_mm
         target = required_sep + delta  # cosi' la garanzia netta torna a D
         # Servono soglie fino a `target`: qualunque punto con a + c < D cade
         # allora in un intervallo aperto lungo piu' di delta, che una griglia
@@ -1110,7 +1112,7 @@ def solve(
         "wall_time": solver.WallTime(),
         "T_ticks": solver.Value(Tv),
         "required_separation_m": required_sep,
-        "clearance_margin_pct": data.clearance_margin_pct,
+        "clearance_step_mm": data.clearance_step_mm,
         "n_separation_constraints": n_sep_constraints,
     }
     return Solution(

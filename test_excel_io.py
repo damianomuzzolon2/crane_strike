@@ -171,16 +171,19 @@ def test_file_in_metri():
 
 def test_parametro_sostituito():
     print("\n[3c] un parametro rinominato cambiando significato")
-    # 'passi_fascia_sicurezza' e 'margine_calcolo_percento' dicono la stessa
-    # cosa al contrario (6 passi = 17%). Cadere nel generico "non riconosciuto"
-    # farebbe ricopiare il 6 sotto il nome nuovo, cioe' un margine del 6%:
-    # quattro volte piu' fine del voluto, e un modello inutilmente grande.
+    # 'passi_fascia_sicurezza' diceva la stessa cosa contando i gradini.
+    # Cadere nel generico "non riconosciuto" farebbe ricopiare il 6 sotto il
+    # nome nuovo, cioe' un controllo ogni 6 mm: trecento volte piu' fitto del
+    # voluto, e un modello ingestibile.
     p = modello_temporaneo()
     try:
         modifica(p, FOGLIO_PARAMETRI, "A20", "passi_fascia_sicurezza")
         msg = errore_leggendo(p)
-        check("margine_calcolo_percento" in msg, "indica il parametro che lo sostituisce")
-        check("100/passi" in msg, "e dice come si converte il valore")
+        check(
+            "passo_controllo_distanza_mm" in msg,
+            "indica il parametro che lo sostituisce",
+        )
+        check("si converte" in msg.lower(), "e dice come si converte il valore")
     finally:
         os.unlink(p)
 

@@ -116,16 +116,17 @@ _PARAMETRI = {
         100,
         "risoluzione temporale interna del solutore",
     ),
-    "margine_calcolo_percento": (
-        "%",
+    "passo_controllo_distanza_mm": (
+        "mm",
         False,
-        15.0,
-        "quanto il calcolo e' piu' severo del necessario sulla non collisione: "
-        "pretende (ingombro + distanza_sicurezza) x (1 + questo/100). NON e' un "
-        "margine di sicurezza -- per quello c'e' distanza_sicurezza_mm, che "
-        "compare nei risultati. Abbassarlo (8, 5) se una linea con vasche "
-        "vicine esce INFEASIBLE o il takt time sembra troppo alto: non e' mai "
-        "pericoloso, costa solo tempo di calcolo",
+        200.0,
+        "ogni quanti mm viene verificata la distanza fra due carroponti "
+        "attorno al confine fra le loro zone. Fra una verifica e l'altra il "
+        "calcolo sta dal lato sicuro, quindi puo' pretendere fino a questi mm "
+        "in piu' del dovuto. NON e' un margine di sicurezza (quello e' "
+        "distanza_sicurezza_mm): la distanza garantita non cambia mai. "
+        "Infittirlo (100, 50) se una linea con vasche vicine esce INFEASIBLE "
+        "o il takt time sembra troppo alto; costa solo tempo di calcolo",
     ),
     "max_carroponti": (
         "-",
@@ -155,10 +156,17 @@ _NOMI_IN_METRI = {
 _NOMI_SOSTITUITI = {
     "passi_fascia_sicurezza": (
         "'passi_fascia_sicurezza' non esiste piu': diceva la stessa cosa in "
-        "modo indiretto. Adesso si dichiara 'margine_calcolo_percento', cioe' "
-        "di quanto il calcolo e' piu' severo del necessario sulla non "
-        "collisione. Il valore si converte con 100/passi: 6 passi -> 17%, "
-        "8 -> 12.5%, 12 -> 8%. Il predefinito e' 15"
+        "modo indiretto. Adesso si dichiara 'passo_controllo_distanza_mm', "
+        "cioe' ogni quanti mm viene verificata la distanza fra i carroponti. "
+        "Si converte con (ingombro + distanza_sicurezza) / passi: con i valori "
+        "d'esempio 6 passi -> 300 mm. Il predefinito e' 200"
+    ),
+    "margine_calcolo_percento": (
+        "'margine_calcolo_percento' non esiste piu': la stessa cosa si dichiara "
+        "adesso in millimetri invece che in percentuale, come "
+        "'passo_controllo_distanza_mm'. Si converte moltiplicando per "
+        "(ingombro + distanza_sicurezza)/100: con i valori d'esempio 15% -> "
+        "270 mm. Il predefinito e' 200"
     ),
 }
 
@@ -299,7 +307,7 @@ def leggi_problema(percorso_file: str) -> Configurazione:
             engage_time=par["tempo_aggancio_s"],
             disengage_time=par["tempo_sgancio_s"],
             drain_time=par["tempo_sgocciolamento_s"],
-            clearance_margin_pct=par["margine_calcolo_percento"],
+            clearance_step_mm=par["passo_controllo_distanza_mm"],
         )
     except ValueError as e:
         # le validazioni di ProblemData sono gia' scritte per un umano:
@@ -718,7 +726,7 @@ def scrivi_modello(percorso_file: str) -> str:
         "tempo_sgancio_s": 1,
         "tempo_sgocciolamento_s": 2,
         "risoluzione_tick_per_s": 100,
-        "margine_calcolo_percento": 15,
+        "passo_controllo_distanza_mm": 200,
         "max_carroponti": 4,
         "tempo_limite_per_tentativo_s": 15,
     }
@@ -1131,10 +1139,16 @@ def scrivi_risultati(
         "mm (limite rigoroso)",
     )
     voce("Tempo di calcolo", round(solution.raw.get("wall_time", 0.0), 2), "s")
+    passo = data.clearance_step_mm
+    richiesta = data.hoist_length + data.safety_distance
     voce(
-        "Margine di calcolo sulla non collisione",
-        round(data.clearance_margin_pct, 1),
-        "%, severita' in piu' del vincolo (non e' un margine di sicurezza)",
+        "Passo di controllo della distanza",
+        round(passo, 1),
+        f"mm fra una verifica e l'altra: il calcolo puo' pretendere fino a "
+        f"{passo / richiesta * 100:.0f}% in piu' della distanza richiesta "
+        f"(non e' un margine di sicurezza)"
+        if richiesta > 0
+        else "mm fra una verifica e l'altra",
         "0.0",
     )
     voce("Risoluzione temporale", data.time_scale, "tick al secondo")
