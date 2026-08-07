@@ -116,11 +116,16 @@ _PARAMETRI = {
         100,
         "risoluzione temporale interna del solutore",
     ),
-    "passi_fascia_sicurezza": (
-        "-",
+    "margine_calcolo_percento": (
+        "%",
         False,
-        6,
-        "finezza del vincolo di non collisione: piu' alto = meno cautelativo",
+        15.0,
+        "quanto il calcolo e' piu' severo del necessario sulla non collisione: "
+        "pretende (ingombro + distanza_sicurezza) x (1 + questo/100). NON e' un "
+        "margine di sicurezza -- per quello c'e' distanza_sicurezza_mm, che "
+        "compare nei risultati. Abbassarlo (8, 5) se una linea con vasche "
+        "vicine esce INFEASIBLE o il takt time sembra troppo alto: non e' mai "
+        "pericoloso, costa solo tempo di calcolo",
     ),
     "max_carroponti": (
         "-",
@@ -136,13 +141,25 @@ _PARAMETRI = {
     ),
 }
 
-_INTERI = {"risoluzione_tick_per_s", "passi_fascia_sicurezza", "max_carroponti"}
+_INTERI = {"risoluzione_tick_per_s", "max_carroponti"}
 
 # Come si chiamavano gli stessi parametri quando il progetto lavorava in metri.
 # Servono solo a riconoscere un file vecchio e dirlo chiaramente: leggerlo
 # com'e' vorrebbe dire interpretare 9.5 m come 9.5 mm.
 _NOMI_IN_METRI = {
     nome.replace("_mm", "_m"): nome for nome in _PARAMETRI if "_mm" in nome
+}
+
+# Parametri sostituiti da altri che vogliono dire una cosa diversa: qui non
+# basta dire il nome nuovo, va detto anche come si converte il valore.
+_NOMI_SOSTITUITI = {
+    "passi_fascia_sicurezza": (
+        "'passi_fascia_sicurezza' non esiste piu': diceva la stessa cosa in "
+        "modo indiretto. Adesso si dichiara 'margine_calcolo_percento', cioe' "
+        "di quanto il calcolo e' piu' severo del necessario sulla non "
+        "collisione. Il valore si converte con 100/passi: 6 passi -> 17%, "
+        "8 -> 12.5%, 12 -> 8%. Il predefinito e' 15"
+    ),
 }
 
 
@@ -282,7 +299,7 @@ def leggi_problema(percorso_file: str) -> Configurazione:
             engage_time=par["tempo_aggancio_s"],
             disengage_time=par["tempo_sgancio_s"],
             drain_time=par["tempo_sgocciolamento_s"],
-            clearance_steps=par["passi_fascia_sicurezza"],
+            clearance_margin_pct=par["margine_calcolo_percento"],
         )
     except ValueError as e:
         # le validazioni di ProblemData sono gia' scritte per un umano:
@@ -424,6 +441,12 @@ def _leggi_parametri(ws, errori: _Errori) -> dict:
                 f"1000. Il modo piu' rapido e' rigenerare il file con "
                 f"'Nuovo modello Excel...' e ricopiarci i dati",
             )
+            continue
+        if nome in _NOMI_SOSTITUITI:
+            # Rinominati cambiando anche il significato: lasciarli cadere nel
+            # generico "non riconosciuto" farebbe ricopiare il vecchio valore
+            # sotto il nome nuovo, che qui vuol dire tutt'altro.
+            errori.aggiungi(FOGLIO_PARAMETRI, f"A{riga}", _NOMI_SOSTITUITI[nome])
             continue
         if nome not in _PARAMETRI:
             errori.aggiungi(
@@ -695,7 +718,7 @@ def scrivi_modello(percorso_file: str) -> str:
         "tempo_sgancio_s": 1,
         "tempo_sgocciolamento_s": 2,
         "risoluzione_tick_per_s": 100,
-        "passi_fascia_sicurezza": 6,
+        "margine_calcolo_percento": 15,
         "max_carroponti": 4,
         "tempo_limite_per_tentativo_s": 15,
     }
@@ -1108,7 +1131,12 @@ def scrivi_risultati(
         "mm (limite rigoroso)",
     )
     voce("Tempo di calcolo", round(solution.raw.get("wall_time", 0.0), 2), "s")
-    voce("Passi fascia di sicurezza", data.clearance_steps)
+    voce(
+        "Margine di calcolo sulla non collisione",
+        round(data.clearance_margin_pct, 1),
+        "%, severita' in piu' del vincolo (non e' un margine di sicurezza)",
+        "0.0",
+    )
     voce("Risoluzione temporale", data.time_scale, "tick al secondo")
 
     wb.save(percorso_file)

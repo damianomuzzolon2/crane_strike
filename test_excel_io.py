@@ -169,6 +169,22 @@ def test_file_in_metri():
         os.unlink(p)
 
 
+def test_parametro_sostituito():
+    print("\n[3c] un parametro rinominato cambiando significato")
+    # 'passi_fascia_sicurezza' e 'margine_calcolo_percento' dicono la stessa
+    # cosa al contrario (6 passi = 17%). Cadere nel generico "non riconosciuto"
+    # farebbe ricopiare il 6 sotto il nome nuovo, cioe' un margine del 6%:
+    # quattro volte piu' fine del voluto, e un modello inutilmente grande.
+    p = modello_temporaneo()
+    try:
+        modifica(p, FOGLIO_PARAMETRI, "A20", "passi_fascia_sicurezza")
+        msg = errore_leggendo(p)
+        check("margine_calcolo_percento" in msg, "indica il parametro che lo sostituisce")
+        check("100/passi" in msg, "e dice come si converte il valore")
+    finally:
+        os.unlink(p)
+
+
 def test_vasca_inesistente():
     print("\n[4] il percorso cita una vasca non definita")
     p = modello_temporaneo()
@@ -580,6 +596,7 @@ def main():
     test_valori_mancanti_e_sbagliati()
     test_virgola_decimale()
     test_file_in_metri()
+    test_parametro_sostituito()
     test_vasca_inesistente()
     test_vasca_duplicata()
     test_percorso_riordinato()
