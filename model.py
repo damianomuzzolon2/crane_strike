@@ -102,15 +102,21 @@ class Tank:
     # della singola tappa del percorso: se la ricetta passa due volte dalla
     # stessa vasca, i pezzi delle due tappe si contendono gli stessi posti.
     capacity: int = 1
-    # Corsa verticale [mm] fra la quota di trasporto e quella di immersione.
-    # None = si usa il valore generale di ProblemData.lift_height: si valorizza
-    # solo per le vasche piu' profonde (o piu' basse) della media.
-    lift_height: Optional[float] = None
-    # Sgocciolamento [s]: quanto il telaio resta sospeso SOPRA questa vasca,
-    # dopo l'emersione, a lasciar scolare il bagno prima di traslare. Dipende
-    # dalla chimica e dalla geometria del pezzo, non dalla meccanica del
-    # carroponte, quindi cambia da vasca a vasca. None = valore generale.
-    drain_time: Optional[float] = None
+    # Corsa verticale [mm] fra la quota di trasporto e quella di immersione, e
+    # sgocciolamento [s], cioe' quanto il telaio resta sospeso SOPRA questa
+    # vasca a lasciar scolare il bagno prima di traslare.
+    #
+    # Sono proprieta' della VASCA -- la sua profondita', la sua chimica -- non
+    # del carroponte, quindi si dichiarano una per vasca e sono OBBLIGATORIE.
+    # Un valore "generale" con le vasche come eccezione sarebbe un default
+    # silenzioso: chi dimentica una riga non se ne accorgerebbe, e il calcolo
+    # userebbe un numero che nessuno ha scelto per quella vasca. Meglio
+    # scrivere 0 dove non serve niente, che e' una dichiarazione.
+    #
+    # Sono keyword-only apposta: cosi' una chiamata posizionale scritta per la
+    # versione precedente non puo' finire per assegnarli di nascosto.
+    lift_height: float = field(kw_only=True)
+    drain_time: float = field(kw_only=True)
 
 
 @dataclass(frozen=True)
@@ -163,15 +169,16 @@ class ProblemData:
     # gancio scarico -> tempo di RILASCIO. Lo spostamento a vuoto successivo
     # non paga nulla: la corsa del gancio scarico e' gia' contata qui dentro.
     #
-    # I tempi non si dichiarano: si ricavano dalla corsa verticale e dalle
-    # cinematiche di sollevamento, con lo stesso profilo trapezoidale usato
-    # per il moto orizzontale.
-    lift_height: float = 0.0  # [mm] corsa verticale, valore generale
+    # I tempi non si dichiarano: si ricavano dalla corsa verticale della VASCA
+    # (Tank.lift_height) e dalle cinematiche di sollevamento, con lo stesso
+    # profilo trapezoidale usato per il moto orizzontale.
+    #
+    # Qui stanno solo le grandezze del CARROPONTE, uguali su tutta la linea.
+    # Corsa e sgocciolamento no: cambiano da vasca a vasca e si dichiarano li'.
     kin_lift_empty: Optional[Kinematics] = None  # sollevamento a gancio scarico
     kin_lift_loaded: Optional[Kinematics] = None  # sollevamento col telaio
     engage_time: float = 0.0  # [s] aggancio del telaio, prima del sollevamento
     disengage_time: float = 0.0  # [s] sgancio, dopo l'immersione
-    drain_time: float = 0.0  # [s] sgocciolamento sopra la vasca, valore generale
     # Ogni quanti millimetri viene verificata la distanza fra due carroponti
     # attorno al confine fra le loro zone. La condizione a(t) + c(t) >= D non
     # e' esprimibile in CP-SAT, e viene coperta con una serie di verifiche
@@ -211,31 +218,26 @@ class ProblemData:
                 raise ValueError(f"dwell_min > dwell_max per vasca '{s.tank_id}'")
         if self.takt_min > self.takt_max:
             raise ValueError("takt_min > takt_max")
-        if self.engage_time < 0 or self.disengage_time < 0 or self.drain_time < 0:
-            raise ValueError(
-                "engage_time, disengage_time e drain_time devono essere >= 0"
-            )
-        if self.lift_height < 0:
-            raise ValueError("lift_height deve essere >= 0")
+        if self.engage_time < 0 or self.disengage_time < 0:
+            raise ValueError("engage_time e disengage_time devono essere >= 0")
         for t in self.tanks.values():
-            if t.lift_height is not None and t.lift_height < 0:
+            if t.lift_height < 0:
                 raise ValueError(
                     f"lift_height della vasca '{t.id}' deve essere >= 0"
                 )
-            if t.drain_time is not None and t.drain_time < 0:
+            if t.drain_time < 0:
                 raise ValueError(
                     f"drain_time della vasca '{t.id}' deve essere >= 0"
                 )
-        serve_cinematica = self.lift_height > 0 or any(
-            t.lift_height for t in self.tanks.values()
-        )
+        serve_cinematica = any(t.lift_height > 0 for t in self.tanks.values())
         if serve_cinematica and (
             self.kin_lift_empty is None or self.kin_lift_loaded is None
         ):
             raise ValueError(
-                "e' stata indicata una corsa verticale (lift_height) ma non le "
-                "cinematiche di sollevamento: servono sia kin_lift_empty sia "
-                "kin_lift_loaded per calcolare i tempi di presa e rilascio."
+                "almeno una vasca ha una corsa verticale (lift_height) ma "
+                "mancano le cinematiche di sollevamento: servono sia "
+                "kin_lift_empty sia kin_lift_loaded per calcolare i tempi di "
+                "presa e rilascio."
             )
         if self.clearance_step_mm <= 0:
             raise ValueError(
@@ -344,10 +346,8 @@ class ProblemData:
     # senza rischio di disallineamenti.
 
     def lift_height_at(self, station_idx: int) -> float:
-        """Corsa verticale [m] alla stazione data: quella dichiarata sulla
-        vasca, se c'e', altrimenti il valore generale della linea."""
-        h = self.tanks[self.route[station_idx].tank_id].lift_height
-        return self.lift_height if h is None else h
+        """Corsa verticale [mm] alla stazione data, cioe' quella della vasca."""
+        return self.tanks[self.route[station_idx].tank_id].lift_height
 
     def _lift_seconds(self, height: float, kin: Optional[Kinematics]) -> float:
         if height <= 0 or kin is None:
@@ -356,8 +356,7 @@ class ProblemData:
 
     def drain_time_at(self, station_idx: int) -> float:
         """Sgocciolamento [s] sopra la vasca della tappa data."""
-        d = self.tanks[self.route[station_idx].tank_id].drain_time
-        return self.drain_time if d is None else d
+        return self.tanks[self.route[station_idx].tank_id].drain_time
 
     def pick_time_at(self, station_idx: int) -> float:
         """Tempo di PRESA [s] alla stazione data: discesa del gancio scarico,

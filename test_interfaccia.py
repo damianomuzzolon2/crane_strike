@@ -146,7 +146,7 @@ def test_calcolo_automatico(percorso_linea):
         )
         check(app.report.ok, "la soluzione supera la verifica indipendente")
         check(
-            len(app.dati.zones) == 2 and abs(app.soluzione.T - 131.88) < 1.0,
+            len(app.dati.zones) == 2 and abs(app.soluzione.T - 127.39) < 1.0,
             f"{len(app.dati.zones)} carroponti, T={app.soluzione.T:.2f}s "
             f"(come da riga di comando)",
         )
@@ -475,7 +475,7 @@ def test_composizione_da_zero(percorso_linea):
         app.update()
         dopo = m.catena_pezzo(d, app.permanenze)
         check(
-            dopo[2] - prima[2] == 40.0 and dopo[0] == prima[0],
+            abs(dopo[2] - prima[2] - 40.0) < 1e-6 and dopo[0] == prima[0],
             f"allungando il bagno di 40 s la scalinata si sposta da quel punto "
             f"in poi ({prima[2]:.1f} -> {dopo[2]:.1f} s)",
         )

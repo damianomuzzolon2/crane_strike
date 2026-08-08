@@ -70,7 +70,15 @@ def make_data(positions, dwells, zones, **kw) -> ProblemData:
     capacity) per stazione. Qui ogni vasca compare una volta sola nel
     percorso, quindi la capacity della tappa e' quella della vasca."""
     caps = [spec[2] if len(spec) > 2 else 1 for spec in dwells]
-    tanks = {f"V{i}": Tank(f"V{i}", p, caps[i]) for i, p in enumerate(positions)}
+    # Corsa verticale e sgocciolamento sono di OGNI vasca e obbligatori. Qui si
+    # applicano uguali a tutte: e' una linea legittima, e va scritta invece che
+    # sottintesa da un valore generale.
+    corsa = kw.pop("lift_height", 0.0)
+    scolo = kw.pop("drain_time", 0.0)
+    tanks = {
+        f"V{i}": Tank(f"V{i}", p, caps[i], lift_height=corsa, drain_time=scolo)
+        for i, p in enumerate(positions)
+    }
     route = [StationSpec(f"V{i}", spec[0], spec[1]) for i, spec in enumerate(dwells)]
     params = dict(
         tanks=tanks,
@@ -527,10 +535,10 @@ def _linea_vasca_ripetuta(cap_lav: int, dwell=(20, 200)) -> ProblemData:
     l'unica capienza sotto esame e' quella di LAV."""
     return ProblemData(
         tanks={
-            "CAR": Tank("CAR", 0),
-            "LAV": Tank("LAV", 5000, capacity=cap_lav),
-            "SEC": Tank("SEC", 10000, capacity=20),
-            "SCA": Tank("SCA", 15000),
+            "CAR": Tank("CAR", 0, lift_height=0, drain_time=0),
+            "LAV": Tank("LAV", 5000, capacity=cap_lav, lift_height=0, drain_time=0),
+            "SEC": Tank("SEC", 10000, capacity=20, lift_height=0, drain_time=0),
+            "SCA": Tank("SCA", 15000, lift_height=0, drain_time=0),
         },
         route=[
             StationSpec("CAR", 0, 0),

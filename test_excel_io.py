@@ -56,6 +56,10 @@ def modifica(percorso: str, foglio: str, cella: str, valore):
     wb.save(percorso)
 
 
+def _testo_cella(valore) -> str:
+    return "" if valore is None else str(valore).strip()
+
+
 def errore_leggendo(percorso: str) -> str:
     """Restituisce il messaggio d'errore, o '' se il file e' valido."""
     try:
@@ -84,17 +88,26 @@ def test_andata_e_ritorno():
             "cinematiche vuoto e carico",
         )
         check(
-            (d.lift_height, d.engage_time, d.disengage_time) == (800, 2.0, 1.0),
-            "corsa verticale e tempi di aggancio/sgancio",
+            (d.engage_time, d.disengage_time) == (2.0, 1.0),
+            "tempi di aggancio/sgancio",
         )
         check(
             (d.kin_lift_empty.v_max, d.kin_lift_loaded.a_max) == (500, 500),
             "cinematiche di sollevamento",
         )
+        # Corsa e sgocciolamento sono di ogni vasca e obbligatori: nessun
+        # valore generale da cui ereditare, e nessun None possibile.
         check(
             d.tanks["ZINCATURA"].lift_height == 1100
-            and d.tanks["SGRASSO"].lift_height is None,
-            "corsa verticale per vasca solo dove indicata",
+            and d.tanks["SGRASSO"].lift_height == 800
+            and d.tanks["CARICO"].lift_height == 0,
+            "corsa verticale dichiarata vasca per vasca",
+        )
+        check(
+            d.tanks["ZINCATURA"].drain_time == 8
+            and d.tanks["SGRASSO"].drain_time == 2
+            and d.tanks["CARICO"].drain_time == 0,
+            "sgocciolamento dichiarato vasca per vasca",
         )
         check(
             d.pick_time_at(3) > d.pick_time_at(1),
@@ -125,6 +138,42 @@ def test_valori_mancanti_e_sbagliati():
             modifica(p, foglio, cella, valore)
             msg = errore_leggendo(p)
             check(atteso in msg, f"{descrizione}: segnalato in {atteso}")
+        finally:
+            os.unlink(p)
+
+
+def test_corsa_e_scolo_obbligatori():
+    print("\n[2-bis] corsa verticale e sgocciolamento: uno per vasca, obbligatori")
+    # Sono proprieta' della vasca, e non esiste piu' un valore generale da cui
+    # ereditare. Una cella vuota deve essere un errore: se passasse per "usa il
+    # default" si calcolerebbe con un numero che nessuno ha scelto per quella
+    # vasca, e nessuno se ne accorgerebbe.
+    for cella, atteso in (("D5", "corsa verticale"), ("E5", "sgocciolamento")):
+        p = modello_temporaneo()
+        try:
+            modifica(p, FOGLIO_VASCHE, cella, None)
+            msg = errore_leggendo(p)
+            check(
+                f"Vasche!{cella}" in msg and atteso in msg,
+                f"{atteso} lasciato vuoto: segnalato in Vasche!{cella}",
+            )
+        finally:
+            os.unlink(p)
+
+    # e i due parametri "generali" non esistono piu': chi li ha nel file
+    # vecchio deve sentirsi dire dove sono finiti, non "non riconosciuto"
+    for vecchio, dove in (
+        ("altezza_sollevamento_mm", "corsa_verticale_mm"),
+        ("tempo_sgocciolamento_s", "sgocciolamento_s"),
+    ):
+        p = modello_temporaneo()
+        try:
+            modifica(p, FOGLIO_PARAMETRI, "A20", vecchio)
+            msg = errore_leggendo(p)
+            check(
+                dove in msg and FOGLIO_VASCHE in msg,
+                f"'{vecchio}' nei Parametri: rimanda a {dove} nel foglio Vasche",
+            )
         finally:
             os.unlink(p)
 
@@ -294,11 +343,12 @@ def test_sollevamento_incoerente():
             nome = str(ws.cell(riga, 1).value or "")
             if nome.startswith(("v_max_sollevamento", "a_max_sollevamento")):
                 ws.cell(riga, 2).value = None
-            elif nome == "altezza_sollevamento_mm":
-                ws.cell(riga, 2).value = 0
+        # corsa a zero su OGNI vasca: e' una dichiarazione, non una cella
+        # lasciata vuota -- quelle adesso sono un errore
         ws2 = wb[FOGLIO_VASCHE]
         for riga in range(2, ws2.max_row + 1):
-            ws2.cell(riga, 4).value = None
+            if _testo_cella(ws2.cell(riga, 1).value):
+                ws2.cell(riga, 4).value = 0
         wb.save(p)
         cfg = leggi_problema(p)
         # niente corsa = nessun moto verticale, ma aggancio e sgancio restano:
@@ -597,6 +647,7 @@ def main():
     print("=" * 72)
     test_andata_e_ritorno()
     test_valori_mancanti_e_sbagliati()
+    test_corsa_e_scolo_obbligatori()
     test_virgola_decimale()
     test_file_in_metri()
     test_parametro_sostituito()

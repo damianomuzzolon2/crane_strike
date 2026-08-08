@@ -33,16 +33,24 @@ def main():
     #    sono sempre 2 pezzi dentro, quindi deve essere una vasca a (almeno)
     #    2 posti. Se fosse a posto singolo il takt time non potrebbe scendere
     #    sotto la permanenza.
+    #    `lift_height` (corsa verticale) e `drain_time` (sgocciolamento) si
+    #    dichiarano per OGNI vasca: dipendono da quanto e' profonda e da cosa
+    #    contiene, non dal carroponte. Non c'e' un valore generale da cui
+    #    ereditare -- dove non serve niente si scrive 0, che e' una scelta
+    #    esplicita e non una dimenticanza.
     tanks = {
-        "CARICO": Tank("CARICO", 0),
-        "SGRASSO": Tank("SGRASSO", 2500),
-        "RISCIACQUO_1": Tank("RISCIACQUO_1", 5500),
+        # carico e scarico non sono bagni: niente corsa, niente scolo
+        "CARICO": Tank("CARICO", 0, lift_height=0, drain_time=0),
+        "SGRASSO": Tank("SGRASSO", 2500, lift_height=800, drain_time=2.0),
+        "RISCIACQUO_1": Tank("RISCIACQUO_1", 5500, lift_height=800, drain_time=2.0),
         # vasca piu' profonda e con sgocciolamento lungo: il bagno di zinco
         # cola parecchio, e lasciarlo cadere fuori dalla vasca e' uno spreco
-        "ZINCATURA": Tank("ZINCATURA", 9500, capacity=2, lift_height=1100, drain_time=8.0),
-        "RISCIACQUO_2": Tank("RISCIACQUO_2", 13000),
-        "PASSIVAZIONE": Tank("PASSIVAZIONE", 16500),
-        "SCARICO": Tank("SCARICO", 20000),
+        "ZINCATURA": Tank(
+            "ZINCATURA", 9500, capacity=2, lift_height=1100, drain_time=8.0
+        ),
+        "RISCIACQUO_2": Tank("RISCIACQUO_2", 13000, lift_height=800, drain_time=2.0),
+        "PASSIVAZIONE": Tank("PASSIVAZIONE", 16500, lift_height=800, drain_time=3.0),
+        "SCARICO": Tank("SCARICO", 20000, lift_height=0, drain_time=0),
     }
 
     # ---------------------------------------------------------------
@@ -89,15 +97,12 @@ def main():
     #    EFFETTIVO in bagno, misurato da fine immersione a inizio
     #    emersione; le fasi verticali si sommano a parte.
     # ---------------------------------------------------------------
-    lift_height = 800  # [mm] corsa fra quota di trasporto e quota di immersione
     kin_lift_empty = Kinematics(v_max=500, a_max=800)  # gancio scarico
     kin_lift_loaded = Kinematics(v_max=300, a_max=500)  # col telaio
     engage_time = 2.0  # [s] aggancio del telaio, prima del sollevamento
     disengage_time = 1.0  # [s] sgancio, dopo l'immersione
-    # Sgocciolamento: il telaio resta sospeso sopra la vasca a lasciar scolare
-    # il bagno. Dipende dalla chimica, non dal carroponte: qui il valore
-    # generale e' modesto, ma sulla ZINCATURA e' molto piu' lungo (vedi Tank).
-    drain_time = 2.0  # [s]
+    # Corsa verticale e sgocciolamento non stanno qui: sono di ogni vasca,
+    # dichiarati sopra insieme alla sua posizione.
 
     # ---------------------------------------------------------------
     # 5) Numero di carroponti E zone: entrambi scelti automaticamente.
@@ -118,12 +123,10 @@ def main():
         safety_distance=safety_distance,
         zones=None,  # <-- zone scelte automaticamente
         time_scale=100,  # risoluzione: centesimi di secondo
-        lift_height=lift_height,
         kin_lift_empty=kin_lift_empty,
         kin_lift_loaded=kin_lift_loaded,
         engage_time=engage_time,
         disengage_time=disengage_time,
-        drain_time=drain_time,
     )
     print("Fasi verticali calcolate:")
     for s in range(1, data.n_moves):

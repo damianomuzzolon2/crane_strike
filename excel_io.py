@@ -60,13 +60,6 @@ _PARAMETRI = {
         None,
         "margine minimo aggiuntivo fra due carroponti",
     ),
-    "altezza_sollevamento_mm": (
-        "mm",
-        True,
-        None,
-        "corsa verticale fra quota di trasporto e quota di immersione "
-        "(0 per ignorare la movimentazione verticale)",
-    ),
     "v_max_sollevamento_vuoto_mm_s": (
         "mm/s",
         False,
@@ -102,13 +95,6 @@ _PARAMETRI = {
         False,
         0.0,
         "sgancio, dopo l'immersione (si somma al rilascio)",
-    ),
-    "tempo_sgocciolamento_s": (
-        "s",
-        False,
-        0.0,
-        "quanto il telaio resta sospeso sopra la vasca a scolare, dopo "
-        "l'emersione; valore generale, si puo' sovrascrivere per vasca",
     ),
     "risoluzione_tick_per_s": (
         "tick/s",
@@ -160,6 +146,19 @@ _NOMI_SOSTITUITI = {
         "cioe' ogni quanti mm viene verificata la distanza fra i carroponti. "
         "Si converte con (ingombro + distanza_sicurezza) / passi: con i valori "
         "d'esempio 6 passi -> 300 mm. Il predefinito e' 200"
+    ),
+    "altezza_sollevamento_mm": (
+        "'altezza_sollevamento_mm' non sta piu' fra i Parametri: la corsa "
+        "verticale e' una proprieta' della singola vasca (quanto e' profonda), "
+        "non del carroponte. Va scritta nella colonna 'corsa_verticale_mm' del "
+        "foglio Vasche, una riga per vasca, obbligatoria: 0 dove non c'e' "
+        "movimentazione verticale"
+    ),
+    "tempo_sgocciolamento_s": (
+        "'tempo_sgocciolamento_s' non sta piu' fra i Parametri: lo "
+        "sgocciolamento dipende dal bagno, non dal carroponte. Va scritto "
+        "nella colonna 'sgocciolamento_s' del foglio Vasche, una riga per "
+        "vasca, obbligatorio: 0 dove non serve"
     ),
     "margine_calcolo_percento": (
         "'margine_calcolo_percento' non esiste piu': la stessa cosa si dichiara "
@@ -301,12 +300,12 @@ def leggi_problema(percorso_file: str) -> Configurazione:
             safety_distance=par["distanza_sicurezza_mm"],
             zones=zone,
             time_scale=par["risoluzione_tick_per_s"],
-            lift_height=par["altezza_sollevamento_mm"],
+
             kin_lift_empty=_kin_sollevamento("vuoto"),
             kin_lift_loaded=_kin_sollevamento("carico"),
             engage_time=par["tempo_aggancio_s"],
             disengage_time=par["tempo_sgancio_s"],
-            drain_time=par["tempo_sgocciolamento_s"],
+
             clearance_step_mm=par["passo_controllo_distanza_mm"],
         )
     except ValueError as e:
@@ -344,16 +343,25 @@ def _leggi_vasche(ws, errori: _Errori) -> dict[str, Tank]:
             posti = _numero(
                 posti_cella, FOGLIO_VASCHE, f"C{riga}", "posti", errori, intero=True
             )
-        def _facoltativo(col: int, lettera: str, nome: str):
-            """None se la cella e' vuota: si usera' il valore generale."""
-            cella = ws.cell(riga, col).value
-            if cella is None or (isinstance(cella, str) and not cella.strip()):
-                return None
-            return _numero(cella, FOGLIO_VASCHE, f"{lettera}{riga}", nome, errori)
-
-        corsa = _facoltativo(4, "D", "corsa verticale")
-        sgocciolamento = _facoltativo(5, "E", "sgocciolamento")
-        if pos is None or posti is None:
+        # Corsa e sgocciolamento sono OBBLIGATORI, una vasca per volta: non
+        # esiste un valore generale da cui ereditare. Dove non serve
+        # movimentazione verticale si scrive 0, che e' una dichiarazione --
+        # una cella vuota no.
+        corsa = _numero(
+            ws.cell(riga, 4).value,
+            FOGLIO_VASCHE,
+            f"D{riga}",
+            "corsa verticale",
+            errori,
+        )
+        sgocciolamento = _numero(
+            ws.cell(riga, 5).value,
+            FOGLIO_VASCHE,
+            f"E{riga}",
+            "sgocciolamento",
+            errori,
+        )
+        if pos is None or posti is None or corsa is None or sgocciolamento is None:
             continue
         tanks[tid] = Tank(
             id=tid,
@@ -576,23 +584,23 @@ def scrivi_modello(percorso_file: str) -> str:
             None,
         ),
         (
-            "  corsa_verticale_mm   solo per le vasche piu' profonde o piu' basse "
-            "della media;",
+            "  corsa_verticale_mm  corsa fra quota di trasporto e quota di "
+            "immersione, per QUESTA vasca;",
             None,
         ),
         (
-            "                lasciando vuoto si usa altezza_sollevamento_mm del "
-            "foglio Parametri",
+            "                obbligatoria. Scrivi 0 dove non c'e' "
+            "movimentazione verticale (carico, scarico)",
             None,
         ),
         (
             "  sgocciolamento_s    quanto il telaio resta sospeso sopra QUESTA "
-            "vasca a scolare;",
+            "vasca a scolare, dopo l'emersione;",
             None,
         ),
         (
-            "                dipende dal bagno, non dal carroponte. Vuoto = "
-            "tempo_sgocciolamento_s generale",
+            "                dipende dal bagno, non dal carroponte. "
+            "Obbligatorio: scrivi 0 dove non serve",
             None,
         ),
         ("", None),
@@ -673,13 +681,14 @@ def scrivi_modello(percorso_file: str) -> str:
         [22, 14, 8, 20, 20],
     )
     for tid, pos, posti, corsa, scolo in [
-        ("CARICO", 0, 1, None, None),
-        ("SGRASSO", 2500, 1, None, None),
-        ("RISCIACQUO_1", 5500, 1, None, None),
+        # carico e scarico non sono bagni: nessuna corsa, nessuno scolo
+        ("CARICO", 0, 1, 0, 0),
+        ("SGRASSO", 2500, 1, 800, 2),
+        ("RISCIACQUO_1", 5500, 1, 800, 2),
         ("ZINCATURA", 9500, 2, 1100, 8),
-        ("RISCIACQUO_2", 13000, 1, None, None),
-        ("PASSIVAZIONE", 16500, 1, None, None),
-        ("SCARICO", 20000, 1, None, None),
+        ("RISCIACQUO_2", 13000, 1, 800, 2),
+        ("PASSIVAZIONE", 16500, 1, 800, 3),
+        ("SCARICO", 20000, 1, 0, 0),
     ]:
         ws.append([tid, pos, posti, corsa, scolo])
 
@@ -717,14 +726,12 @@ def scrivi_modello(percorso_file: str) -> str:
         "ingombro_lato_positivo_mm": 500,
         "ingombro_lato_negativo_mm": 700,
         "distanza_sicurezza_mm": 600,
-        "altezza_sollevamento_mm": 800,
         "v_max_sollevamento_vuoto_mm_s": 500,
         "a_max_sollevamento_vuoto_mm_s2": 800,
         "v_max_sollevamento_carico_mm_s": 300,
         "a_max_sollevamento_carico_mm_s2": 500,
         "tempo_aggancio_s": 2,
         "tempo_sgancio_s": 1,
-        "tempo_sgocciolamento_s": 2,
         "risoluzione_tick_per_s": 100,
         "passo_controllo_distanza_mm": 200,
         "max_carroponti": 4,
@@ -932,7 +939,14 @@ def scrivi_risultati(
         )
 
     sezione("Movimentazione verticale")
-    voce("Corsa (valore generale)", round(data.lift_height, 1), "mm", "0.0")
+    corse = {round(data.lift_height_at(s), 1) for s in range(1, data.n_moves)}
+    voce(
+        "Corsa verticale",
+        min(corse) if corse else 0.0,
+        "mm"
+        + ("" if len(corse) <= 1 else f" (fino a {max(corse):.0f} mm, varia per vasca)"),
+        "0.0",
+    )
     presa = {round(data.pick_time_at(s), 2) for s in range(1, data.n_moves)}
     rilascio = {round(data.release_time_at(s), 2) for s in range(1, data.n_moves)}
     voce(

@@ -50,7 +50,7 @@ aprire una finestra, e la cinematica senza avere OR-Tools installato.
 | file | righe | contenuto |
 | --- | ---: | --- |
 | `kinematics.py` | 130 | La fisica del movimento, in millimetri e secondi. `travel_time()` da' il tempo per percorrere una distanza con profilo trapezoidale o triangolare; `position_profile()` la posizione istante per istante; `profile_breakpoints()` gli spigoli della curva, che servono al verificatore per limitare in modo rigoroso l'errore di campionamento. Non sa nulla del resto del progetto. |
-| `model.py` | 1737 | Il cuore. Contiene le **strutture dati** (`Tank`, `StationSpec`, `HoistZone`, `ProblemData`, `Segment`, `Solution`), la costruzione e risoluzione del **modello CP-SAT** (`solve`), la scelta automatica di zone e numero di carroponti (`solve_auto_zones`, `solve_auto_hoists`), e la costruzione di un ciclogramma **senza risolvere** a partire dai suoi gradi di liberta' (`build_solution`, `estrai_gradi_di_liberta`) — quest'ultima e' cio' che rende possibile l'editor. |
+| `model.py` | 1736 | Il cuore. Contiene le **strutture dati** (`Tank`, `StationSpec`, `HoistZone`, `ProblemData`, `Segment`, `Solution`), la costruzione e risoluzione del **modello CP-SAT** (`solve`), la scelta automatica di zone e numero di carroponti (`solve_auto_zones`, `solve_auto_hoists`), e la costruzione di un ciclogramma **senza risolvere** a partire dai suoi gradi di liberta' (`build_solution`, `estrai_gradi_di_liberta`) — quest'ultima e' cio' che rende possibile l'editor. |
 | `verify.py` | 1020 | Il **verificatore indipendente**: `verify_solution()` ricontrolla una soluzione in Python puro, senza CP-SAT, campionando le posizioni reali dei carroponti. Restituisce un `VerificationReport` con l'elenco delle `Violation` divise per gravita'. E' la rete di sicurezza contro gli errori nella formulazione del modello. |
 | `manuale.py` | 230 | Il ciclogramma nei termini in cui si modifica: il "pettine" dei pezzi (`pettine`, `catena_pezzo`), la composizione libera del ciclogramma (`componi`) e il controllo che i carroponti non si scavalchino sulla rotaia (`perche_non_va`). |
 
@@ -58,7 +58,7 @@ aprire una finestra, e la cinematica senza avere OR-Tools installato.
 
 | file | righe | contenuto |
 | --- | ---: | --- |
-| `excel_io.py` | 1164 | Tutto l'Excel: `scrivi_modello()` genera il file da compilare, `leggi_problema()` lo rilegge raccogliendo **tutti** gli errori di compilazione con foglio e cella, `scrivi_risultati()` produce il file dei risultati a quattro fogli. |
+| `excel_io.py` | 1178 | Tutto l'Excel: `scrivi_modello()` genera il file da compilare, `leggi_problema()` lo rilegge raccogliendo **tutti** gli errori di compilazione con foglio e cella, `scrivi_risultati()` produce il file dei risultati a quattro fogli. |
 | `plotting.py` | 175 | `plot_cyclogram()`: disegna il ciclogramma (posizione lungo la rotaia contro tempo) con il profilo cinematico vero, non con segmenti diritti. |
 
 ### Programmi da lanciare
@@ -67,7 +67,7 @@ aprire una finestra, e la cinematica senza avere OR-Tools installato.
 | --- | ---: | --- |
 | `interfaccia.py` | 1692 | L'**interfaccia grafica** (tkinter). La classe `Applicazione` e' tutta la finestra: caricamento, calcolo in background, grafico incorporato (due viste), la pagina unica in cui il ciclogramma si modifica -- calcolato o composto da zero che sia -- verifica e salvataggio. `autotest()` prova l'installazione da sola. E' il programma che usa un utente normale. |
 | `ciclogramma.py` | 170 | Lo stesso lavoro da **riga di comando**, per chi preferisce il terminale o vuole automatizzare. |
-| `esempio.py` | 195 | La linea di esempio definita **in codice** invece che in Excel, per chi vuole integrare il solutore in qualcos'altro. |
+| `esempio.py` | 198 | La linea di esempio definita **in codice** invece che in Excel, per chi vuole integrare il solutore in qualcos'altro. |
 | `costruisci_exe.py` | 119 | Costruisce l'**eseguibile autonomo** con PyInstaller. Vedi sotto. |
 | `ciclogrammi.spec` | — | La ricetta per PyInstaller: cosa includere, cosa escludere, come impacchettare. Non si lancia a mano, la usa `costruisci_exe.py`. |
 | `Ciclogrammi.bat` | — | Avvia l'interfaccia con un doppio clic, senza aprire il terminale. |
@@ -80,9 +80,9 @@ Non serve pytest.
 
 | file | righe | cosa verifica |
 | --- | ---: | --- |
-| `test_verify.py` | 839 | **Il verificatore.** Risponde a "chi verifica il verificatore?": venti casi, di cui uno solo corretto e tutti gli altri rotti di proposito (collisioni, permanenze fuori tolleranza, periodicita' incoerente, geometrie patologiche, capienze). Un controllore che non segnala mai nulla e' inutile, quindi ogni controllo ha un caso che DEVE farlo scattare. Non richiede OR-Tools: le soluzioni sono costruite a mano. |
-| `test_model.py` | 420 | **Il modello CP-SAT.** Risolve davvero e passa ogni soluzione al verificatore: vasche ravvicinate, tre carroponti, capienza, tempi verticali, e la fedelta' della ricostruzione di una soluzione dai suoi gradi di liberta'. Richiede OR-Tools. |
-| `test_excel_io.py` | 625 | **La lettura e la scrittura Excel.** Quasi tutti i casi sono file compilati male: valori mancanti o non numerici, vasche inesistenti o duplicate, righe riordinate, parametri sbagliati, o un file scritto per la vecchia versione in metri. Piu' la struttura del file dei risultati. Non richiede OR-Tools. |
+| `test_verify.py` | 847 | **Il verificatore.** Risponde a "chi verifica il verificatore?": venti casi, di cui uno solo corretto e tutti gli altri rotti di proposito (collisioni, permanenze fuori tolleranza, periodicita' incoerente, geometrie patologiche, capienze). Un controllore che non segnala mai nulla e' inutile, quindi ogni controllo ha un caso che DEVE farlo scattare. Non richiede OR-Tools: le soluzioni sono costruite a mano. |
+| `test_model.py` | 430 | **Il modello CP-SAT.** Risolve davvero e passa ogni soluzione al verificatore: vasche ravvicinate, tre carroponti, capienza, tempi verticali, e la fedelta' della ricostruzione di una soluzione dai suoi gradi di liberta'. Richiede OR-Tools. |
+| `test_excel_io.py` | 676 | **La lettura e la scrittura Excel.** Quasi tutti i casi sono file compilati male: valori mancanti o non numerici, vasche inesistenti o duplicate, righe riordinate, parametri sbagliati, o un file scritto per la vecchia versione in metri. Piu' la struttura del file dei risultati. Non richiede OR-Tools. |
 | `test_interfaccia.py` | 606 | **Le funzioni dell'interfaccia grafica.** La finestra viene costruita davvero e pilotata da codice — si "premono" i pulsanti chiamando i metodi e si fa girare il ciclo degli eventi con `update()` invece di `mainloop()`. Verifica che i pulsanti si abilitino al momento giusto, che il calcolo in background consegni il risultato, che una soluzione calcolata riletta come tempi in vasca e ricomposta dia esattamente lo stesso ciclogramma, che le modifiche vengano riverificate, che le due viste mostrino lo stesso oggetto, e che la composizione da zero produca il pettine giusto. Richiede OR-Tools e un ambiente grafico. |
 
 `kinematics.py` ha in fondo un autotest che si lancia allo stesso modo
@@ -396,9 +396,9 @@ fogli:
 | foglio | contenuto |
 | --- | --- |
 | `Istruzioni` | come compilare gli altri fogli |
-| `Vasche` | id, posizione lungo la rotaia **in millimetri**, numero di posti, corsa verticale, sgocciolamento |
+| `Vasche` | una riga per vasca: id, posizione lungo la rotaia **in millimetri**, numero di posti, corsa verticale, sgocciolamento. Corsa e sgocciolamento sono **obbligatori** (0 dove non servono) |
 | `Percorso` | sequenza di vasche attraversate, con le permanenze |
-| `Parametri` | takt time, cinematiche, ingombri, tempi verticali, opzioni |
+| `Parametri` | quello che vale per tutta la linea: takt time, cinematiche del carroponte, ingombri, tempi di aggancio/sgancio, opzioni di calcolo |
 | `Zone` | facoltativo: suddivisione manuale delle mosse fra i carroponti. **Lasciandolo vuoto** numero di carroponti e zone vengono scelti automaticamente |
 
 ### Uso da Python
@@ -471,9 +471,10 @@ attesa tutte le volte. La cartella si copia tale e quale e parte subito.
 
 ## Come modellare il tuo caso
 
-1. **Vasche** (`Tank`): id, posizione `[m]` lungo la rotaia, numero di posti
-   simultanei (`capacity`, default 1) e, facoltativi, corsa verticale
-   (`lift_height`) e sgocciolamento (`drain_time`) propri di quella vasca.
+1. **Vasche** (`Tank`): id, posizione `[mm]` lungo la rotaia, numero di posti
+   simultanei (`capacity`, default 1), corsa verticale (`lift_height`) e
+   sgocciolamento (`drain_time`). Le ultime due sono **obbligatorie e proprie
+   di ogni vasca**: dove non c'e' movimentazione verticale si scrive 0.
 2. **Percorso** (`route`, lista di `StationSpec`): sequenza di vasche che il
    pezzo attraversa, con tempo di permanenza `[min,max]` in secondi. La stessa
    vasca puo' comparire piu' volte.
@@ -497,9 +498,9 @@ attesa tutte le volte. La cartella si copia tale e quale e parte subito.
      dividere la linea.
 6. **Sicurezza**: `hoist_extent_pos`, `hoist_extent_neg` (ingombro del
    carrello, vedi sotto) e `safety_distance` (margine minimo aggiuntivo).
-7. **Movimentazione verticale**: `lift_height`, `kin_lift_empty`,
-   `kin_lift_loaded`, `engage_time`, `disengage_time`, `drain_time`
-   (vedi sotto).
+7. **Movimentazione verticale**: `kin_lift_empty`, `kin_lift_loaded`,
+   `engage_time`, `disengage_time` — grandezze del carroponte. Corsa e
+   sgocciolamento stanno sulla vasca (punto 1). Vedi sotto.
 
 ### Ingombro del carroponte
 
@@ -586,11 +587,17 @@ dichiarano**: si ricavano dalla corsa verticale e dalle cinematiche di
 sollevamento, con lo stesso profilo trapezoidale usato per il moto
 orizzontale.
 
-- `lift_height` — corsa fra quota di trasporto e quota di immersione;
+Del **carroponte** (uguali su tutta la linea, in `ProblemData`):
+
 - `kin_lift_empty`, `kin_lift_loaded` — velocita' e accelerazione massime di
   sollevamento, a gancio scarico e col telaio;
 - `engage_time` — aggancio del telaio, prima del sollevamento (tempo morto);
-- `disengage_time` — sgancio, dopo l'immersione (tempo morto);
+- `disengage_time` — sgancio, dopo l'immersione (tempo morto).
+
+Della **vasca** (una per vasca, in `Tank`):
+
+- `lift_height` — corsa fra quota di trasporto e quota di immersione: dipende
+  da quanto e' profonda;
 - `drain_time` — **sgocciolamento**: quanto il telaio resta sospeso sopra la
   vasca a lasciar scolare il bagno, dopo l'emersione.
 
@@ -608,20 +615,28 @@ Ne segue una cosa che vale la pena notare: **presa e rilascio percorrono le
 stesse due tratte** (una a vuoto e una a carico), solo in ordine invertito, e
 quindi differiscono unicamente per i tempi morti.
 
-Due grandezze si dichiarano **per vasca**, perche' non dipendono dal
-carroponte:
+#### Perche' corsa e sgocciolamento stanno sulla vasca
 
-- `Tank.lift_height` — le vasche piu' profonde hanno corse piu' lunghe;
-- `Tank.drain_time` — lo sgocciolamento dipende dalla chimica del bagno e dalla
-  geometria del pezzo: sulla zincatura e' lungo, su un risciacquo quasi nullo.
+Perche' sono della vasca, non del carroponte: la corsa dipende da quanto e'
+profonda, lo sgocciolamento dalla chimica del bagno e dalla geometria del pezzo
+— sulla zincatura e' lungo, su un risciacquo quasi nullo.
 
-Lasciandole vuote si usa il valore generale. Nell'esempio ZINCATURA ha corsa
-1100 mm contro 800 mm e sgocciolamento 8 s contro 2 s: la sua presa vale 17,09 s
-contro i 9,49 s delle altre vasche.
+**Vanno dichiarati per ognuna, e non esiste un valore generale da cui
+ereditare.** C'e' stato, ed era una trappola: un numero nei Parametri che si
+applicava a tutte le vasche lasciate in bianco. Chi dimenticava una riga non
+riceveva nessun segnale, e il calcolo usava un valore che nessuno aveva scelto
+per quella vasca. Adesso una cella vuota e' un errore con foglio e cella, e
+dove non serve niente si scrive **0** — che e' una dichiarazione, non una
+dimenticanza.
 
-Con `lift_height = 0` le cinematiche di sollevamento non servono e restano solo
-i tempi morti: e' la via da usare se si hanno tempi gia' misurati sul campo
-invece della meccanica.
+Si vede subito sull'esempio: carico e scarico non sono bagni, quindi hanno
+corsa 0 e scolo 0. Col vecchio valore generale prendevano 800 mm di corsa e 2 s
+di scolo che nessuno voleva, e il takt time ne pagava il conto — 131,88 s
+contro i 127,39 s di adesso.
+
+Con `lift_height = 0` su **tutte** le vasche le cinematiche di sollevamento non
+servono e restano solo i tempi morti: e' la via da usare se si hanno tempi gia'
+misurati sul campo invece della meccanica.
 
 Ogni mossa dura quindi `presa + traslazione + rilascio`. Lo spostamento **a
 vuoto non paga alcun tempo verticale**: dopo lo sgancio il gancio e' gia' in
@@ -952,7 +967,7 @@ Nessuna dipendenza da pytest. Stato attuale: **66, 59, 24 e 51 asserzioni,
 zero fallimenti**.
 
 **La risoluzione CP-SAT e' eseguita e verificata end-to-end.** Sull'esempio
-fornito il solver trova `T = 131,88 s` con 2 carroponti, separazione minima
+fornito il solver trova `T = 127,39 s` con 2 carroponti, separazione minima
 3500 mm contro 1800 mm richiesti, e il verificatore indipendente conferma la
 soluzione senza errori.
 

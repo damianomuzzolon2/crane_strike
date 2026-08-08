@@ -54,11 +54,21 @@ def linea(
     takt_max=40.0,
     dwell=(5, 400),
     capacity=20,
+    lift_height=0.0,
+    drain_time=0.0,
     **kw,
 ) -> ProblemData:
     n_st = n_moves + 1
+    # Corsa verticale e sgocciolamento sono di OGNI vasca e obbligatori: qui
+    # uguali per tutte, scritti e non sottintesi.
     tanks = {
-        f"V{i}": Tank(f"V{i}", i * spacing, 1 if i in (0, n_st - 1) else capacity)
+        f"V{i}": Tank(
+            f"V{i}",
+            i * spacing,
+            1 if i in (0, n_st - 1) else capacity,
+            lift_height=lift_height,
+            drain_time=drain_time,
+        )
         for i in range(n_st)
     }
     route = [StationSpec("V0", 0, 0)]
@@ -281,10 +291,10 @@ def test_vasca_ripetuta():
     def linea_lav(cap, dwell):
         return ProblemData(
             tanks={
-                "CAR": Tank("CAR", 0.0),
-                "LAV": Tank("LAV", 5.0, capacity=cap),
-                "SEC": Tank("SEC", 10.0),
-                "SCA": Tank("SCA", 15.0),
+                "CAR": Tank("CAR", 0, lift_height=0, drain_time=0),
+                "LAV": Tank("LAV", 5000, capacity=cap, lift_height=0, drain_time=0),
+                "SEC": Tank("SEC", 10000, lift_height=0, drain_time=0),
+                "SCA": Tank("SCA", 15000, lift_height=0, drain_time=0),
             },
             route=[
                 StationSpec("CAR", 0, 0),
