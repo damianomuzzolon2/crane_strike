@@ -65,7 +65,7 @@ aprire una finestra, e la cinematica senza avere OR-Tools installato.
 
 | file | righe | contenuto |
 | --- | ---: | --- |
-| `interfaccia.py` | 1692 | L'**interfaccia grafica** (tkinter). La classe `Applicazione` e' tutta la finestra: caricamento, calcolo in background, grafico incorporato (due viste), la pagina unica in cui il ciclogramma si modifica -- calcolato o composto da zero che sia -- verifica e salvataggio. `autotest()` prova l'installazione da sola. E' il programma che usa un utente normale. |
+| `interfaccia.py` | 1662 | L'**interfaccia grafica** (tkinter). La classe `Applicazione` e' tutta la finestra: caricamento, calcolo in background, grafico incorporato (due viste), la pagina unica in cui il ciclogramma si modifica -- calcolato o composto da zero che sia -- verifica e salvataggio. `autotest()` prova l'installazione da sola. E' il programma che usa un utente normale. |
 | `ciclogramma.py` | 170 | Lo stesso lavoro da **riga di comando**, per chi preferisce il terminale o vuole automatizzare. |
 | `esempio.py` | 198 | La linea di esempio definita **in codice** invece che in Excel, per chi vuole integrare il solutore in qualcos'altro. |
 | `costruisci_exe.py` | 119 | Costruisce l'**eseguibile autonomo** con PyInstaller. Vedi sotto. |
@@ -83,7 +83,7 @@ Non serve pytest.
 | `test_verify.py` | 847 | **Il verificatore.** Risponde a "chi verifica il verificatore?": venti casi, di cui uno solo corretto e tutti gli altri rotti di proposito (collisioni, permanenze fuori tolleranza, periodicita' incoerente, geometrie patologiche, capienze). Un controllore che non segnala mai nulla e' inutile, quindi ogni controllo ha un caso che DEVE farlo scattare. Non richiede OR-Tools: le soluzioni sono costruite a mano. |
 | `test_model.py` | 430 | **Il modello CP-SAT.** Risolve davvero e passa ogni soluzione al verificatore: vasche ravvicinate, tre carroponti, capienza, tempi verticali, e la fedelta' della ricostruzione di una soluzione dai suoi gradi di liberta'. Richiede OR-Tools. |
 | `test_excel_io.py` | 676 | **La lettura e la scrittura Excel.** Quasi tutti i casi sono file compilati male: valori mancanti o non numerici, vasche inesistenti o duplicate, righe riordinate, parametri sbagliati, o un file scritto per la vecchia versione in metri. Piu' la struttura del file dei risultati. Non richiede OR-Tools. |
-| `test_interfaccia.py` | 606 | **Le funzioni dell'interfaccia grafica.** La finestra viene costruita davvero e pilotata da codice — si "premono" i pulsanti chiamando i metodi e si fa girare il ciclo degli eventi con `update()` invece di `mainloop()`. Verifica che i pulsanti si abilitino al momento giusto, che il calcolo in background consegni il risultato, che una soluzione calcolata riletta come tempi in vasca e ricomposta dia esattamente lo stesso ciclogramma, che le modifiche vengano riverificate, che le due viste mostrino lo stesso oggetto, e che la composizione da zero produca il pettine giusto. Richiede OR-Tools e un ambiente grafico. |
+| `test_interfaccia.py` | 587 | **Le funzioni dell'interfaccia grafica.** La finestra viene costruita davvero e pilotata da codice — si "premono" i pulsanti chiamando i metodi e si fa girare il ciclo degli eventi con `update()` invece di `mainloop()`. Verifica che i pulsanti si abilitino al momento giusto, che il calcolo in background consegni il risultato, che una soluzione calcolata riletta come tempi in vasca e ricomposta dia esattamente lo stesso ciclogramma, che le modifiche vengano riverificate, che le due viste mostrino lo stesso oggetto, e che la composizione da zero produca il pettine giusto. Richiede OR-Tools e un ambiente grafico. |
 
 `kinematics.py` ha in fondo un autotest che si lancia allo stesso modo
 (`python kinematics.py`).
@@ -184,12 +184,15 @@ Quando la lente o la croce sono premute il clic serve a navigare: il
 trascinamento dei punti e l'assegnazione dei trasporti sono sospesi finche' non
 le rilasci.
 
-Mentre muovi il mouse sul grafico una **linea verticale grigia** segue il
-puntatore, e in basso si legge l'istante e la quota esatti
-(`t = 175.0 s   posizione = 10000 mm`). Serve a confrontare a occhio cosa
-succede nello stesso istante su carroponti diversi: senza un riferimento
-verticale, incolonnare due tratti distanti mezzo schermo e' un esercizio di
-fiducia.
+Mentre muovi il mouse sul grafico, **in basso si legge l'istante e la quota
+esatti** sotto al puntatore (`t = 175.0 s   posizione = 10000 mm`).
+
+(C'e' stata anche una linea verticale che seguiva il puntatore, ed e' stata
+tolta. Per restare fluida sul pettine -- centinaia di segmenti -- si appoggiava
+a una copia in cache dello sfondo; ogni volta che qualcos'altro ridisegnava il
+grafico quella copia restava vecchia e finiva a schermo, lasciando in giro
+pezzi di disegno precedente. Un riferimento che ogni tanto mente e' peggio di
+nessun riferimento.)
 
 **L'ingrandimento sopravvive alle modifiche.** Ritocchi un punto, cambi un tempo
 in vasca, assegni un trasporto: il grafico viene ridisegnato ma resta inquadrato

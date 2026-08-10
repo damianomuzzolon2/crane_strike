@@ -35,7 +35,6 @@ from tkinter import filedialog, messagebox, ttk
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
 from matplotlib.figure import Figure
 from matplotlib.lines import Line2D
-from matplotlib.widgets import Cursor
 
 from excel_io import leggi_problema, scrivi_modello, scrivi_risultati
 from model import solve, solve_auto_hoists, solve_auto_zones
@@ -159,7 +158,6 @@ class Applicazione(tk.Tk):
         # zoom: vero quando l'inquadratura l'ha scelta l'utente e va
         # conservata attraverso i ridisegni
         self._zoom_utente = False
-        self._cursore = None  # mirino verticale che segue il puntatore
 
         # Come guardare lo stesso ciclogramma: le traiettorie dei carroponti
         # su due cicli, oppure il pettine dei pezzi su cui si leggono i tempi
@@ -270,7 +268,6 @@ class Applicazione(tk.Tk):
         self.tela.mpl_connect("motion_notify_event", self._su_movimento)
         self.tela.mpl_connect("button_release_event", self._su_rilascio)
         self.tela.mpl_connect("scroll_event", self._su_rotella)
-        self._attiva_cursore()
 
         pannello = ttk.Frame(corpo, width=470)
         corpo.add(pannello, weight=1)
@@ -542,7 +539,7 @@ class Applicazione(tk.Tk):
         )
         self._svuota_tabella()
         self._grafico_vuoto("Nessun ciclogramma calcolato")
-        self._ridisegna()
+        self.tela.draw()
         self._stato("Linea caricata")
         self._aggiorna_stato_pulsanti()
 
@@ -669,7 +666,7 @@ class Applicazione(tk.Tk):
             self._aggiorna_stato_pulsanti()
             self._stato("Nessuna soluzione trovata")
             self._grafico_vuoto("Nessuna soluzione")
-            self._ridisegna()
+            self.tela.draw()
             self._scrivi_riepilogo(
                 f"Nessuna soluzione trovata (stato: {sol.status}).\n\n"
                 "Cosa provare:\n"
@@ -982,7 +979,7 @@ class Applicazione(tk.Tk):
     def _mostra_ciclogramma(self):
         if self.soluzione is None or self.dati is None:
             self._grafico_vuoto()
-            self._ridisegna()
+            self.tela.draw()
             return
         if self.vista == "pettine":
             self._disegna_pettine()
@@ -1009,7 +1006,7 @@ class Applicazione(tk.Tk):
             self._grafico_vuoto(f"Impossibile disegnare: {e}")
         self.figura.tight_layout()
         self._riapplica_vista(vista)
-        self._ridisegna()
+        self.tela.draw()
 
     def _disegna_pettine(self):
         d, T = self.config_linea.data, self.T_corrente
@@ -1106,7 +1103,7 @@ class Applicazione(tk.Tk):
         )
         self.figura.tight_layout()
         self._riapplica_vista(vista)
-        self._ridisegna()
+        self.tela.draw()
 
     def _mossa_del_segmento(self, s) -> int | None:
         """A quale mossa appartiene un tratto del pettine, dalle posizioni."""
@@ -1398,38 +1395,14 @@ class Applicazione(tk.Tk):
     # Zoom
     # ------------------------------------------------------------------
 
-    def _ridisegna(self):
-        """Manda a schermo il grafico e rimette il mirino.
-
-        Unico punto da cui passa un ridisegno completo: il mirino e' una linea
-        che sta DENTRO gli assi, e ogni ridisegno comincia con assi.clear(),
-        che se la porta via insieme al resto. Ricrearlo qui evita di doverselo
-        ricordare in ognuno dei posti che ridisegnano."""
-        self.tela.draw()
-        self._attiva_cursore()
-
-    def _attiva_cursore(self):
-        """(Ri)crea il mirino verticale che segue il puntatore.
-
-        `useblit` fa ridisegnare solo la linea invece di tutto il grafico: nel
-        pettine ci sono centinaia di segmenti, e senza blitting il mirino si
-        trascinerebbe dietro il mouse a scatti."""
-        if getattr(self, "tela", None) is None:
-            return  # chiamata durante la costruzione della finestra
-        if self._cursore is not None:
-            self._cursore.disconnect_events()
-        self._cursore = Cursor(
-            self.assi,
-            useblit=True,
-            horizOn=False,
-            vertOn=True,
-            # grigio, non arancione: l'arancione e' gia' la guida che compare
-            # mentre si trascina un punto, e due linee dello stesso colore
-            # con significato diverso si confondono proprio nel momento in cui
-            # servono entrambe
-            color="#666666",
-            linewidth=0.8,
-        )
+    # C'e' stato un mirino verticale che seguiva il puntatore. E' stato
+    # tolto: per essere fluido sul pettine (centinaia di segmenti) usava il
+    # blitting, cioe' una copia in cache dello sfondo da ridipingere sotto la
+    # linea. Ogni volta che qualcos'altro ridisegnava la tela -- un
+    # trascinamento, il pan della barra, il cambio di vista -- la cache
+    # restava vecchia e finiva a schermo, lasciando pezzi di grafico
+    # precedente sparsi in giro. La posizione del puntatore si legge comunque,
+    # in basso sotto il grafico (vedi plotting.lettura_coordinate).
 
     def _segna_zoom(self):
         """L'utente ha scelto lui l'inquadratura: da qui in poi va rispettata."""
@@ -1530,9 +1503,6 @@ class Applicazione(tk.Tk):
         # traceback ("main thread is not in main loop"): innocuo, ma appare a
         # ogni chiusura e sembra un guasto. Si lasciano andare finche' Tk e'
         # ancora in piedi.
-        if self._cursore is not None:
-            self._cursore.disconnect_events()
-            self._cursore = None
         barra = getattr(self, "barra_grafico", None)
         if barra is not None:
             for pulsante in getattr(barra, "_buttons", {}).values():
