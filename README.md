@@ -65,7 +65,7 @@ aprire una finestra, e la cinematica senza avere OR-Tools installato.
 
 | file | righe | contenuto |
 | --- | ---: | --- |
-| `interfaccia.py` | 1712 | L'**interfaccia grafica** (tkinter). La classe `Applicazione` e' tutta la finestra: caricamento, calcolo in background, grafico incorporato (due viste), la pagina unica in cui il ciclogramma si modifica -- calcolato o composto da zero che sia -- verifica e salvataggio. `autotest()` prova l'installazione da sola. E' il programma che usa un utente normale. |
+| `interfaccia.py` | 1738 | L'**interfaccia grafica** (tkinter). La classe `Applicazione` e' tutta la finestra: caricamento, calcolo in background, grafico incorporato (due viste), la pagina unica in cui il ciclogramma si modifica -- calcolato o composto da zero che sia -- verifica e salvataggio. `autotest()` prova l'installazione da sola. E' il programma che usa un utente normale. |
 | `ciclogramma.py` | 170 | Lo stesso lavoro da **riga di comando**, per chi preferisce il terminale o vuole automatizzare. |
 | `esempio.py` | 198 | La linea di esempio definita **in codice** invece che in Excel, per chi vuole integrare il solutore in qualcos'altro. |
 | `costruisci_exe.py` | 119 | Costruisce l'**eseguibile autonomo** con PyInstaller. Vedi sotto. |
@@ -83,7 +83,7 @@ Non serve pytest.
 | `test_verify.py` | 847 | **Il verificatore.** Risponde a "chi verifica il verificatore?": venti casi, di cui uno solo corretto e tutti gli altri rotti di proposito (collisioni, permanenze fuori tolleranza, periodicita' incoerente, geometrie patologiche, capienze). Un controllore che non segnala mai nulla e' inutile, quindi ogni controllo ha un caso che DEVE farlo scattare. Non richiede OR-Tools: le soluzioni sono costruite a mano. |
 | `test_model.py` | 430 | **Il modello CP-SAT.** Risolve davvero e passa ogni soluzione al verificatore: vasche ravvicinate, tre carroponti, capienza, tempi verticali, e la fedelta' della ricostruzione di una soluzione dai suoi gradi di liberta'. Richiede OR-Tools. |
 | `test_excel_io.py` | 676 | **La lettura e la scrittura Excel.** Quasi tutti i casi sono file compilati male: valori mancanti o non numerici, vasche inesistenti o duplicate, righe riordinate, parametri sbagliati, o un file scritto per la vecchia versione in metri. Piu' la struttura del file dei risultati. Non richiede OR-Tools. |
-| `test_interfaccia.py` | 637 | **Le funzioni dell'interfaccia grafica.** La finestra viene costruita davvero e pilotata da codice — si "premono" i pulsanti chiamando i metodi e si fa girare il ciclo degli eventi con `update()` invece di `mainloop()`. Verifica che i pulsanti si abilitino al momento giusto, che il calcolo in background consegni il risultato, che una soluzione calcolata riletta come tempi in vasca e ricomposta dia esattamente lo stesso ciclogramma, che le modifiche vengano riverificate, che le due viste mostrino lo stesso oggetto, e che la composizione da zero produca il pettine giusto. Richiede OR-Tools e un ambiente grafico. |
+| `test_interfaccia.py` | 655 | **Le funzioni dell'interfaccia grafica.** La finestra viene costruita davvero e pilotata da codice — si "premono" i pulsanti chiamando i metodi e si fa girare il ciclo degli eventi con `update()` invece di `mainloop()`. Verifica che i pulsanti si abilitino al momento giusto, che il calcolo in background consegni il risultato, che una soluzione calcolata riletta come tempi in vasca e ricomposta dia esattamente lo stesso ciclogramma, che le modifiche vengano riverificate, che le due viste mostrino lo stesso oggetto, e che la composizione da zero produca il pettine giusto. Richiede OR-Tools e un ambiente grafico. |
 
 `kinematics.py` ha in fondo un autotest che si lancia allo stesso modo
 (`python kinematics.py`).
@@ -115,7 +115,7 @@ programma.
    compilato con una linea di esempio.
 2. Compili il file (vedi *Come modellare il tuo caso*, piu' sotto).
 3. `Apri linea...` — lo carichi.
-4. `Calcola automaticamente` oppure `Componi da zero`.
+4. `Calcola auto` oppure `Calcola man`.
 5. Guardi il verdetto, eventualmente ritocchi.
 6. `Salva risultati...` — esce l'Excel dei risultati e l'immagine.
 
@@ -125,8 +125,9 @@ programma.
 | --- | --- |
 | `Apri linea...` | Carica un file Excel con la definizione della linea. Se il file e' compilato male non succede nulla di brutto: compare una finestra con **tutti** gli errori trovati, con foglio e cella. |
 | `Nuovo modello Excel...` | Crea il file da compilare, gia' pieno con una linea di zincatura d'esempio, e chiede se aprirlo subito. E' il modo consigliato di cominciare: si parte da qualcosa che funziona e lo si modifica. |
-| `Calcola automaticamente` | Cerca il numero minimo di carroponti, la suddivisione migliore della linea e il takt time piu' basso. Puo' durare da qualche secondo a qualche minuto: la barra in basso a destra si muove e i pulsanti restano disabilitati finche' non ha finito. La finestra **non si blocca**. |
-| `Componi da zero` | Butta via il ciclogramma corrente e riparte dai tempi minimi di processo, per comporlo a mano (vedi sotto). |
+| `Calcola auto` | Cerca il numero minimo di carroponti, la suddivisione migliore della linea e il takt time piu' basso. Puo' durare da qualche secondo a qualche minuto: la barra in basso a destra si muove e i pulsanti restano disabilitati finche' non ha finito. La finestra **non si blocca**. |
+| `Calcola man` | Butta via il ciclogramma corrente e riparte dai tempi minimi di processo, con **nessun trasporto assegnato**, per comporlo a mano (vedi sotto). |
+| `Modifica` | Porta a lavorare sul ciclogramma che c'e'. Non cambia niente: apre la scheda dove si modifica. |
 | `Salva risultati...` | Scrive l'Excel dei risultati e, accanto, l'immagine del ciclogramma. Si abilita solo quando c'e' qualcosa da salvare. |
 
 A destra nella stessa barra c'e' il **percorso completo** del file caricato —
@@ -276,6 +277,22 @@ solutore e **butta via le modifiche fatte a mano**.
 impossibile viene composta e disegnata: e' il verificatore a dire cosa non va,
 non un blocco che ti impedisce di provare.
 
+#### `Modifica`: cosa modifica
+
+Quello che c'e'. **Non sceglie fra una versione automatica e una manuale**,
+perche' non ce ne sono due: da quando la pagina e' una sola, il ciclogramma
+calcolato e quello composto a mano sono lo stesso oggetto con gli stessi tre
+gradi di liberta'. Da dove sia partito lo dice il *Riepilogo*, alla voce
+`Origine`.
+
+Per la stessa ragione la regola per abilitarlo e' una sola: **e' acceso quando
+un ciclogramma c'e'**, spento appena aperta la linea. Un pulsante che dovesse
+scegliere la sorgente obbligherebbe a tenerne due vivi insieme, che e'
+esattamente la duplicazione tolta unificando le schede.
+
+Serve perche' dopo un calcolo si resta sul *Riepilogo*, e che il risultato sia
+modificabile non si vede.
+
 #### Quando parte la verifica
 
 - Se il ciclogramma arriva dal **calcolo automatico**, la verifica c'e' gia' e
@@ -312,7 +329,7 @@ prendersi quella mossa.
 
 ### Comporre da zero
 
-`Componi da zero` butta via tutto, passa alla vista **pettine** e riparte dai
+`Calcola man` butta via tutto, passa alla vista **pettine** e riparte dai
 **tempi minimi di processo**, col takt time piu' basso ammesso e — soprattutto
 — **nessun trasporto assegnato a nessuno**.
 
@@ -344,7 +361,7 @@ A parte il punto di partenza, i comandi sono quelli di sopra: sono gli stessi.
 Capita, ed e' un'informazione: vuol dire che con i dati dati la linea non sta in
 piedi. Il riepilogo elenca cosa provare — allargare la tolleranza sul takt time,
 aumentare il numero massimo di carroponti, aggiungere posti alle vasche piu'
-lente, allungare il tempo limite di calcolo. In alternativa `Componi da zero`, e
+lente, allungare il tempo limite di calcolo. In alternativa `Calcola man`, e
 si guarda dove il conto non torna: li' non c'e' niente da trovare, si vede.
 
 ## Cosa produce

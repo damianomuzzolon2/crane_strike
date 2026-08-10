@@ -110,12 +110,30 @@ def test_apertura_e_proposta(percorso_linea):
             and str(app.btn_salva["state"]) == "disabled",
             "ora si puo' calcolare, ma non ancora salvare",
         )
+        # "Modifica" non sceglie fra una versione automatica e una manuale:
+        # lavora su quella che c'e'. Quindi resta spento finche' non ce n'e'
+        # nessuna -- e' l'unica regola che serve.
+        check(
+            str(app.btn_modifica["state"]) == "disabled",
+            "e 'Modifica' e' spento: non c'e' ancora niente da modificare",
+        )
 
         app._componi_da_zero()
         app.update()
         check(
             app.soluzione is not None and app.report is None,
-            "'Componi da zero' da' subito un ciclogramma, senza verifica",
+            "'Calcola man' da' subito un ciclogramma, senza verifica",
+        )
+        check(
+            str(app.btn_modifica["state"]) == "normal",
+            "adesso 'Modifica' si accende",
+        )
+        app.schede.select(0)
+        app._vai_a_modifica()
+        app.update()
+        check(
+            app.schede.index(app.schede.select()) == 1,
+            "e porta alla scheda dove si modifica",
         )
     finally:
         chiudi(app)

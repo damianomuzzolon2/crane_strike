@@ -193,19 +193,24 @@ class Applicazione(tk.Tk):
             side=tk.LEFT, fill=tk.Y, padx=12
         )
 
+        # I tre modi di arrivare a un ciclogramma: fallo fare al solutore,
+        # componilo tu, oppure lavora su quello che c'e'. Il terzo non e' un
+        # quarto stato del programma: di ciclogramma ne esiste sempre e solo
+        # uno, e "Modifica" porta li' -- non sceglie fra una versione
+        # automatica e una manuale, che dopo l'unificazione della pagina sono
+        # lo stesso oggetto con gli stessi gradi di liberta'.
         self.btn_auto = ttk.Button(
-            barra, text="Calcola automaticamente", command=self._calcola_automatico
+            barra, text="Calcola auto", command=self._calcola_automatico
         )
         self.btn_auto.pack(side=tk.LEFT)
         self.btn_proposta = ttk.Button(
-            barra,
-            # Non "disegna a mano": ora si modifica a mano anche il calcolato,
-            # dalla stessa pagina. Quello che questo pulsante fa di diverso e'
-            # buttare via tutto e ripartire dai tempi minimi di processo.
-            text="Componi da zero",
-            command=self._componi_da_zero,
+            barra, text="Calcola man", command=self._componi_da_zero
         )
         self.btn_proposta.pack(side=tk.LEFT, padx=(6, 0))
+        self.btn_modifica = ttk.Button(
+            barra, text="Modifica", command=self._vai_a_modifica
+        )
+        self.btn_modifica.pack(side=tk.LEFT, padx=(6, 0))
 
         ttk.Separator(barra, orient=tk.VERTICAL).pack(
             side=tk.LEFT, fill=tk.Y, padx=12
@@ -679,7 +684,7 @@ class Applicazione(tk.Tk):
                 "    Con vasche vicine puo' bastare questo. Non e' un margine\n"
                 "    di sicurezza: quello resta intero\n"
                 "  - allungare il tempo limite di calcolo\n\n"
-                "Oppure premi 'Componi da zero' e aggiustalo a mano: "
+                "Oppure premi 'Calcola man' e componilo a mano: "
                 "il verificatore dira' esattamente cosa manca."
             )
             self._svuota_tabella()
@@ -739,6 +744,21 @@ class Applicazione(tk.Tk):
         self.carroponte_attivo = 0
         self._annulla.clear()
         return True
+
+    def _vai_a_modifica(self):
+        """Porta a lavorare sul ciclogramma che c'e'.
+
+        Non cambia niente e non sceglie niente: apre la scheda dove si
+        modifica e dice cosa si puo' fare. Serve perche' dopo un calcolo si
+        resta sul Riepilogo, e che il ciclogramma sia modificabile non si
+        vede."""
+        if self.soluzione is None:
+            return
+        self.schede.select(1)
+        self._stato(
+            "Modifica: trascina un prelievo sul grafico, cambia un tempo in "
+            "vasca, oppure clicca un trasporto per assegnarlo"
+        )
 
     def _componi_da_zero(self):
         """Butta via tutto e riparte dai tempi minimi di processo."""
@@ -1429,8 +1449,14 @@ class Applicazione(tk.Tk):
         stato = tk.NORMAL if c_e_linea else tk.DISABLED
         self.btn_auto.configure(state=stato)
         self.btn_proposta.configure(state=stato)
+        # "Modifica" si abilita quando c'e' qualcosa da modificare, e basta:
+        # non ha una sorgente da scegliere, perche' il ciclogramma corrente e'
+        # uno solo (da dove venga lo dice il Riepilogo).
         c_e_ciclogramma = self.soluzione is not None and not self._lavoro_in_corso
         self.btn_salva.configure(
+            state=tk.NORMAL if c_e_ciclogramma else tk.DISABLED
+        )
+        self.btn_modifica.configure(
             state=tk.NORMAL if c_e_ciclogramma else tk.DISABLED
         )
         self.btn_verifica.configure(
