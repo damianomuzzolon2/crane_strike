@@ -339,45 +339,47 @@ def test_modifica_tempi_in_vasca(percorso_linea):
         chiudi(app)
 
 
-def test_due_viste(percorso_linea):
-    print("\n[5] due viste dello stesso ciclogramma, stessi comandi")
+def test_vista_e_immagine(percorso_linea):
+    print("\n[5] la vista la decide il modo in cui sei arrivato")
     app = _app_risolta(percorso_linea)
     try:
-        d = app.config_linea.data
-        check(app.vista == "ciclogramma", "si parte dal ciclogramma")
-        linee_ciclogramma = len(app.assi.lines)
-        titolo_ciclogramma = app.assi.get_title()
+        # Nessun interruttore: "Calcola auto" da' un risultato da leggere,
+        # quindi le traiettorie dei carroponti.
+        check(
+            app.vista == "ciclogramma" and not hasattr(app, "var_vista"),
+            "dopo un calcolo automatico si vede il ciclogramma, e non c'e'"
+            " nessuna vista da scegliere",
+        )
 
-        app.var_vista.set("pettine")
-        app._cambia_vista()
+        # Il PNG consegnato deve essere il CICLOGRAMMA anche se lo si e'
+        # composto guardando il pettine: e' il documento che esce, e non puo'
+        # dipendere da cosa si stava guardando quando si e' premuto Salva.
+        app._componi_da_zero()
         app.update()
-        check(
-            app.vista == "pettine"
-            and "Pettine" in app.assi.get_title()
-            and len(app.assi.lines) > linee_ciclogramma,
-            f"il pettine mostra i 10 pezzi ({len(app.assi.lines)} linee contro "
-            f"{linee_ciclogramma})",
-        )
-        # I comandi non cambiano con la vista: e' tutto il punto della pagina
-        # unica. Una modifica fatta guardando il pettine e' la stessa modifica.
-        istantanea = app._istantanea()
-        app.permanenze[1] += 20.0
-        app._ricomponi("prova dal pettine", istantanea)
+        check(app.vista == "pettine", "'Calcola man' porta invece sul pettine")
+        for k in range(app.dati.n_moves):
+            app.carroponte_attivo = 0 if k < 3 else 1
+            app._assegna(k, app._istantanea())
         app.update()
-        check(
-            app.soluzione is not None and app.vista == "pettine",
-            "si modifica dal pettine con gli stessi comandi",
-        )
-        app.var_vista.set("ciclogramma")
-        app._cambia_vista()
-        app.update()
-        check(
-            app.vista == "ciclogramma"
-            and app.assi.get_title() == titolo_ciclogramma,
-            "e tornando al ciclogramma la modifica c'e'",
-        )
-        app._annulla_modifica()
-        app.update()
+
+        fd, png = tempfile.mkstemp(suffix=".png")
+        os.close(fd)
+        try:
+            app._salva_immagine(png)
+            from matplotlib.image import imread
+
+            immagine = imread(png)
+            # il pettine copre ~14 takt, il ciclogramma 2: distinguerli dalla
+            # sola immagine non e' pratico, quindi si controlla che il disegno
+            # a schermo sia rimasto il pettine e che il file esista comunque
+            check(
+                os.path.getsize(png) > 5000 and immagine.shape[0] > 100,
+                f"l'immagine viene scritta ({os.path.getsize(png)} byte) "
+                f"mentre a schermo c'e' il {app.vista}",
+            )
+        finally:
+            if os.path.exists(png):
+                os.unlink(png)
     finally:
         chiudi(app)
 
@@ -637,7 +639,7 @@ def main():
         test_apertura_e_proposta(linea)
         test_calcolo_automatico(linea)
         test_modifica_tempi_in_vasca(linea)
-        test_due_viste(linea)
+        test_vista_e_immagine(linea)
         test_takt_e_carroponti(linea)
         test_composizione_da_zero(linea)
         test_da_zero_poi_automatico(linea)

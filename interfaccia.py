@@ -159,9 +159,14 @@ class Applicazione(tk.Tk):
         # conservata attraverso i ridisegni
         self._zoom_utente = False
 
-        # Come guardare lo stesso ciclogramma: le traiettorie dei carroponti
-        # su due cicli, oppure il pettine dei pezzi su cui si leggono i tempi
-        # in vasca. Cambia il disegno, non i comandi.
+        # Quale disegno e' a schermo. NON e' una scelta dell'utente: la decide
+        # il modo in cui e' arrivato. "Calcola auto" da' un ciclogramma da
+        # leggere, quindi le traiettorie dei carroponti; "Calcola man" da' un
+        # foglio bianco da riempire, quindi il pettine dei pezzi su cui si
+        # clicca. Un interruttore fra i due c'e' stato ed e' stato tolto: le
+        # tabelle della scheda Ciclogramma permettono di modificare tutto
+        # senza cambiare disegno, quindi restava un comando che chiedeva una
+        # decisione senza darne il motivo.
         self.vista = "ciclogramma"  # oppure "pettine"
         # La verifica, una volta chiesta, si tiene aggiornata da sola. Non
         # parte da sola: comporre da zero vuol dire passare per stati
@@ -236,27 +241,6 @@ class Applicazione(tk.Tk):
 
         cornice_grafico = ttk.Frame(corpo)
         corpo.add(cornice_grafico, weight=3)
-
-        # -- come guardare il ciclogramma -----------------------------------
-        # Due disegni dello stesso oggetto: le traiettorie dei carroponti su
-        # due cicli, oppure il pettine dei pezzi. Il primo dice se il piano
-        # regge, il secondo dice da dove vengono i tempi -- le pedate delle
-        # scalinate SONO i tempi in vasca. I comandi restano gli stessi.
-        scelta_vista = ttk.Frame(cornice_grafico)
-        scelta_vista.pack(side=tk.TOP, fill=tk.X, pady=(0, 4))
-        ttk.Label(scelta_vista, text="Vista:").pack(side=tk.LEFT)
-        self.var_vista = tk.StringVar(value="ciclogramma")
-        for valore, etichetta in (
-            ("ciclogramma", "ciclogramma (carroponti, 2 cicli)"),
-            ("pettine", "pettine (pezzi, tempi in vasca)"),
-        ):
-            ttk.Radiobutton(
-                scelta_vista,
-                text=etichetta,
-                value=valore,
-                variable=self.var_vista,
-                command=self._cambia_vista,
-            ).pack(side=tk.LEFT, padx=(8, 0))
 
         self.figura = Figure(figsize=(9, 6), dpi=100)
         self.assi = self.figura.add_subplot(111)
@@ -620,7 +604,7 @@ class Applicazione(tk.Tk):
                 sorgente=self.percorso_file,
             )
             png = os.path.splitext(percorso)[0] + ".png"
-            self.figura.savefig(png, dpi=150, bbox_inches="tight")
+            self._salva_immagine(png)
         except Exception as e:
             self._errore("Impossibile salvare", str(e))
             return
@@ -629,6 +613,31 @@ class Applicazione(tk.Tk):
             TITOLO,
             f"Salvati:\n{percorso}\n{png}",
         )
+
+    def _salva_immagine(self, percorso_png: str):
+        """Scrive il PNG del CICLOGRAMMA, non di quello che c'e' a schermo.
+
+        Il ciclogramma e' il documento che si consegna, e va consegnato anche
+        se lo si e' composto guardando il pettine. Si disegna quindi su una
+        figura a parte: fotografare la finestra legherebbe il risultato a cosa
+        si stava guardando quando si e' premuto Salva."""
+        figura = Figure(figsize=(13, 7), dpi=100)
+        assi = figura.add_subplot(111)
+        try:
+            plot_cyclogram(
+                self.dati,
+                self.soluzione,
+                n_cycles=2,
+                title=f"Ciclogramma - {os.path.basename(self.percorso_file or '')}",
+                ax=assi,
+            )
+        except ValueError:
+            # niente da disegnare (per esempio nessun trasporto assegnato):
+            # meglio l'immagine di quello che si vede che nessuna immagine
+            self.figura.savefig(percorso_png, dpi=150, bbox_inches="tight")
+            return
+        figura.tight_layout()
+        figura.savefig(percorso_png, dpi=150)
 
     # ------------------------------------------------------------------
     # Lavoro in background (il calcolo puo' durare parecchio)
@@ -787,7 +796,6 @@ class Applicazione(tk.Tk):
         # clic. Il ciclogramma disegna le traiettorie dei carroponti, e senza
         # nessuna mossa assegnata sarebbe un riquadro vuoto.
         self.vista = "pettine"
-        self.var_vista.set("pettine")
         self.schede.select(1)
         self._ricomponi(
             "Composizione da zero: fai clic sui trasporti per assegnarli"
@@ -1003,16 +1011,6 @@ class Applicazione(tk.Tk):
         )
 
     # -- presentazione --------------------------------------------------
-
-    def _cambia_vista(self):
-        nuova = self.var_vista.get()
-        if nuova == self.vista:
-            return
-        self.vista = nuova
-        # I due disegni hanno scale dei tempi diverse (2 cicli contro 14):
-        # un'inquadratura scelta sull'uno non vuol dire niente sull'altro.
-        self._reimposta_grafico()
-        self._mostra_ciclogramma()
 
     def _mostra_ciclogramma(self):
         if self.soluzione is None or self.dati is None:

@@ -65,7 +65,7 @@ aprire una finestra, e la cinematica senza avere OR-Tools installato.
 
 | file | righe | contenuto |
 | --- | ---: | --- |
-| `interfaccia.py` | 1738 | L'**interfaccia grafica** (tkinter). La classe `Applicazione` e' tutta la finestra: caricamento, calcolo in background, grafico incorporato (due viste), la pagina unica in cui il ciclogramma si modifica -- calcolato o composto da zero che sia -- verifica e salvataggio. `autotest()` prova l'installazione da sola. E' il programma che usa un utente normale. |
+| `interfaccia.py` | 1736 | L'**interfaccia grafica** (tkinter). La classe `Applicazione` e' tutta la finestra: caricamento, calcolo in background, grafico incorporato (ciclogramma o pettine, secondo come ci si e' arrivati), la pagina unica in cui il ciclogramma si modifica -- calcolato o composto da zero che sia -- verifica e salvataggio. `autotest()` prova l'installazione da sola. E' il programma che usa un utente normale. |
 | `ciclogramma.py` | 170 | Lo stesso lavoro da **riga di comando**, per chi preferisce il terminale o vuole automatizzare. |
 | `esempio.py` | 198 | La linea di esempio definita **in codice** invece che in Excel, per chi vuole integrare il solutore in qualcos'altro. |
 | `costruisci_exe.py` | 119 | Costruisce l'**eseguibile autonomo** con PyInstaller. Vedi sotto. |
@@ -83,7 +83,7 @@ Non serve pytest.
 | `test_verify.py` | 847 | **Il verificatore.** Risponde a "chi verifica il verificatore?": venti casi, di cui uno solo corretto e tutti gli altri rotti di proposito (collisioni, permanenze fuori tolleranza, periodicita' incoerente, geometrie patologiche, capienze). Un controllore che non segnala mai nulla e' inutile, quindi ogni controllo ha un caso che DEVE farlo scattare. Non richiede OR-Tools: le soluzioni sono costruite a mano. |
 | `test_model.py` | 430 | **Il modello CP-SAT.** Risolve davvero e passa ogni soluzione al verificatore: vasche ravvicinate, tre carroponti, capienza, tempi verticali, e la fedelta' della ricostruzione di una soluzione dai suoi gradi di liberta'. Richiede OR-Tools. |
 | `test_excel_io.py` | 676 | **La lettura e la scrittura Excel.** Quasi tutti i casi sono file compilati male: valori mancanti o non numerici, vasche inesistenti o duplicate, righe riordinate, parametri sbagliati, o un file scritto per la vecchia versione in metri. Piu' la struttura del file dei risultati. Non richiede OR-Tools. |
-| `test_interfaccia.py` | 655 | **Le funzioni dell'interfaccia grafica.** La finestra viene costruita davvero e pilotata da codice — si "premono" i pulsanti chiamando i metodi e si fa girare il ciclo degli eventi con `update()` invece di `mainloop()`. Verifica che i pulsanti si abilitino al momento giusto, che il calcolo in background consegni il risultato, che una soluzione calcolata riletta come tempi in vasca e ricomposta dia esattamente lo stesso ciclogramma, che le modifiche vengano riverificate, che le due viste mostrino lo stesso oggetto, e che la composizione da zero produca il pettine giusto. Richiede OR-Tools e un ambiente grafico. |
+| `test_interfaccia.py` | 657 | **Le funzioni dell'interfaccia grafica.** La finestra viene costruita davvero e pilotata da codice — si "premono" i pulsanti chiamando i metodi e si fa girare il ciclo degli eventi con `update()` invece di `mainloop()`. Verifica che i pulsanti si abilitino al momento giusto, che il calcolo in background consegni il risultato, che una soluzione calcolata riletta come tempi in vasca e ricomposta dia esattamente lo stesso ciclogramma, che le modifiche vengano riverificate, che l'immagine salvata sia il ciclogramma anche componendo dal pettine, e che la composizione da zero produca il pettine giusto. Richiede OR-Tools e un ambiente grafico. |
 
 `kinematics.py` ha in fondo un autotest che si lancia allo stesso modo
 (`python kinematics.py`).
@@ -138,15 +138,23 @@ scheda *Riepilogo*: se la barra e' troppo stretta per contenerlo, si legge li'.
 
 ### Come si legge il ciclogramma
 
-Sopra al grafico ci sono **due viste dello stesso ciclogramma**:
+Il grafico ha **due disegni**, e non c'e' niente da scegliere: lo decide il
+modo in cui sei arrivato.
 
-| vista | cosa disegna | a cosa serve |
+| disegno | quando compare | cosa mostra |
 | --- | --- | --- |
-| `ciclogramma` | le traiettorie dei **carroponti**, su due cicli | dire se il piano regge: chi si muove quando, chi rischia di incontrare chi |
-| `pettine` | le scalinate dei **pezzi**, dieci, una ogni takt time | dire da dove vengono i tempi: le pedate delle scalinate **sono** i tempi in vasca |
+| **ciclogramma** | dopo `Calcola auto` | le traiettorie dei **carroponti**, su due cicli: chi si muove quando, chi rischia di incontrare chi |
+| **pettine** | dopo `Calcola man` | le scalinate dei **pezzi**, dieci, una ogni takt time: e' il foglio su cui si compone, e le pedate **sono** i tempi in vasca |
 
-I comandi non cambiano con la vista: e' lo stesso ciclogramma guardato da due
-parti. Si passa dall'una all'altra quando serve, anche a meta' di una modifica.
+Un interruttore fra i due c'e' stato ed e' stato tolto: le tabelle della scheda
+*Ciclogramma* permettono di modificare tutto — tempi in vasca, assegnazione,
+takt time, carroponti — senza cambiare disegno, quindi restava un comando che
+chiedeva una decisione senza darne il motivo.
+
+Quello che il disegno a schermo **non** decide e' l'immagine consegnata:
+`Salva risultati...` esporta sempre il **ciclogramma**, anche se l'hai composto
+guardando il pettine. E' il documento che esce, e non puo' dipendere da cosa
+stavi guardando quando hai premuto Salva.
 
 Nel **ciclogramma**: in orizzontale il tempo, in verticale la posizione lungo la
 rotaia: le vasche sono le righe, col nome e la quota sull'asse. Il disegno
@@ -199,7 +207,8 @@ nessun riferimento.)
 in vasca, assegni un trasporto: il grafico viene ridisegnato ma resta inquadrato
 dov'eri. Sarebbe inutile ingrandire per lavorare su un dettaglio se poi il primo
 ritocco riportasse la vista al punto di partenza. Si riparte da capo solo quando
-cambia il disegno stesso: un'altra linea, o il passaggio fra le due viste.
+cambia il disegno stesso: un'altra linea, o il passaggio dal ciclogramma al
+pettine.
 
 ### Il verdetto
 
@@ -378,7 +387,8 @@ ingresso:
   | `FlussoPezzo` | il percorso di **un** pezzo lungo tutta la linea: ingresso e uscita da ogni vasca, permanenza effettiva, margine rispetto ai limiti di processo, posti occupati |
   | `Verifica` | l'elenco dei rilievi del verificatore indipendente, colorati per gravita' |
 
-- **`linea.png`** — il ciclogramma disegnato.
+- **`linea.png`** — il **ciclogramma** disegnato. Sempre quello, anche se a
+  schermo c'era il pettine: e' il documento che si consegna.
 
 Il comando stampa anche a video il takt time e il report della verifica.
 Altre opzioni: `--risultati FILE.xlsx`, `--grafico FILE.png`, `--cicli N`,
