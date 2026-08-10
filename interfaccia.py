@@ -749,7 +749,12 @@ class Applicazione(tk.Tk):
         self.T_corrente = d.takt_min
         self.permanenze = manuale.permanenze_iniziali(d)
         self.n_carroponti = min(2, d.n_moves)
-        self.assegnazione = manuale.assegnazione_iniziale(d, self.n_carroponti)
+        # NIENTE assegnato: il pettine parte tutto grigio ed e' l'utente a
+        # darlo ai carroponti una mossa per volta, che e' il modo in cui un
+        # ciclogramma si traccia. Partire da una suddivisione gia' fatta
+        # significava non avere mai niente "da assegnare" -- si restava a
+        # correggere una proposta invece di comporre.
+        self.assegnazione = {}
         self.carroponte_attivo = 0
         self.origine = "composto da zero"
         self.modificato = False
@@ -758,8 +763,15 @@ class Applicazione(tk.Tk):
         self.verifica_viva = False
         self.report = None
         self._annulla.clear()
+        # Si compone sul PETTINE: e' li' che stanno i trasporti su cui si fa
+        # clic. Il ciclogramma disegna le traiettorie dei carroponti, e senza
+        # nessuna mossa assegnata sarebbe un riquadro vuoto.
+        self.vista = "pettine"
+        self.var_vista.set("pettine")
         self.schede.select(1)
-        self._ricomponi("Composizione da zero: assegna i trasporti")
+        self._ricomponi(
+            "Composizione da zero: fai clic sui trasporti per assegnarli"
+        )
 
     def _ricomponi(self, descrizione: str = "", prima=None):
         """Ricostruisce il ciclogramma dallo stato e rimette tutto a schermo.
@@ -842,11 +854,14 @@ class Applicazione(tk.Tk):
     def _cambia_carroponti(self):
         """Spinbox: ridistribuisce le mosse in blocchi contigui.
 
-        Ridistribuire sempre, anche quando si aggiunge un carroponte, e' l'unico
-        comportamento prevedibile: tenere l'assegnazione vecchia lascerebbe il
-        carroponte nuovo senza niente da fare e il grafico identico, cioe' un
-        comando che sembra non funzionare. Si annulla con 'Annulla modifica',
-        e chi vuole la suddivisione migliore ha il pulsante apposta."""
+        Cambiare il numero NON ridistribuisce le mosse: l'assegnazione la fa
+        l'utente, e rifargliela sotto sarebbe buttare via il suo lavoro.
+        Aggiungere un carroponte lo rende disponibile nel menu `attivo` --
+        da li' in poi gli si danno le mosse a mano. Togliendone uno, le sue
+        mosse passano all'ultimo rimasto, che e' l'unico modo di non
+        scavalcare i vicini.
+
+        Chi vuole una suddivisione gia' fatta ha il pulsante apposta."""
         if self.config_linea is None or self.T_corrente is None:
             return
         try:
@@ -859,8 +874,11 @@ class Applicazione(tk.Tk):
             return
         prima = self._istantanea()
         self.n_carroponti = n
-        self.assegnazione = manuale.assegnazione_iniziale(d, n)
-        self._ricomponi(f"Carroponti: {n}, mosse ridistribuite", prima)
+        rimaste = {k: min(c, n - 1) for k, c in self.assegnazione.items()}
+        self.assegnazione = rimaste
+        if self.carroponte_attivo >= n:
+            self.carroponte_attivo = n - 1
+        self._ricomponi(f"Carroponti: {n}", prima)
 
     def _modifica_numero_carroponti(self):
         """Pulsante 'Ottimizza con questi carroponti': fa cercare al solutore
@@ -1053,13 +1071,18 @@ class Applicazione(tk.Tk):
                     )
 
         # -- i rientri a vuoto dei carroponti, ripetuti su tutto il pettine -
-        # Restano grigi come lo scheletro: il colore in questo disegno vuol
-        # dire "l'ho assegnato io", e il rientro non si assegna, viene da se'.
-        # Quale carroponte lo faccia si legge dai trasporti colorati che
-        # collega. Le attese non si disegnano affatto: coinciderebbero con le
-        # soste del pettine, raddoppiando le linee senza aggiungere niente.
+        # Colorati come il carroponte a cui appartengono: assegnando una mossa
+        # per volta serve vedere subito di CHI e' il rientro che compare, e
+        # dove lo obbliga a passare. Restano sottili e tratteggiati, cosi' non
+        # competono con i trasporti assegnati. Le attese non si disegnano
+        # affatto: coinciderebbero con le soste del pettine, raddoppiando le
+        # linee senza aggiungere niente.
         n_cicli = manuale.RIPETIZIONI_PREDEFINITE + 4
-        for segs in self.soluzione.segments_per_hoist:
+        for h, segs in enumerate(self.soluzione.segments_per_hoist):
+            c = self._carro_della_zona(h)
+            if c is None:
+                continue  # zona senza mosse assegnate: non e' di nessuno
+            colore = _HOIST_COLORS[c % len(_HOIST_COLORS)]
             for s in segs:
                 if s.kind != "empty":
                     continue
@@ -1068,7 +1091,7 @@ class Applicazione(tk.Tk):
                     self.assi.plot(
                         ts + ciclo * T,
                         xs,
-                        color=_GRIGIO,
+                        color=colore,
                         linewidth=_SOTTILE,
                         linestyle="--",
                         zorder=3,
@@ -1090,12 +1113,12 @@ class Applicazione(tk.Tk):
         legenda = [
             Line2D([0], [0], color=_GRIGIO, lw=_SOTTILE, label="da assegnare"),
             Line2D(
-                [0], [0], color=_GRIGIO, lw=_SOTTILE, linestyle="--",
-                label="rientro a vuoto",
-            ),
-            Line2D(
                 [0], [0], color="#333333", lw=_SPESSO,
                 label="assegnato a un carroponte",
+            ),
+            Line2D(
+                [0], [0], color="#333333", lw=_SOTTILE, linestyle="--",
+                label="il suo rientro a vuoto",
             ),
         ]
         self.assi.legend(
@@ -1104,6 +1127,22 @@ class Applicazione(tk.Tk):
         self.figura.tight_layout()
         self._riapplica_vista(vista)
         self.tela.draw()
+
+    def _carro_della_zona(self, indice: int) -> int | None:
+        """Di quale carroponte e' la zona `indice`, o None se non contiene
+        nessuna mossa assegnata.
+
+        Le zone nascono da `manuale.zone_coprenti`, che riempie i buchi
+        riportando avanti l'ultimo carroponte: con un'assegnazione parziale il
+        numero della zona non e' per forza quello del carroponte, quindi il
+        colore va preso dalle mosse che ci stanno dentro davvero."""
+        if indice >= len(self.dati.zones):
+            return None
+        z = self.dati.zones[indice]
+        for k in range(z.lo, z.hi + 1):
+            if k in self.assegnazione:
+                return self.assegnazione[k]
+        return None
 
     def _mossa_del_segmento(self, s) -> int | None:
         """A quale mossa appartiene un tratto del pettine, dalle posizioni."""
@@ -1197,14 +1236,25 @@ class Applicazione(tk.Tk):
             f"Carroponti:     {self.n_carroponti}",
         ]
         for h, z in enumerate(self.dati.zones):
-            mosse = [k for k in range(z.lo, z.hi + 1) if k in self.assegnazione]
-            if not mosse:
-                continue
+            c = self._carro_della_zona(h)
+            if c is None:
+                continue  # zona senza mosse assegnate: non e' di nessuno
             righe.append(
-                f"   {h + 1}: mosse {z.lo}-{z.hi}  "
+                f"   {c + 1}: mosse {z.lo}-{z.hi}  "
                 f"({self.dati.route[z.lo].tank_id} -> "
                 f"{self.dati.route[z.hi + 1].tank_id})"
             )
+        scoperte = [k for k in range(self.dati.n_moves) if k not in self.assegnazione]
+        if scoperte:
+            righe.append("")
+            righe.append(
+                f"Ancora da assegnare: {len(scoperte)} trasporti su "
+                f"{self.dati.n_moves} (mosse {scoperte})."
+            )
+            righe.append(
+                "Fai clic sul trasporto nel grafico, oppure doppio clic sulla"
+            )
+            righe.append("riga nella tabella Assegnazione.")
         righe.append("")
         if rep is None:
             righe.append(

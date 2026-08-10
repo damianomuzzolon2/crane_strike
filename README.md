@@ -52,7 +52,7 @@ aprire una finestra, e la cinematica senza avere OR-Tools installato.
 | `kinematics.py` | 130 | La fisica del movimento, in millimetri e secondi. `travel_time()` da' il tempo per percorrere una distanza con profilo trapezoidale o triangolare; `position_profile()` la posizione istante per istante; `profile_breakpoints()` gli spigoli della curva, che servono al verificatore per limitare in modo rigoroso l'errore di campionamento. Non sa nulla del resto del progetto. |
 | `model.py` | 1736 | Il cuore. Contiene le **strutture dati** (`Tank`, `StationSpec`, `HoistZone`, `ProblemData`, `Segment`, `Solution`), la costruzione e risoluzione del **modello CP-SAT** (`solve`), la scelta automatica di zone e numero di carroponti (`solve_auto_zones`, `solve_auto_hoists`), e la costruzione di un ciclogramma **senza risolvere** a partire dai suoi gradi di liberta' (`build_solution`, `estrai_gradi_di_liberta`) — quest'ultima e' cio' che rende possibile l'editor. |
 | `verify.py` | 1020 | Il **verificatore indipendente**: `verify_solution()` ricontrolla una soluzione in Python puro, senza CP-SAT, campionando le posizioni reali dei carroponti. Restituisce un `VerificationReport` con l'elenco delle `Violation` divise per gravita'. E' la rete di sicurezza contro gli errori nella formulazione del modello. |
-| `manuale.py` | 230 | Il ciclogramma nei termini in cui si modifica: il "pettine" dei pezzi (`pettine`, `catena_pezzo`), la composizione libera del ciclogramma (`componi`) e il controllo che i carroponti non si scavalchino sulla rotaia (`perche_non_va`). |
+| `manuale.py` | 238 | Il ciclogramma nei termini in cui si modifica: il "pettine" dei pezzi (`pettine`, `catena_pezzo`), la composizione libera del ciclogramma (`componi`) e il controllo che i carroponti non si scavalchino sulla rotaia (`perche_non_va`). |
 
 ### Ingresso, uscita, disegno
 
@@ -65,7 +65,7 @@ aprire una finestra, e la cinematica senza avere OR-Tools installato.
 
 | file | righe | contenuto |
 | --- | ---: | --- |
-| `interfaccia.py` | 1662 | L'**interfaccia grafica** (tkinter). La classe `Applicazione` e' tutta la finestra: caricamento, calcolo in background, grafico incorporato (due viste), la pagina unica in cui il ciclogramma si modifica -- calcolato o composto da zero che sia -- verifica e salvataggio. `autotest()` prova l'installazione da sola. E' il programma che usa un utente normale. |
+| `interfaccia.py` | 1712 | L'**interfaccia grafica** (tkinter). La classe `Applicazione` e' tutta la finestra: caricamento, calcolo in background, grafico incorporato (due viste), la pagina unica in cui il ciclogramma si modifica -- calcolato o composto da zero che sia -- verifica e salvataggio. `autotest()` prova l'installazione da sola. E' il programma che usa un utente normale. |
 | `ciclogramma.py` | 170 | Lo stesso lavoro da **riga di comando**, per chi preferisce il terminale o vuole automatizzare. |
 | `esempio.py` | 198 | La linea di esempio definita **in codice** invece che in Excel, per chi vuole integrare il solutore in qualcos'altro. |
 | `costruisci_exe.py` | 119 | Costruisce l'**eseguibile autonomo** con PyInstaller. Vedi sotto. |
@@ -83,7 +83,7 @@ Non serve pytest.
 | `test_verify.py` | 847 | **Il verificatore.** Risponde a "chi verifica il verificatore?": venti casi, di cui uno solo corretto e tutti gli altri rotti di proposito (collisioni, permanenze fuori tolleranza, periodicita' incoerente, geometrie patologiche, capienze). Un controllore che non segnala mai nulla e' inutile, quindi ogni controllo ha un caso che DEVE farlo scattare. Non richiede OR-Tools: le soluzioni sono costruite a mano. |
 | `test_model.py` | 430 | **Il modello CP-SAT.** Risolve davvero e passa ogni soluzione al verificatore: vasche ravvicinate, tre carroponti, capienza, tempi verticali, e la fedelta' della ricostruzione di una soluzione dai suoi gradi di liberta'. Richiede OR-Tools. |
 | `test_excel_io.py` | 676 | **La lettura e la scrittura Excel.** Quasi tutti i casi sono file compilati male: valori mancanti o non numerici, vasche inesistenti o duplicate, righe riordinate, parametri sbagliati, o un file scritto per la vecchia versione in metri. Piu' la struttura del file dei risultati. Non richiede OR-Tools. |
-| `test_interfaccia.py` | 587 | **Le funzioni dell'interfaccia grafica.** La finestra viene costruita davvero e pilotata da codice — si "premono" i pulsanti chiamando i metodi e si fa girare il ciclo degli eventi con `update()` invece di `mainloop()`. Verifica che i pulsanti si abilitino al momento giusto, che il calcolo in background consegni il risultato, che una soluzione calcolata riletta come tempi in vasca e ricomposta dia esattamente lo stesso ciclogramma, che le modifiche vengano riverificate, che le due viste mostrino lo stesso oggetto, e che la composizione da zero produca il pettine giusto. Richiede OR-Tools e un ambiente grafico. |
+| `test_interfaccia.py` | 637 | **Le funzioni dell'interfaccia grafica.** La finestra viene costruita davvero e pilotata da codice — si "premono" i pulsanti chiamando i metodi e si fa girare il ciclo degli eventi con `update()` invece di `mainloop()`. Verifica che i pulsanti si abilitino al momento giusto, che il calcolo in background consegni il risultato, che una soluzione calcolata riletta come tempi in vasca e ricomposta dia esattamente lo stesso ciclogramma, che le modifiche vengano riverificate, che le due viste mostrino lo stesso oggetto, e che la composizione da zero produca il pettine giusto. Richiede OR-Tools e un ambiente grafico. |
 
 `kinematics.py` ha in fondo un autotest che si lancia allo stesso modo
 (`python kinematics.py`).
@@ -312,23 +312,32 @@ prendersi quella mossa.
 
 ### Comporre da zero
 
-`Componi da zero` butta via tutto e riparte dai **tempi minimi di processo**,
-col takt time piu' basso ammesso e le mosse spartite fra due carroponti. E' il
-pettine piu' stretto che il processo consenta: da li' si allarga dove serve.
+`Componi da zero` butta via tutto, passa alla vista **pettine** e riparte dai
+**tempi minimi di processo**, col takt time piu' basso ammesso e — soprattutto
+— **nessun trasporto assegnato a nessuno**.
 
 ![composizione a mano](doc/disegno-manuale.png)
 
-Conviene passare alla vista **pettine**, dove i tempi in vasca sono le pedate
-delle scalinate e si vede subito cosa si sta cambiando. Poi si decide quali
-trasporti fa ciascun carroponte, che e' il metodo con cui i ciclogrammi si
-tracciano a mano da sempre.
+E' il metodo con cui i ciclogrammi si tracciano a mano da sempre: prima il
+pettine dei pezzi, che e' il vincolo di processo, poi si decide una mossa per
+volta chi la fa. Partire da una suddivisione gia' pronta voleva dire non avere
+mai niente "da assegnare": si finiva a correggere una proposta invece di
+comporre, che e' un'altra cosa.
 
 Nel pettine il colore vuol dire una cosa sola: **l'ho assegnato io**. Tutto
-quello che non hai ancora deciso — soste in vasca, trasporti liberi, rientri a
-vuoto — e' dello stesso grigio sottile, cosi' il disegno resta uno sfondo e le
-tue scelte si vedono da lontano.
+quello che non hai ancora deciso e' dello stesso grigio sottile, cosi' il
+disegno resta uno sfondo e le tue scelte si vedono da lontano. Appena dai un
+trasporto a un carroponte, quel trasporto **e il rientro a vuoto che ne
+consegue** prendono il suo colore: il rientro e' la conseguenza piu' importante
+di una assegnazione — dice dove quel carro e' costretto a tornare, e quando —
+e va vista mentre si decide, non dopo.
 
-I comandi sono quelli di sopra: sono gli stessi. Cambia solo da dove parti.
+Il numero di `Carroponti` non ridistribuisce niente: aggiungerne uno lo rende
+disponibile nel menu `attivo`, e da li' in poi gli si danno le mosse a mano.
+Toglierne uno passa le sue mosse a chi resta, che e' l'unico modo di non far
+scavalcare i vicini.
+
+A parte il punto di partenza, i comandi sono quelli di sopra: sono gli stessi.
 
 ### Se il calcolo non trova niente
 

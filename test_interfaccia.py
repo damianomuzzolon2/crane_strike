@@ -385,17 +385,31 @@ def test_takt_e_carroponti(percorso_linea):
             "un valore non numerico non cambia nulla e non schianta",
         )
 
-        # Lo spinbox ridistribuisce subito, senza risolvere: deve vedersi.
+        # Lo spinbox NON ridistribuisce: l'assegnazione la fa l'utente, e
+        # rifargliela sotto sarebbe buttare via il suo lavoro. Aggiungere un
+        # carroponte lo rende solo disponibile.
         n0 = app.n_carroponti
+        ass0 = dict(app.assegnazione)
         app.var_carroponti.set(str(n0 + 1))
         app._cambia_carroponti()
         app.update()
         check(
-            app.n_carroponti == n0 + 1
-            and len(set(app.assegnazione.values())) == n0 + 1,
-            f"lo spinbox ridistribuisce subito le mosse su {app.n_carroponti} "
-            f"carroponti, senza risolvere",
+            app.n_carroponti == n0 + 1 and app.assegnazione == ass0,
+            f"aggiungendo un carroponte ({n0} -> {app.n_carroponti}) "
+            f"l'assegnazione fatta resta com'era",
         )
+        # Togliendone uno invece le sue mosse devono passare all'ultimo
+        # rimasto: e' l'unico modo di non far scavalcare i vicini.
+        app.var_carroponti.set("1")
+        app._cambia_carroponti()
+        app.update()
+        check(
+            app.n_carroponti == 1 and set(app.assegnazione.values()) <= {0},
+            "togliendone uno, le sue mosse passano a chi resta",
+        )
+        app.var_carroponti.set(str(n0 + 1))
+        app._cambia_carroponti()
+        app.update()
 
         # Il pulsante invece fa lavorare il solutore su quel numero.
         app._modifica_numero_carroponti()
@@ -413,6 +427,7 @@ def test_composizione_da_zero(percorso_linea):
     print("\n[7] composizione da zero: stessa pagina, verifica su richiesta")
     from interfaccia import Applicazione
     import manuale as m
+    from plotting import _HOIST_COLORS
 
     app = Applicazione(percorso_linea)
     try:
@@ -437,6 +452,41 @@ def test_composizione_da_zero(percorso_linea):
             app.report is None and not app.verifica_viva,
             "nessuna verifica finche' non la si chiede",
         )
+        # Si comincia da NIENTE assegnato, sul pettine: se si partisse da una
+        # suddivisione gia' fatta non ci sarebbe mai niente "da assegnare", e
+        # comporre diventerebbe correggere una proposta.
+        check(
+            app.assegnazione == {} and app.vista == "pettine",
+            "si parte da zero trasporti assegnati, sulla vista a pettine",
+        )
+        colori_prima = {l.get_color() for l in app.assi.lines}
+        check(
+            not (colori_prima & set(_HOIST_COLORS)),
+            "e infatti sul grafico non c'e' nessun colore di carroponte",
+        )
+
+        # -- assegnare una mossa per volta -----------------------------------
+        app.carroponte_attivo = 1
+        check(
+            app._assegna(3, app._istantanea()) and app.assegnazione == {3: 1},
+            "un clic assegna la mossa al carroponte attivo, senza toccare le altre",
+        )
+        app.update()
+        colori = {l.get_color() for l in app.assi.lines}
+        check(
+            _HOIST_COLORS[1] in colori and _HOIST_COLORS[0] not in colori,
+            "compare il colore del carroponte 2 e solo quello -- trasporto e "
+            "rientro a vuoto",
+        )
+        # Il rientro a vuoto e' del carroponte, e nel pettine ha il suo colore:
+        # con l'assegnazione parziale il numero della zona non coincide con
+        # quello del carroponte, e prendere il colore dall'indice slitterebbe.
+        check(
+            [app._carro_della_zona(i) for i in range(len(app.dati.zones))] == [None, 1],
+            "la zona senza mosse assegnate non e' di nessuno, l'altra e' del 2",
+        )
+        app._annulla_modifica()
+        app.update()
 
         pettine = m.pettine(d, app.T_corrente, app.permanenze)
         check(len(pettine) == 10, f"il pettine ha {len(pettine)} scalinate")

@@ -76,7 +76,12 @@ def segmenti_pezzo(data: ProblemData, tempi: list[float]) -> list[Segment]:
 
 def assegnazione_iniziale(data: ProblemData, n_carroponti: int) -> dict[int, int]:
     """Suddivisione di partenza: le mosse spartite il piu' uniformemente
-    possibile fra i carroponti, in blocchi contigui."""
+    possibile fra i carroponti, in blocchi contigui.
+
+    Non e' quello da cui parte il disegno a mano -- li' si parte da NIENTE
+    assegnato, ed e' l'utente a decidere una mossa per volta. Serve a chi
+    vuole una suddivisione plausibile su cui ragionare senza passare dal
+    solutore."""
     n = max(1, min(n_carroponti, data.n_moves))
     tagli = [round(i * data.n_moves / n) for i in range(n + 1)]
     assegnazione = {}
@@ -95,18 +100,21 @@ def perche_non_va(
     disegno -- ma sulla GEOMETRIA: i carroponti stanno tutti sulla stessa
     rotaia e non possono scavalcarsi. Se il carroponte 2 dovesse servire una
     vasca che sta prima di quelle del carroponte 1, dovrebbe passargli
-    attraverso. Non e' una limitazione del calcolo: e' la rotaia."""
-    sequenza = [assegnazione.get(k) for k in range(data.n_moves)]
-    mancanti = [k for k, v in enumerate(sequenza) if v is None]
-    if mancanti:
-        return f"le mosse {mancanti} non sono assegnate a nessun carroponte"
-    for k in range(data.n_moves - 1):
-        if sequenza[k + 1] < sequenza[k]:
+    attraverso. Non e' una limitazione del calcolo: e' la rotaia.
+
+    Le mosse ancora non assegnate NON sono un motivo: si parte da zero e si
+    assegna una mossa per volta, quindi un'assegnazione incompleta e' lo stato
+    normale del lavoro in corso. Che manchi qualcosa lo dice `componi()` fra le
+    incoerenze, dove serve -- non qui, che deve rispondere solo a "posso dare
+    questa mossa a questo carroponte?"."""
+    assegnate = [(k, assegnazione[k]) for k in sorted(assegnazione)]
+    for (k1, c1), (k2, c2) in zip(assegnate, assegnate[1:]):
+        if c2 < c1:
             return (
-                f"il carroponte {sequenza[k + 1] + 1} dovrebbe fare la mossa "
-                f"{k + 1} ({data.route[k + 1].tank_id} -> "
-                f"{data.route[k + 2].tank_id}) mentre il carroponte "
-                f"{sequenza[k] + 1} lavora piu' avanti sulla linea: sulla "
+                f"il carroponte {c2 + 1} dovrebbe fare la mossa "
+                f"{k2} ({data.route[k2].tank_id} -> "
+                f"{data.route[k2 + 1].tank_id}) mentre il carroponte "
+                f"{c1 + 1} lavora piu' avanti sulla linea: sulla "
                 f"stessa rotaia dovrebbero scavalcarsi"
             )
     return None
