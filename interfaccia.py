@@ -168,6 +168,13 @@ class Applicazione(tk.Tk):
         # senza cambiare disegno, quindi restava un comando che chiedeva una
         # decisione senza darne il motivo.
         self.vista = "ciclogramma"  # oppure "pettine"
+        # Se la scheda Ciclogramma sia aperta o no. Non e' sempre: dopo un
+        # calcolo automatico si sta LEGGENDO un risultato, e per metterci le
+        # mani bisogna dirlo premendo "Modifica". Cosi' i tre pulsanti sono tre
+        # stati veri -- leggi, componi, modifica -- invece di due piu' una
+        # scorciatoia, e un ciclogramma calcolato non si altera per sbaglio
+        # con un trascinamento di troppo.
+        self.modifica_aperta = False
         # La verifica, una volta chiesta, si tiene aggiornata da sola. Non
         # parte da sola: comporre da zero vuol dire passare per stati
         # dichiaratamente sbagliati, e un muro di errori rossi mentre si sceglie
@@ -508,6 +515,7 @@ class Applicazione(tk.Tk):
         self.incoerenze = []
         self.origine = ""
         self.modificato = False
+        self.modifica_aperta = False
         self.verifica_viva = False
         self._annulla.clear()
         self._reimposta_grafico()  # altra linea, altre quote: si riparte da tutto
@@ -707,6 +715,11 @@ class Applicazione(tk.Tk):
             else "calcolo automatico (soluzione valida, non dimostrata ottima)"
         )
         self.modificato = False
+        # Un risultato del solutore si LEGGE. Per modificarlo si preme
+        # "Modifica": cosi' non lo si altera per sbaglio, e quel pulsante
+        # smette di essere una scorciatoia per diventare il passaggio in cui
+        # si dichiara l'intenzione.
+        self.modifica_aperta = False
         # Il solutore ha gia' verificato: da qui in poi il verdetto resta vivo.
         self.verifica_viva = True
         self._reimposta_grafico()
@@ -755,14 +768,16 @@ class Applicazione(tk.Tk):
         return True
 
     def _vai_a_modifica(self):
-        """Porta a lavorare sul ciclogramma che c'e'.
+        """Apre il ciclogramma che c'e' alla modifica.
 
-        Non cambia niente e non sceglie niente: apre la scheda dove si
-        modifica e dice cosa si puo' fare. Serve perche' dopo un calcolo si
-        resta sul Riepilogo, e che il ciclogramma sia modificabile non si
-        vede."""
+        Non sceglie fra una versione automatica e una manuale -- ce n'e' una
+        sola -- ne' cambia qualcosa: sblocca la scheda e ci porta. E' il
+        momento in cui si dichiara di voler mettere le mani su un risultato,
+        che e' diverso dal guardarlo."""
         if self.soluzione is None:
             return
+        self.modifica_aperta = True
+        self._aggiorna_stato_pulsanti()  # prima si sblocca, poi si seleziona
         self.schede.select(1)
         self._stato(
             "Modifica: trascina un prelievo sul grafico, cambia un tempo in "
@@ -796,10 +811,11 @@ class Applicazione(tk.Tk):
         # clic. Il ciclogramma disegna le traiettorie dei carroponti, e senza
         # nessuna mossa assegnata sarebbe un riquadro vuoto.
         self.vista = "pettine"
-        self.schede.select(1)
+        self.modifica_aperta = True
         self._ricomponi(
             "Composizione da zero: fai clic sui trasporti per assegnarli"
         )
+        self.schede.select(1)
 
     def _ricomponi(self, descrizione: str = "", prima=None):
         """Ricostruisce il ciclogramma dallo stato e rimette tutto a schermo.
@@ -808,6 +824,12 @@ class Applicazione(tk.Tk):
         Rifiutare una modifica vorrebbe dire rimettere i controlli proprio
         dove si e' scelto di toglierli -- e il verificatore li fa meglio."""
         if self.config_linea is None or self.T_corrente is None:
+            return
+        if self._lavoro_in_corso:
+            # Ultima rete: qui passa OGNI modifica, quindi basta questa riga
+            # perche' nessuna possa infilarsi mentre il solutore lavora --
+            # anche da una strada che oggi non esiste.
+            self._stato("Calcolo in corso: aspetta che finisca per modificare")
             return
         if prima is not None:
             self._annulla.append(prima)
@@ -1356,6 +1378,12 @@ class Applicazione(tk.Tk):
     def _su_pressione(self, evento):
         if evento.inaxes is not self.assi or self.soluzione is None:
             return
+        if self._lavoro_in_corso or not self.modifica_aperta:
+            # Il grafico sta FUORI dalla scheda, quindi il cancello di
+            # "Modifica" non lo coprirebbe: trascinare un prelievo su un
+            # risultato appena calcolato lo modificherebbe senza che nessuno
+            # abbia detto di volerlo.
+            return
         if self._navigazione_attiva():
             return  # sta navigando: il clic e' della barra, non nostro
         if evento.xdata is None:
@@ -1445,6 +1473,21 @@ class Applicazione(tk.Tk):
     def _aggiorna_stato_pulsanti(self):
         c_e_linea = self.config_linea is not None and not self._lavoro_in_corso
         stato = tk.NORMAL if c_e_linea else tk.DISABLED
+        # La scheda Ciclogramma e' aperta solo quando si sta davvero
+        # lavorando al ciclogramma: dopo "Calcola man" o dopo "Modifica", e
+        # mai mentre il solutore gira.
+        #
+        # Chiuderla vuol dire chiuderla davvero, non ingrigire i pulsanti che
+        # contiene: i doppi clic sulle tabelle sono binding di evento e non
+        # hanno uno stato da spegnere. E disabilitare la linguetta non basta
+        # se e' quella aperta -- il contenuto resta a schermo e cliccabile --
+        # quindi va anche lasciata.
+        if self.modifica_aperta and not self._lavoro_in_corso:
+            self.schede.tab(1, state=tk.NORMAL)
+        else:
+            if self.schede.index(self.schede.select()) == 1:
+                self.schede.select(0)
+            self.schede.tab(1, state=tk.DISABLED)
         self.btn_auto.configure(state=stato)
         self.btn_proposta.configure(state=stato)
         # "Modifica" si abilita quando c'e' qualcosa da modificare, e basta:

@@ -50,6 +50,17 @@ class Rotella:
         self.ydata = y
 
 
+class Clic:
+    """Il minimo che serve a `_su_pressione`: un clic vero arriva solo da un
+    puntatore in carne e ossa."""
+
+    def __init__(self, assi, x, y, xdata):
+        self.inaxes = assi
+        self.x = x
+        self.y = y
+        self.xdata = xdata
+
+
 def pompa(app, secondi_max=180.0):
     """Fa girare il ciclo degli eventi finche' il lavoro in background non e'
     finito (o scade il tempo). Sostituisce mainloop() nei test."""
@@ -128,7 +139,6 @@ def test_apertura_e_proposta(percorso_linea):
             str(app.btn_modifica["state"]) == "normal",
             "adesso 'Modifica' si accende",
         )
-        app.schede.select(0)
         app._vai_a_modifica()
         app.update()
         check(
@@ -161,6 +171,36 @@ def test_calcolo_automatico(percorso_linea):
             f"soluzione trovata (stato {app.soluzione.status if app.soluzione else '-'})",
         )
         check(app.report.ok, "la soluzione supera la verifica indipendente")
+        # Un risultato del solutore si LEGGE: la scheda di modifica resta
+        # chiusa finche' non si preme "Modifica". Cosi' non lo si altera per
+        # sbaglio, e quel pulsante diventa il punto in cui si dichiara di
+        # volerci mettere le mani.
+        check(
+            str(app.schede.tab(1, "state")) == "disabled",
+            "la scheda di modifica resta chiusa: il risultato si legge",
+        )
+        # Il grafico sta fuori dalla scheda, quindi ha bisogno dello stesso
+        # cancello: senza, un trascinamento di troppo modificherebbe comunque.
+        k, istante, quota = app._punti_prelievo()[1]
+        px, py = app.assi.transData.transform((istante, quota))
+        app._su_pressione(Clic(app.assi, px, py, istante))
+        check(
+            app._trascinamento is None,
+            "e nemmeno il grafico si lascia trascinare",
+        )
+        app._vai_a_modifica()
+        app.update()
+        check(
+            str(app.schede.tab(1, "state")) == "normal"
+            and app.schede.index(app.schede.select()) == 1,
+            "'Modifica' la apre",
+        )
+        app._su_pressione(Clic(app.assi, px, py, istante))
+        check(
+            app._trascinamento is not None,
+            "e da li' in poi il trascinamento funziona",
+        )
+        app._trascinamento = None
         check(
             len(app.dati.zones) == 2 and abs(app.soluzione.T - 127.39) < 1.0,
             f"{len(app.dati.zones)} carroponti, T={app.soluzione.T:.2f}s "
@@ -603,6 +643,74 @@ def test_da_zero_poi_automatico(percorso_linea):
         chiudi(app)
 
 
+def test_scheda_chiusa_durante_il_calcolo(percorso_linea):
+    print("\n[9] durante il calcolo la scheda Ciclogramma e' chiusa")
+    from interfaccia import Applicazione
+
+    app = Applicazione(percorso_linea)
+    try:
+        for _ in range(50):
+            app.update()
+            if app.config_linea is not None:
+                break
+            time.sleep(0.02)
+        app._componi_da_zero()
+        app.update()
+        check(
+            str(app.schede.tab(1, "state")) == "normal"
+            and app.schede.index(app.schede.select()) == 1,
+            "componendo a mano si e' sulla scheda, ed e' aperta",
+        )
+        permanenze_prima = dict(app.permanenze)
+
+        app._calcola_automatico()
+        app.update()
+        # Ingrigire i soli pulsanti non basta: i doppi clic sulle tabelle sono
+        # binding di evento, senza stato da spegnere. E disabilitare la
+        # linguetta non serve se e' quella aperta -- il contenuto resta a
+        # schermo e cliccabile. Quindi la scheda va anche lasciata.
+        check(
+            str(app.schede.tab(1, "state")) == "disabled"
+            and app.schede.index(app.schede.select()) != 1,
+            "appena parte il calcolo la scheda si chiude e si esce",
+        )
+        # La modifica che ci si infilasse comunque va rifiutata, non persa:
+        # senza questo si vedeva il ritocco comparire sul grafico e sparire
+        # trenta secondi dopo, quando il risultato del calcolo ci passava
+        # sopra senza dire niente.
+        app.permanenze[1] += 25.0
+        app._ricomponi("ritocco durante il calcolo")
+        app.update()
+        check(
+            "Calcolo in corso" in app.etichetta_stato["text"],
+            f"e una modifica viene rifiutata dicendolo: "
+            f"\"{app.etichetta_stato['text']}\"",
+        )
+        app.permanenze = dict(permanenze_prima)
+
+        check(pompa(app), "il calcolo termina")
+        # A calcolo finito NON si riapre da sola: quello che c'e' adesso e' un
+        # risultato del solutore, e si legge. Il lavoro fatto a mano prima e'
+        # stato sostituito -- riaprire la scheda darebbe l'idea di poterlo
+        # riprendere.
+        check(
+            str(app.schede.tab(1, "state")) == "disabled",
+            "a calcolo finito resta chiusa: c'e' un risultato nuovo da leggere",
+        )
+        check(
+            app.permanenze != permanenze_prima,
+            "e i tempi in vasca sono quelli del solutore, non quelli composti",
+        )
+        app._vai_a_modifica()
+        app.update()
+        check(
+            str(app.schede.tab(1, "state")) == "normal",
+            "'Modifica' la riapre quando si vuole intervenire",
+        )
+    finally:
+        chiudi(app)
+
+
 def test_file_illeggibile():
     print("\n[3] file non valido: messaggio, non schianto")
     from interfaccia import Applicazione
@@ -643,6 +751,7 @@ def main():
         test_takt_e_carroponti(linea)
         test_composizione_da_zero(linea)
         test_da_zero_poi_automatico(linea)
+        test_scheda_chiusa_durante_il_calcolo(linea)
         test_file_illeggibile()
     finally:
         os.unlink(linea)
