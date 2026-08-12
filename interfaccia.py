@@ -1138,18 +1138,25 @@ class Applicazione(tk.Tk):
         # -- il pettine: un pezzo per scalinata ----------------------------
         # Il pettine e' lo SCHELETRO e deve restare il disegno dominante: le
         # linee dei carroponti ci passano sopra, non lo coprono.
+        # A ogni tratto la sua mossa, presa dalla costruzione del pettine:
+        # per presa/traslazione/rilascio e' la mossa stessa, per una SOSTA in
+        # vasca e' quella che verra' a prendere il pezzo. Cosi' anche le soste
+        # si colorano: restando grigie sembravano lavoro da fare, mentre il
+        # grigio qui vuol dire "ancora da assegnare".
         scalinate = manuale.pettine(d, T, self.permanenze)
+        mosse = manuale.mosse_del_pettine(d, self.permanenze)
         for segs in scalinate:
-            for s in segs:
+            for s, k in zip(segs, mosse):
                 ts, xs = _sample_segment(s)
-                k = self._mossa_del_segmento(s) if s.kind != "wait" else None
-                c = self.assegnazione.get(k) if k is not None else None
+                c = self.assegnazione.get(k)
                 if c is None:
-                    # Scheletro: soste in vasca e trasporti ancora liberi, tutti
-                    # dello stesso grigio. Distinguerli servirebbe a niente --
-                    # sono entrambi "cose che non ho ancora deciso".
                     self.assi.plot(ts, xs, color=_GRIGIO, linewidth=_SOTTILE, zorder=2)
                 else:
+                    # Trasporto e sosta si disegnano identici: la parte di
+                    # scalinata che tocca a un carroponte e' una linea sola,
+                    # dello stesso colore e dello stesso spessore. Distinguerli
+                    # vorrebbe dire far discutere l'occhio su una differenza
+                    # che non porta nessuna informazione.
                     self.assi.plot(
                         ts,
                         xs,
@@ -1230,23 +1237,6 @@ class Applicazione(tk.Tk):
         for k in range(z.lo, z.hi + 1):
             if k in self.assegnazione:
                 return self.assegnazione[k]
-        return None
-
-    def _mossa_del_segmento(self, s) -> int | None:
-        """A quale mossa appartiene un tratto del pettine, dalle posizioni."""
-        d = self.config_linea.data
-        for k in range(d.n_moves):
-            x0, x1 = d.station_position(k), d.station_position(k + 1)
-            if (
-                s.kind == "loaded"
-                and abs(s.x_start - x0) < 1e-6
-                and abs(s.x_end - x1) < 1e-6
-            ):
-                return k
-            if s.kind == "pick" and abs(s.x_start - x0) < 1e-6:
-                return k
-            if s.kind == "release" and abs(s.x_start - x1) < 1e-6:
-                return k
         return None
 
     def _sincronizza_campi(self):

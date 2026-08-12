@@ -560,6 +560,43 @@ def test_composizione_da_zero(percorso_linea):
         )
         app._annulla_modifica()
         app.update()
+        # A lavoro finito NIENTE deve restare grigio: il grigio vuol dire
+        # "ancora da assegnare", e una sosta in vasca lasciata grigia
+        # sembrerebbe lavoro da fare quando non c'e' piu' niente da fare.
+        istantanea = app._istantanea()
+        for k in range(d.n_moves):
+            app.carroponte_attivo = 0 if k < 3 else 1
+            app._assegna(k, app._istantanea())
+        app.update()
+        from interfaccia import _GRIGIO
+
+        from interfaccia import _SPESSO
+
+        check(
+            not [l for l in app.assi.lines if l.get_color() == _GRIGIO],
+            f"assegnato tutto, non resta nessun tratto grigio "
+            f"({len(app.assi.lines)} linee, tutte di un carroponte)",
+        )
+        # E la parte di scalinata di un carroponte e' UNA linea sola: stesso
+        # colore e stesso spessore per trasporti e soste. Distinguerli
+        # farebbe discutere l'occhio su una differenza che non informa.
+        piene = {
+            (l.get_color(), l.get_linewidth())
+            for l in app.assi.lines
+            if l.get_linestyle() == "-" and l.get_color() != "#dddddd"
+        }
+        check(
+            {larghezza for _, larghezza in piene} == {_SPESSO},
+            f"trasporti e soste hanno lo stesso spessore ({piene})",
+        )
+        app.assegnazione, app.T_corrente, app.permanenze, app.n_carroponti = (
+            istantanea[2],
+            istantanea[0],
+            istantanea[1],
+            istantanea[3],
+        )
+        app._ricomponi("")
+        app.update()
 
         pettine = m.pettine(d, app.T_corrente, app.permanenze)
         check(len(pettine) == 10, f"il pettine ha {len(pettine)} scalinate")

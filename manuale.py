@@ -55,7 +55,26 @@ def segmenti_pezzo(data: ProblemData, tempi: list[float]) -> list[Segment]:
     pettine e le linee dei carri si sovrappongono esattamente sugli stessi
     tratti -- che e' il punto: l'utente clicca su un trasporto del pettine e
     quello diventa un pezzo del giro di un carroponte."""
-    segs: list[Segment] = []
+    return [s for s, _ in _segmenti_e_mosse(data, tempi)]
+
+
+def mosse_del_pettine(data: ProblemData, permanenze: dict[int, float]) -> list[int]:
+    """Per ogni segmento di UNA scalinata, la mossa a cui va attribuito.
+
+    Serve a colorare: il pettine e' fatto di pezzi, ma quello che l'utente
+    assegna sono i trasporti, e ogni tratto va ricondotto al suo. Per presa,
+    traslazione e rilascio e' la mossa stessa; per una SOSTA in vasca e' la
+    mossa che verra' a prendere il pezzo -- il carroponte che deve arrivare
+    li' entro quel momento, cioe' quello a cui la sosta pone un vincolo.
+
+    Si ricava dalla costruzione, non dalle coordinate: indovinare la mossa
+    dalla posizione sbaglia appena la stessa vasca compare due volte nella
+    ricetta, che e' un caso ammesso."""
+    return [k for _, k in _segmenti_e_mosse(data, catena_pezzo(data, permanenze))]
+
+
+def _segmenti_e_mosse(data: ProblemData, tempi: list[float]):
+    segs: list[tuple[Segment, int]] = []
     for k in range(data.n_moves):
         x0 = data.station_position(k)
         x1 = data.station_position(k + 1)
@@ -64,13 +83,16 @@ def segmenti_pezzo(data: ProblemData, tempi: list[float]) -> list[Segment]:
         t_arrivo = t_presa + data.horizontal_loaded_seconds(k)
         t_fine = t_arrivo + data.release_time_at(k + 1)
         if t_presa > t0:
-            segs.append(Segment("pick", t0, t_presa, x0, x0, None))
-        segs.append(Segment("loaded", t_presa, t_arrivo, x0, x1, data.kin_loaded))
+            segs.append((Segment("pick", t0, t_presa, x0, x0, None), k))
+        segs.append(
+            (Segment("loaded", t_presa, t_arrivo, x0, x1, data.kin_loaded), k)
+        )
         if t_fine > t_arrivo:
-            segs.append(Segment("release", t_arrivo, t_fine, x1, x1, None))
-        # sosta in vasca fino al prelievo successivo
+            segs.append((Segment("release", t_arrivo, t_fine, x1, x1, None), k))
+        # sosta in vasca fino al prelievo successivo: e' della mossa DOPO,
+        # quella che verra' a prendere il pezzo
         if k + 1 < data.n_moves and tempi[k + 1] > t_fine:
-            segs.append(Segment("wait", t_fine, tempi[k + 1], x1, x1, None))
+            segs.append((Segment("wait", t_fine, tempi[k + 1], x1, x1, None), k + 1))
     return segs
 
 
