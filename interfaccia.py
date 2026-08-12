@@ -539,6 +539,37 @@ class Applicazione(tk.Tk):
         self.tela.draw()
         self._stato("Linea caricata")
         self._aggiorna_stato_pulsanti()
+        if self.config_linea.ciclogramma is not None:
+            self._riprendi_ciclogramma()
+
+    def _riprendi_ciclogramma(self):
+        """Rimette in piedi il ciclogramma che il file si portava dietro.
+
+        Il file di ingresso ne contiene i tre gradi di liberta', non le
+        traiettorie: quelle si ricostruiscono, cosi' non possono essere in
+        disaccordo con i valori da cui derivano. La scheda resta chiusa come
+        sempre -- si guarda, e per intervenire si preme "Modifica"."""
+        c = self.config_linea.ciclogramma
+        d = self.config_linea.data
+        self.T_corrente = c["T"]
+        self.n_carroponti = max(1, min(c["n_carroponti"], d.n_moves))
+        self.permanenze = {
+            k: c["permanenze"].get(k, float(d.route[k].dwell_min))
+            for k in range(1, d.n_moves)
+        }
+        self.assegnazione = dict(c["assegnazione"])
+        self.carroponte_attivo = 0
+        self.origine = "riletto dal file, gia' composto"
+        self.modificato = False
+        self.verifica_viva = False
+        self.report = None
+        self._annulla.clear()
+        self.vista = (
+            "ciclogramma" if len(self.assegnazione) == d.n_moves else "pettine"
+        )
+        self._ricomponi(
+            "Ciclogramma ripreso dal file: premi Modifica per intervenire"
+        )
 
     def _crea_modello(self):
         percorso = filedialog.asksaveasfilename(
@@ -604,12 +635,23 @@ class Applicazione(tk.Tk):
         if not percorso:
             return
         try:
+            # Un file solo: davanti il referto, dietro la linea col
+            # ciclogramma dentro. Cosi' lo stesso file che si consegna e'
+            # anche quello da riaprire per riprendere il lavoro, e non ci
+            # sono due Excel da tenere insieme e da non confondere.
             scrivi_risultati(
                 percorso,
                 self.dati,
                 self.soluzione,
                 self.report,
                 sorgente=self.percorso_file,
+                cfg=self.config_linea,
+                ciclogramma={
+                    "T": self.T_corrente,
+                    "n_carroponti": self.n_carroponti,
+                    "permanenze": self.permanenze,
+                    "assegnazione": self.assegnazione,
+                },
             )
             png = os.path.splitext(percorso)[0] + ".png"
             self._salva_immagine(png)
@@ -619,7 +661,9 @@ class Applicazione(tk.Tk):
         self._stato(f"Risultati salvati in {os.path.basename(percorso)}")
         messagebox.showinfo(
             TITOLO,
-            f"Salvati:\n{percorso}\n{png}",
+            f"Salvati:\n{percorso}\n{png}\n\n"
+            f"L'Excel contiene anche la linea col ciclogramma: riaprilo con "
+            f"'Apri linea...' per riprendere da qui.",
         )
 
     def _salva_immagine(self, percorso_png: str):

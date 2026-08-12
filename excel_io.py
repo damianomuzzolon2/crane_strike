@@ -10,6 +10,7 @@ Il file ha quattro fogli:
   Percorso   sequenza di vasche attraversate dal pezzo, con le permanenze
   Parametri  takt time, cinematiche, ingombri, tempi verticali, opzioni
   Zone       (facoltativo) suddivisione manuale delle mosse fra i carroponti
+  Ciclogramma (facoltativo) il ciclogramma gia' composto, per riprenderlo
 
 Per creare il modello da compilare:
 
@@ -22,6 +23,7 @@ problema alla volta.
 
 from __future__ import annotations
 
+import dataclasses
 import sys
 from dataclasses import dataclass
 from typing import Optional
@@ -33,6 +35,7 @@ FOGLIO_VASCHE = "Vasche"
 FOGLIO_PERCORSO = "Percorso"
 FOGLIO_PARAMETRI = "Parametri"
 FOGLIO_ZONE = "Zone"
+FOGLIO_CICLOGRAMMA = "Ciclogramma"
 
 # nome parametro -> (unita', obbligatorio, default, descrizione)
 _PARAMETRI = {
@@ -179,6 +182,10 @@ class Configurazione:
     tempo_limite_s: float
     zone_manuali: Optional[list[HoistZone]]
     percorso_file: str
+    # Ciclogramma gia' composto, se il file lo porta con se': un dizionario con
+    # `T`, `permanenze` (stazione -> secondi) e `assegnazione` (mossa ->
+    # carroponte 0-based). None = il file descrive solo la linea.
+    ciclogramma: Optional[dict] = None
 
 
 # --------------------------------------------------------------------------
@@ -274,6 +281,11 @@ def leggi_problema(percorso_file: str) -> Configurazione:
         if FOGLIO_ZONE in wb.sheetnames
         else None
     )
+    ciclogramma = (
+        _leggi_ciclogramma(wb[FOGLIO_CICLOGRAMMA], len(route) - 1, errori)
+        if FOGLIO_CICLOGRAMMA in wb.sheetnames
+        else None
+    )
     errori.solleva_se_presenti()
 
     def _kin_sollevamento(prefisso: str) -> Optional[Kinematics]:
@@ -319,6 +331,7 @@ def leggi_problema(percorso_file: str) -> Configurazione:
         tempo_limite_s=par["tempo_limite_per_tentativo_s"],
         zone_manuali=zone,
         percorso_file=percorso_file,
+        ciclogramma=ciclogramma,
     )
 
 
@@ -436,6 +449,93 @@ def _leggi_percorso(ws, tanks: dict[str, Tank], errori: _Errori) -> list[Station
     return route
 
 
+def _leggi_ciclogramma(ws, n_moves: int, errori: _Errori) -> Optional[dict]:
+    """Il ciclogramma salvato: takt time, tempi in vasca, assegnazione.
+
+    Foglio facoltativo, e una linea senza ciclogramma e' normale: un foglio
+    vuoto vale come assente, non come errore. Se invece c'e' ed e' rotto lo si
+    dice, perche' il silenzio farebbe ripartire da zero senza spiegare dove sia
+    finito il lavoro di ieri."""
+    T = ws["B1"].value
+    if T is None or (isinstance(T, str) and not T.strip()):
+        # nessun takt time: il foglio c'e' ma non e' compilato
+        righe_piene = any(
+            _testo(ws.cell(r, 1).value) for r in range(5, ws.max_row + 1)
+        )
+        if not righe_piene:
+            return None
+        errori.aggiungi(
+            FOGLIO_CICLOGRAMMA, "B1", "takt time mancante: senza non si "
+            "puo' ricostruire il ciclogramma"
+        )
+        return None
+    takt = _numero(T, FOGLIO_CICLOGRAMMA, "B1", "takt time", errori)
+    if takt is not None and takt <= 0:
+        errori.aggiungi(
+            FOGLIO_CICLOGRAMMA, "B1", f"takt time deve essere > 0, trovato {takt}"
+        )
+        takt = None
+
+    n_carroponti = _numero(
+        ws["B2"].value, FOGLIO_CICLOGRAMMA, "B2", "carroponti", errori, intero=True
+    ) if ws["B2"].value is not None else None
+
+    permanenze: dict[int, float] = {}
+    assegnazione: dict[int, int] = {}
+    for riga in range(5, ws.max_row + 1):
+        cella_k = ws.cell(riga, 1).value
+        if cella_k is None or (isinstance(cella_k, str) and not cella_k.strip()):
+            continue
+        k = _numero(cella_k, FOGLIO_CICLOGRAMMA, f"A{riga}", "mossa", errori,
+                    intero=True)
+        if k is None:
+            continue
+        if not 0 <= k < n_moves:
+            errori.aggiungi(
+                FOGLIO_CICLOGRAMMA,
+                f"A{riga}",
+                f"mossa {k} fuori dall'intervallo 0..{n_moves - 1}",
+            )
+            continue
+        carro = ws.cell(riga, 4).value
+        if carro is not None and not (isinstance(carro, str) and not carro.strip()):
+            c = _numero(carro, FOGLIO_CICLOGRAMMA, f"D{riga}", "carroponte",
+                        errori, intero=True)
+            if c is not None:
+                if c < 1:
+                    errori.aggiungi(
+                        FOGLIO_CICLOGRAMMA,
+                        f"D{riga}",
+                        f"carroponte numerato da 1, trovato {c}",
+                    )
+                else:
+                    assegnazione[k] = c - 1
+        sosta = ws.cell(riga, 5).value
+        if sosta is not None and not (isinstance(sosta, str) and not sosta.strip()):
+            s = _numero(sosta, FOGLIO_CICLOGRAMMA, f"E{riga}", "tempo in vasca",
+                        errori)
+            if s is not None:
+                if s < 0:
+                    errori.aggiungi(
+                        FOGLIO_CICLOGRAMMA,
+                        f"E{riga}",
+                        f"tempo in vasca negativo: {s}",
+                    )
+                else:
+                    permanenze[k] = s
+    if takt is None:
+        return None
+    if not n_carroponti or n_carroponti < 1:
+        # non dichiarato: si deduce da chi lavora davvero
+        n_carroponti = max(assegnazione.values(), default=0) + 1
+    return {
+        "T": takt,
+        "permanenze": permanenze,
+        "assegnazione": assegnazione,
+        "n_carroponti": n_carroponti,
+    }
+
+
 def _leggi_parametri(ws, errori: _Errori) -> dict:
     grezzi: dict[str, tuple] = {}
     for riga in range(2, ws.max_row + 1):
@@ -540,10 +640,150 @@ def _leggi_zone(ws, n_moves: int, errori: _Errori) -> Optional[list[HoistZone]]:
 # --------------------------------------------------------------------------
 
 
+def _righe_esempio():
+    """La linea di zincatura d'esempio, nella forma in cui va scritta sui
+    fogli. E' la linea con cui si comincia: si lancia subito e la si modifica
+    pezzo per pezzo."""
+    vasche = [
+        # carico e scarico non sono bagni: nessuna corsa, nessuno scolo
+        ("CARICO", 0, 1, 0, 0),
+        ("SGRASSO", 2500, 1, 800, 2),
+        ("RISCIACQUO_1", 5500, 1, 800, 2),
+        ("ZINCATURA", 9500, 2, 1100, 8),
+        ("RISCIACQUO_2", 13000, 1, 800, 2),
+        ("PASSIVAZIONE", 16500, 1, 800, 3),
+        ("SCARICO", 20000, 1, 0, 0),
+    ]
+    percorso = [
+        ("CARICO", 0, 0),
+        ("SGRASSO", 60, 90),
+        ("RISCIACQUO_1", 20, 40),
+        ("ZINCATURA", 180, 220),
+        ("RISCIACQUO_2", 20, 40),
+        ("PASSIVAZIONE", 30, 45),
+        ("SCARICO", 0, 0),
+    ]
+    parametri = {
+        "takt_min_s": 110,
+        "takt_max_s": 150,
+        "v_max_vuoto_mm_s": 1600,
+        "a_max_vuoto_mm_s2": 900,
+        "v_max_carico_mm_s": 1000,
+        "a_max_carico_mm_s2": 400,
+        "ingombro_lato_positivo_mm": 500,
+        "ingombro_lato_negativo_mm": 700,
+        "distanza_sicurezza_mm": 600,
+        "v_max_sollevamento_vuoto_mm_s": 500,
+        "a_max_sollevamento_vuoto_mm_s2": 800,
+        "v_max_sollevamento_carico_mm_s": 300,
+        "a_max_sollevamento_carico_mm_s2": 500,
+        "tempo_aggancio_s": 2,
+        "tempo_sgancio_s": 1,
+        "risoluzione_tick_per_s": 100,
+        "passo_controllo_distanza_mm": 200,
+        "max_carroponti": 4,
+        "tempo_limite_per_tentativo_s": 15,
+    }
+    return vasche, percorso, parametri, None
+
+
+def _righe_da_configurazione(cfg: Configurazione):
+    """Le stesse righe, ricavate da una linea gia' letta. E' l'inverso esatto
+    di `leggi_problema`: quello che esce di qui, riletto, deve ridare la
+    stessa linea."""
+    d = cfg.data
+
+    def cinematica(kin, campo):
+        return None if kin is None else getattr(kin, campo)
+
+    vasche = [
+        (t.id, t.position, t.capacity, t.lift_height, t.drain_time)
+        for t in d.tanks.values()
+    ]
+    percorso = [(s.tank_id, s.dwell_min, s.dwell_max) for s in d.route]
+    parametri = {
+        "takt_min_s": d.takt_min,
+        "takt_max_s": d.takt_max,
+        "v_max_vuoto_mm_s": d.kin_empty.v_max,
+        "a_max_vuoto_mm_s2": d.kin_empty.a_max,
+        "v_max_carico_mm_s": d.kin_loaded.v_max,
+        "a_max_carico_mm_s2": d.kin_loaded.a_max,
+        "ingombro_lato_positivo_mm": d.hoist_extent_pos,
+        "ingombro_lato_negativo_mm": d.hoist_extent_neg,
+        "distanza_sicurezza_mm": d.safety_distance,
+        "v_max_sollevamento_vuoto_mm_s": cinematica(d.kin_lift_empty, "v_max"),
+        "a_max_sollevamento_vuoto_mm_s2": cinematica(d.kin_lift_empty, "a_max"),
+        "v_max_sollevamento_carico_mm_s": cinematica(d.kin_lift_loaded, "v_max"),
+        "a_max_sollevamento_carico_mm_s2": cinematica(d.kin_lift_loaded, "a_max"),
+        "tempo_aggancio_s": d.engage_time,
+        "tempo_sgancio_s": d.disengage_time,
+        "risoluzione_tick_per_s": d.time_scale,
+        "passo_controllo_distanza_mm": d.clearance_step_mm,
+        "max_carroponti": cfg.max_carroponti,
+        "tempo_limite_per_tentativo_s": cfg.tempo_limite_s,
+    }
+    zone = (
+        None
+        if cfg.zone_manuali is None
+        else [(z.lo, z.hi) for z in cfg.zone_manuali]
+    )
+    return vasche, percorso, parametri, zone
+
+
 def scrivi_modello(percorso_file: str) -> str:
     """Crea un file Excel gia' compilato con una linea di esempio, da usare
     come punto di partenza. Restituisce il percorso del file scritto."""
     from openpyxl import Workbook
+
+    wb = Workbook()
+    wb.remove(wb.active)  # il foglio vuoto che openpyxl crea da solo
+    _aggiungi_fogli_linea(wb, *_righe_esempio())
+    wb.save(percorso_file)
+    return percorso_file
+
+
+def scrivi_linea(
+    percorso_file: str, cfg: Configurazione, ciclogramma=None
+) -> str:
+    """Riscrive una linea nel formato di INGRESSO, con dentro il suo
+    ciclogramma.
+
+    Serve a non perdere il lavoro: un ciclogramma composto a mano vive solo
+    nella memoria del programma, e chiuso il programma andrebbe rifatto. Il
+    file dei risultati non basta a riprenderlo -- e' un referto, e per giunta
+    non contiene le cinematiche, senza le quali le durate dei trasporti non si
+    possono ricalcolare. Un file di ingresso invece descrive gia' tutto: gli
+    si aggiunge un foglio e si riapre con "Apri linea...".
+
+    `ciclogramma`: None, oppure un dizionario con `T`, `permanenze`
+    (stazione -> secondi) e `assegnazione` (mossa -> carroponte, 0-based)."""
+    from openpyxl import Workbook
+
+    wb = Workbook()
+    wb.remove(wb.active)
+    _aggiungi_fogli_linea(
+        wb, *_righe_da_configurazione(cfg), data=cfg.data, ciclogramma=ciclogramma
+    )
+    wb.save(percorso_file)
+    return percorso_file
+
+
+def _aggiungi_fogli_linea(
+    wb,
+    vasche,
+    percorso,
+    parametri,
+    zone=None,
+    data=None,
+    ciclogramma=None,
+):
+    """Aggiunge a `wb` i fogli del formato di INGRESSO.
+
+    Unico posto da cui esce quel formato: il modello d'esempio, una linea
+    risalvata e il file dei risultati passano tutti di qui, quindi non possono
+    divergere. Aggiunge invece di creare il file proprio perche' i risultati
+    devono poterci stare nello stesso libro -- un file solo che e' insieme il
+    referto e la linea da riaprire."""
     from openpyxl.styles import Alignment, Font, PatternFill
     from openpyxl.utils import get_column_letter
 
@@ -551,8 +791,6 @@ def scrivi_modello(percorso_file: str) -> str:
     sfondo = PatternFill("solid", fgColor="4F6228")
     nota = Font(italic=True, color="808080")
     titolo_par = Font(bold=True, size=12)
-
-    wb = Workbook()
 
     def prepara(ws, titoli, larghezze):
         ws.append(titoli)
@@ -568,8 +806,7 @@ def scrivi_modello(percorso_file: str) -> str:
     # Tutte le spiegazioni stanno QUI e non nei fogli dei dati: una nota
     # scritta in una colonna che poi viene letta verrebbe scambiata per un
     # dato, ed e' un errore facilissimo da fare.
-    ws = wb.active
-    ws.title = "Istruzioni"
+    ws = wb.create_sheet("Istruzioni")
     ws.column_dimensions["A"].width = 110
     for testo, stile in [
         ("Come compilare questo file", titolo_par),
@@ -659,6 +896,36 @@ def scrivi_modello(percorso_file: str) -> str:
             None,
         ),
         ("", None),
+        (f"Foglio {FOGLIO_CICLOGRAMMA} (facoltativo)", titolo_par),
+        (
+            "Lo scrive il programma quando salvi, e serve a RIPRENDERE il lavoro: "
+            "riaprendo questo",
+            None,
+        ),
+        (
+            "file il ciclogramma e' gia' li', pronto da modificare invece che da "
+            "rifare.",
+            None,
+        ),
+        (
+            "  takt_time_s   il periodo del ciclo (cella B1)",
+            None,
+        ),
+        (
+            "  carroponte    chi fa quel trasporto, numerato da 1. Vuoto = non "
+            "ancora assegnato",
+            None,
+        ),
+        (
+            "  tempo_in_vasca_s   quanto il pezzo resta nella vasca DA CUI parte "
+            "quel trasporto",
+            None,
+        ),
+        (
+            "Cancellalo se vuoi ripartire da zero: senza, la linea si apre e basta.",
+            None,
+        ),
+        ("", None),
         ("Attenzione", titolo_par),
         (
             "Non scrivere note o commenti nelle colonne dei dati: verrebbero letti "
@@ -680,17 +947,8 @@ def scrivi_modello(percorso_file: str) -> str:
         ["id", "posizione_mm", "posti", "corsa_verticale_mm", "sgocciolamento_s"],
         [22, 14, 8, 20, 20],
     )
-    for tid, pos, posti, corsa, scolo in [
-        # carico e scarico non sono bagni: nessuna corsa, nessuno scolo
-        ("CARICO", 0, 1, 0, 0),
-        ("SGRASSO", 2500, 1, 800, 2),
-        ("RISCIACQUO_1", 5500, 1, 800, 2),
-        ("ZINCATURA", 9500, 2, 1100, 8),
-        ("RISCIACQUO_2", 13000, 1, 800, 2),
-        ("PASSIVAZIONE", 16500, 1, 800, 3),
-        ("SCARICO", 20000, 1, 0, 0),
-    ]:
-        ws.append([tid, pos, posti, corsa, scolo])
+    for riga in vasche:
+        ws.append(list(riga))
 
     # -- Percorso --------------------------------------------------------
     ws = wb.create_sheet(FOGLIO_PERCORSO)
@@ -699,60 +957,87 @@ def scrivi_modello(percorso_file: str) -> str:
         ["n", "vasca", "permanenza_min_s", "permanenza_max_s"],
         [6, 22, 20, 20],
     )
-    for n, (tid, dmin, dmax) in enumerate(
-        [
-            ("CARICO", 0, 0),
-            ("SGRASSO", 60, 90),
-            ("RISCIACQUO_1", 20, 40),
-            ("ZINCATURA", 180, 220),
-            ("RISCIACQUO_2", 20, 40),
-            ("PASSIVAZIONE", 30, 45),
-            ("SCARICO", 0, 0),
-        ],
-        start=1,
-    ):
+    for n, (tid, dmin, dmax) in enumerate(percorso, start=1):
         ws.append([n, tid, dmin, dmax])
 
     # -- Parametri -------------------------------------------------------
     ws = wb.create_sheet(FOGLIO_PARAMETRI)
     prepara(ws, ["parametro", "valore", "unita", "descrizione"], [30, 12, 10, 62])
-    valori_esempio = {
-        "takt_min_s": 110,
-        "takt_max_s": 150,
-        "v_max_vuoto_mm_s": 1600,
-        "a_max_vuoto_mm_s2": 900,
-        "v_max_carico_mm_s": 1000,
-        "a_max_carico_mm_s2": 400,
-        "ingombro_lato_positivo_mm": 500,
-        "ingombro_lato_negativo_mm": 700,
-        "distanza_sicurezza_mm": 600,
-        "v_max_sollevamento_vuoto_mm_s": 500,
-        "a_max_sollevamento_vuoto_mm_s2": 800,
-        "v_max_sollevamento_carico_mm_s": 300,
-        "a_max_sollevamento_carico_mm_s2": 500,
-        "tempo_aggancio_s": 2,
-        "tempo_sgancio_s": 1,
-        "risoluzione_tick_per_s": 100,
-        "passo_controllo_distanza_mm": 200,
-        "max_carroponti": 4,
-        "tempo_limite_per_tentativo_s": 15,
-    }
     for nome, (unita, obbligatorio, default, descr) in _PARAMETRI.items():
         suffisso = "" if obbligatorio else f" (facoltativo, default {default})"
-        ws.append([nome, valori_esempio[nome], unita, descr + suffisso])
+        ws.append([nome, parametri.get(nome), unita, descr + suffisso])
 
     # -- Zone (facoltativo) ----------------------------------------------
     ws = wb.create_sheet(FOGLIO_ZONE)
     prepara(ws, ["prima_mossa", "ultima_mossa", "", "note"], [16, 16, 4, 80])
-    # la nota va in colonna D, fuori dalle colonne lette
-    ws.cell(2, 4).value = (
-        "Vuoto = numero di carroponti e zone scelti automaticamente "
-        "(consigliato). Vedi il foglio Istruzioni."
-    )
-    ws.cell(2, 4).font = nota
+    if zone:
+        for lo, hi in zone:
+            ws.append([lo, hi])
+    else:
+        # la nota va in colonna D, fuori dalle colonne lette
+        ws.cell(2, 4).value = (
+            "Vuoto = numero di carroponti e zone scelti automaticamente "
+            "(consigliato). Vedi il foglio Istruzioni."
+        )
+        ws.cell(2, 4).font = nota
 
-    wb.save(percorso_file)
-    return percorso_file
+    # -- Ciclogramma (facoltativo) ---------------------------------------
+    if ciclogramma is not None and data is not None:
+        _scrivi_foglio_ciclogramma(
+            wb, data, ciclogramma, intestazione, sfondo, nota
+        )
+
+
+def _scrivi_foglio_ciclogramma(wb, data, ciclogramma, intestazione, sfondo, nota):
+    """Il ciclogramma nei suoi tre gradi di liberta': takt time, tempo in
+    vasca di ogni tappa, e chi fa ogni trasporto.
+
+    Non si scrivono gli istanti di prelievo ne' le traiettorie: sono
+    conseguenze, e riscriverle vorrebbe dire poterle rileggere in contrasto
+    con quello da cui derivano. Da questi tre valori il ciclogramma si
+    ricostruisce identico."""
+    ws = wb.create_sheet(FOGLIO_CICLOGRAMMA)
+    for riga, (nome, valore, spiega) in enumerate(
+        (
+            ("takt_time_s", round(float(ciclogramma["T"]), 4),
+             "il periodo del ciclo, in secondi"),
+            ("carroponti", int(ciclogramma.get("n_carroponti") or 1),
+             "quanti ne hai a disposizione (anche se non tutti usati)"),
+        ),
+        start=1,
+    ):
+        ws.cell(riga, 1).value = nome
+        ws.cell(riga, 1).font = intestazione
+        ws.cell(riga, 1).fill = sfondo
+        ws.cell(riga, 2).value = valore
+        ws.cell(riga, 3).value = spiega
+        ws.cell(riga, 3).font = nota
+
+    titoli = ["mossa", "da vasca", "a vasca", "carroponte", "tempo_in_vasca_s"]
+    for col, (titolo, larghezza) in enumerate(
+        zip(titoli, [8, 22, 22, 12, 18]), start=1
+    ):
+        cella = ws.cell(4, col)
+        cella.value = titolo
+        cella.font = intestazione
+        cella.fill = sfondo
+        ws.column_dimensions[chr(ord("A") + col - 1)].width = larghezza
+
+    permanenze = ciclogramma.get("permanenze") or {}
+    assegnazione = ciclogramma.get("assegnazione") or {}
+    for k in range(data.n_moves):
+        # append() parte dopo l'ultima riga scritta, cioe' dalla 5
+        carro = assegnazione.get(k)
+        sosta = permanenze.get(k)
+        ws.append(
+            [
+                k,
+                data.route[k].tank_id,
+                data.route[k + 1].tank_id,
+                None if carro is None else carro + 1,
+                None if sosta is None else round(float(sosta), 3),
+            ]
+        )
 
 
 # --------------------------------------------------------------------------
@@ -856,9 +1141,19 @@ def scrivi_risultati(
     solution,
     report,
     sorgente: Optional[str] = None,
+    cfg: Optional[Configurazione] = None,
+    ciclogramma: Optional[dict] = None,
 ) -> str:
-    """Scrive i risultati del calcolo in un file Excel a quattro fogli:
-    Riepilogo, Movimenti, FlussoPezzo, Verifica. Restituisce il percorso."""
+    """Scrive UN file Excel che e' due cose insieme.
+
+    Davanti il referto -- Riepilogo, Movimenti, FlussoPezzo, Verifica -- da
+    leggere e da consegnare. Dietro, se si passano `cfg` e `ciclogramma`, la
+    linea nel formato di INGRESSO col ciclogramma dentro: cosi' lo stesso file
+    si riapre con "Apri linea..." e il lavoro riprende da dov'era.
+
+    Due file separati sarebbero due cose da tenere insieme e da non
+    confondere; `leggi_problema` cerca i fogli per nome e ignora gli altri,
+    quindi non c'e' ragione di dividerli."""
     from datetime import datetime
 
     from openpyxl import Workbook
@@ -1166,6 +1461,16 @@ def scrivi_risultati(
         "0.0",
     )
     voce("Risoluzione temporale", data.time_scale, "tick al secondo")
+
+    # -- e in coda la linea, per poterla riaprire --------------------------
+    if cfg is not None:
+        _aggiungi_fogli_linea(
+            wb,
+            *_righe_da_configurazione(dataclasses.replace(cfg, data=data)),
+            data=data,
+            ciclogramma=ciclogramma,
+        )
+    wb.active = 0  # si apre sul Riepilogo, che e' quello che si va a leggere
 
     wb.save(percorso_file)
     return percorso_file

@@ -711,6 +711,102 @@ def test_scheda_chiusa_durante_il_calcolo(percorso_linea):
         chiudi(app)
 
 
+def test_ciclogramma_si_riprende(percorso_linea):
+    print("\n[10] un ciclogramma composto a mano si salva e si riprende")
+    from interfaccia import Applicazione
+    from excel_io import scrivi_risultati
+
+    app = Applicazione(percorso_linea)
+    try:
+        for _ in range(50):
+            app.update()
+            if app.config_linea is not None:
+                break
+            time.sleep(0.02)
+        app._componi_da_zero()
+        app.update()
+        # composizione a meta': una mossa senza carroponte e un bagno allungato.
+        # Riprendere solo i casi completi non servirebbe a niente -- e' proprio
+        # il lavoro interrotto quello che non si vuole rifare.
+        for k, c in ((0, 0), (1, 0), (2, 0), (3, 1), (5, 1)):
+            app.carroponte_attivo = c
+            app._assegna(k, app._istantanea())
+        app.permanenze[3] = 200.0
+        app.n_carroponti = 3
+        app._ricomponi("composizione di prova")
+        app.update()
+        prima = (
+            round(app.T_corrente, 4),
+            {k: round(v, 3) for k, v in app.permanenze.items()},
+            dict(app.assegnazione),
+            app.n_carroponti,
+        )
+
+        # Un file solo: e' il referto E la linea da riaprire. Due file
+        # separati sarebbero due cose da tenere insieme e da non confondere.
+        app._verifica_adesso()
+        app.update()
+        fd, riapribile = tempfile.mkstemp(suffix=".xlsx")
+        os.close(fd)
+        scrivi_risultati(
+            riapribile,
+            app.dati,
+            app.soluzione,
+            app.report,
+            sorgente=percorso_linea,
+            cfg=app.config_linea,
+            ciclogramma={
+                "T": app.T_corrente,
+                "n_carroponti": app.n_carroponti,
+                "permanenze": app.permanenze,
+                "assegnazione": app.assegnazione,
+            },
+        )
+        from openpyxl import load_workbook
+
+        fogli = load_workbook(riapribile).sheetnames
+        check(
+            "Riepilogo" in fogli and "Vasche" in fogli and "Ciclogramma" in fogli,
+            f"un file solo, con referto e linea insieme ({len(fogli)} fogli)",
+        )
+    finally:
+        chiudi(app)
+
+    # finestra nuova: e' il caso vero, il programma e' stato chiuso e riaperto
+    app = Applicazione()
+    try:
+        app.update()
+        app._carica(riapribile)
+        app.update()
+        dopo = (
+            round(app.T_corrente, 4),
+            {k: round(v, 3) for k, v in app.permanenze.items()},
+            dict(app.assegnazione),
+            app.n_carroponti,
+        )
+        check(
+            dopo == prima,
+            f"takt, tempi in vasca, assegnazione e carroponti tornano identici "
+            f"({len(dopo[2])} mosse assegnate su {app.dati.n_moves}, "
+            f"T={dopo[0]:.2f}s)",
+        )
+        check(
+            "riletto dal file" in app.origine,
+            f"il riepilogo dice da dove viene: \"{app.origine}\"",
+        )
+        # la regola sulla scheda non fa eccezioni: si guarda, e per intervenire
+        # si preme Modifica
+        check(
+            str(app.schede.tab(1, "state")) == "disabled"
+            and str(app.btn_modifica["state"]) == "normal",
+            "la scheda resta chiusa, ma 'Modifica' e' pronto",
+        )
+    finally:
+        chiudi(app)
+        if os.path.exists(riapribile):
+            os.unlink(riapribile)
+
+
 def test_file_illeggibile():
     print("\n[3] file non valido: messaggio, non schianto")
     from interfaccia import Applicazione
@@ -752,6 +848,7 @@ def main():
         test_composizione_da_zero(linea)
         test_da_zero_poi_automatico(linea)
         test_scheda_chiusa_durante_il_calcolo(linea)
+        test_ciclogramma_si_riprende(linea)
         test_file_illeggibile()
     finally:
         os.unlink(linea)

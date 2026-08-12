@@ -141,8 +141,29 @@ def main(argv=None) -> int:
     radice = os.path.splitext(args.file)[0]
     if not args.niente_excel:
         destinazione = args.risultati or (radice + "_risultati.xlsx")
+        at = solution.actual_time
         scrivi_risultati(
-            destinazione, data_finale, solution, report, sorgente=args.file
+            destinazione,
+            data_finale,
+            solution,
+            report,
+            sorgente=args.file,
+            # anche da riga di comando il file resta riapribile: e' lo stesso
+            # Excel, con la linea e il ciclogramma nei fogli in coda
+            cfg=cfg,
+            ciclogramma={
+                "T": solution.T,
+                "n_carroponti": len(data_finale.zones),
+                "permanenze": {
+                    k: at[k] - (at[k - 1] + data_finale.loaded_leg_seconds(k - 1))
+                    for k in range(1, data_finale.n_moves)
+                },
+                "assegnazione": {
+                    k: h
+                    for h, z in enumerate(data_finale.zones)
+                    for k in range(z.lo, z.hi + 1)
+                },
+            },
         )
         print(f"Risultati salvati in {destinazione}")
 

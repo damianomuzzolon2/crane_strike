@@ -58,15 +58,15 @@ aprire una finestra, e la cinematica senza avere OR-Tools installato.
 
 | file | righe | contenuto |
 | --- | ---: | --- |
-| `excel_io.py` | 1178 | Tutto l'Excel: `scrivi_modello()` genera il file da compilare, `leggi_problema()` lo rilegge raccogliendo **tutti** gli errori di compilazione con foglio e cella, `scrivi_risultati()` produce il file dei risultati a quattro fogli. |
+| `excel_io.py` | 1483 | Tutto l'Excel: `scrivi_modello()` genera il file da compilare, `leggi_problema()` lo rilegge raccogliendo **tutti** gli errori di compilazione con foglio e cella, `scrivi_risultati()` produce il file dei risultati -- che e' anche un file di ingresso, col ciclogramma dentro, per poterlo riaprire. |
 | `plotting.py` | 175 | `plot_cyclogram()`: disegna il ciclogramma (posizione lungo la rotaia contro tempo) con il profilo cinematico vero, non con segmenti diritti. |
 
 ### Programmi da lanciare
 
 | file | righe | contenuto |
 | --- | ---: | --- |
-| `interfaccia.py` | 1779 | L'**interfaccia grafica** (tkinter). La classe `Applicazione` e' tutta la finestra: caricamento, calcolo in background, grafico incorporato (ciclogramma o pettine, secondo come ci si e' arrivati), la pagina unica in cui il ciclogramma si modifica -- calcolato o composto da zero che sia -- verifica e salvataggio. `autotest()` prova l'installazione da sola. E' il programma che usa un utente normale. |
-| `ciclogramma.py` | 170 | Lo stesso lavoro da **riga di comando**, per chi preferisce il terminale o vuole automatizzare. |
+| `interfaccia.py` | 1823 | L'**interfaccia grafica** (tkinter). La classe `Applicazione` e' tutta la finestra: caricamento, calcolo in background, grafico incorporato (ciclogramma o pettine, secondo come ci si e' arrivati), la pagina unica in cui il ciclogramma si modifica -- calcolato o composto da zero che sia -- verifica e salvataggio. `autotest()` prova l'installazione da sola. E' il programma che usa un utente normale. |
+| `ciclogramma.py` | 191 | Lo stesso lavoro da **riga di comando**, per chi preferisce il terminale o vuole automatizzare. |
 | `esempio.py` | 198 | La linea di esempio definita **in codice** invece che in Excel, per chi vuole integrare il solutore in qualcos'altro. |
 | `costruisci_exe.py` | 119 | Costruisce l'**eseguibile autonomo** con PyInstaller. Vedi sotto. |
 | `ciclogrammi.spec` | — | La ricetta per PyInstaller: cosa includere, cosa escludere, come impacchettare. Non si lancia a mano, la usa `costruisci_exe.py`. |
@@ -82,8 +82,8 @@ Non serve pytest.
 | --- | ---: | --- |
 | `test_verify.py` | 847 | **Il verificatore.** Risponde a "chi verifica il verificatore?": venti casi, di cui uno solo corretto e tutti gli altri rotti di proposito (collisioni, permanenze fuori tolleranza, periodicita' incoerente, geometrie patologiche, capienze). Un controllore che non segnala mai nulla e' inutile, quindi ogni controllo ha un caso che DEVE farlo scattare. Non richiede OR-Tools: le soluzioni sono costruite a mano. |
 | `test_model.py` | 430 | **Il modello CP-SAT.** Risolve davvero e passa ogni soluzione al verificatore: vasche ravvicinate, tre carroponti, capienza, tempi verticali, e la fedelta' della ricostruzione di una soluzione dai suoi gradi di liberta'. Richiede OR-Tools. |
-| `test_excel_io.py` | 676 | **La lettura e la scrittura Excel.** Quasi tutti i casi sono file compilati male: valori mancanti o non numerici, vasche inesistenti o duplicate, righe riordinate, parametri sbagliati, o un file scritto per la vecchia versione in metri. Piu' la struttura del file dei risultati. Non richiede OR-Tools. |
-| `test_interfaccia.py` | 766 | **Le funzioni dell'interfaccia grafica.** La finestra viene costruita davvero e pilotata da codice — si "premono" i pulsanti chiamando i metodi e si fa girare il ciclo degli eventi con `update()` invece di `mainloop()`. Verifica che i pulsanti si abilitino al momento giusto, che il calcolo in background consegni il risultato, che una soluzione calcolata riletta come tempi in vasca e ricomposta dia esattamente lo stesso ciclogramma, che le modifiche vengano riverificate, che l'immagine salvata sia il ciclogramma anche componendo dal pettine, che la scheda di modifica si apra solo dopo 'Calcola man' o 'Modifica' e mai mentre il solutore lavora, e che la composizione da zero produca il pettine giusto. Richiede OR-Tools e un ambiente grafico. |
+| `test_excel_io.py` | 733 | **La lettura e la scrittura Excel.** Quasi tutti i casi sono file compilati male: valori mancanti o non numerici, vasche inesistenti o duplicate, righe riordinate, parametri sbagliati, o un file scritto per la vecchia versione in metri. Piu' l'andata e ritorno del ciclogramma salvato nel file, e la struttura del file dei risultati. Non richiede OR-Tools. |
+| `test_interfaccia.py` | 863 | **Le funzioni dell'interfaccia grafica.** La finestra viene costruita davvero e pilotata da codice — si "premono" i pulsanti chiamando i metodi e si fa girare il ciclo degli eventi con `update()` invece di `mainloop()`. Verifica che i pulsanti si abilitino al momento giusto, che il calcolo in background consegni il risultato, che una soluzione calcolata riletta come tempi in vasca e ricomposta dia esattamente lo stesso ciclogramma, che le modifiche vengano riverificate, che l'immagine salvata sia il ciclogramma anche componendo dal pettine, che la scheda di modifica si apra solo dopo 'Calcola man' o 'Modifica' e mai mentre il solutore lavora, che un ciclogramma salvato si riapra identico anche se lasciato a meta', e che la composizione da zero produca il pettine giusto. Richiede OR-Tools e un ambiente grafico. |
 
 `kinematics.py` ha in fondo un autotest che si lancia allo stesso modo
 (`python kinematics.py`).
@@ -128,7 +128,7 @@ programma.
 | `Calcola auto` | Cerca il numero minimo di carroponti, la suddivisione migliore della linea e il takt time piu' basso. Puo' durare da qualche secondo a qualche minuto: la barra in basso a destra si muove, i pulsanti si spengono e la scheda *Ciclogramma* si chiude finche' non ha finito. La finestra **non si blocca**. |
 | `Calcola man` | Butta via il ciclogramma corrente e riparte dai tempi minimi di processo, con **nessun trasporto assegnato**, per comporlo a mano (vedi sotto). |
 | `Modifica` | Apre alla modifica il ciclogramma che c'e'. Non cambia niente, ma e' il passaggio obbligato: senza, la scheda *Ciclogramma* resta chiusa. |
-| `Salva risultati...` | Scrive l'Excel dei risultati e, accanto, l'immagine del ciclogramma. Si abilita solo quando c'e' qualcosa da salvare. |
+| `Salva risultati...` | Scrive l'Excel dei risultati e, accanto, l'immagine del ciclogramma. **Lo stesso Excel si riapre con `Apri linea...`** per riprendere il lavoro: contiene anche la linea e il ciclogramma. Si abilita solo quando c'e' qualcosa da salvare. |
 
 A destra nella stessa barra c'e' il **percorso completo** del file caricato —
 non solo il nome, perche' dello stesso file girano di solito piu' copie (la
@@ -383,6 +383,40 @@ scavalcare i vicini.
 
 A parte il punto di partenza, i comandi sono quelli di sopra: sono gli stessi.
 
+### Riprendere il lavoro un altro giorno
+
+Un ciclogramma composto a mano vive nella memoria del programma: chiuso il
+programma, andrebbe rifatto da capo. Per questo **l'Excel dei risultati e'
+anche un file di ingresso**: dopo i quattro fogli del referto ne trova altri
+sei — `Istruzioni`, `Vasche`, `Percorso`, `Parametri`, `Zone` e `Ciclogramma`
+— e si riapre con `Apri linea...`.
+
+Un file solo perche' non ce n'e' bisogno di due: `leggi_problema` cerca i fogli
+per nome e ignora gli altri. Due file separati sarebbero due cose da tenere
+insieme e da non confondere, e prima o poi si consegna quello sbagliato.
+
+Riaprendolo il ciclogramma e' gia' li', **anche se lasciato a meta'**: i
+trasporti ancora da assegnare restano tali, e si riprende da quel punto. La
+scheda resta chiusa come sempre, e si preme `Modifica` per intervenire.
+
+Nel foglio ci sono i **tre gradi di liberta'** e nient'altro: takt time, tempo
+in vasca di ogni tappa, e quale carroponte fa ogni trasporto (piu' quanti
+carroponti hai a disposizione). Le traiettorie e gli istanti di prelievo non ci
+sono, perche' sono conseguenze: riscriverli vorrebbe dire poterli rileggere in
+contrasto con i valori da cui derivano. Si ricostruiscono, e tornano identici.
+
+Il file di partenza **non viene toccato**: quello descrive l'impianto, e a
+riscriverlo si rischierebbe di perdere quello che openpyxl non sa riprodurre —
+grafici, commenti, formattazioni fatte a mano.
+
+**Perche' non si riapre invece il file dei risultati**, che pure contiene i
+tempi in vasca: perche' e' un referto, scritto per essere letto da una persona,
+e soprattutto **non contiene le cinematiche**. Senza velocita' e accelerazioni
+le durate dei trasporti non si possono ricalcolare, quindi il ciclogramma non
+si ricostruisce. Un file di ingresso invece descrive gia' tutto.
+
+Cancellando il foglio `Ciclogramma` il file torna a essere una linea e basta.
+
 ### Se il calcolo non trova niente
 
 Capita, ed e' un'informazione: vuol dire che con i dati dati la linea non sta in
@@ -396,7 +430,7 @@ si guarda dove il conto non torna: li' non c'e' niente da trovare, si vede.
 Sia l'interfaccia sia la riga di comando producono, accanto al file di
 ingresso:
 
-- **`linea_risultati.xlsx`** — quattro fogli:
+- **`linea_risultati.xlsx`** — il referto, in quattro fogli:
 
   | foglio | contenuto |
   | --- | --- |
@@ -404,6 +438,11 @@ ingresso:
   | `Movimenti` | una riga per tratto: carroponte, fase (presa, trasporto, rilascio, spostamento a vuoto, attesa), vasca di partenza e arrivo, istanti di inizio e fine, durata, posizioni. E' la tabella da passare a chi programma il PLC |
   | `FlussoPezzo` | il percorso di **un** pezzo lungo tutta la linea: ingresso e uscita da ogni vasca, permanenza effettiva, margine rispetto ai limiti di processo, posti occupati |
   | `Verifica` | l'elenco dei rilievi del verificatore indipendente, colorati per gravita' |
+
+  ...piu' altri sei in coda — `Istruzioni`, `Vasche`, `Percorso`, `Parametri`,
+  `Zone`, `Ciclogramma` — che sono la **linea nel formato di ingresso**, col
+  ciclogramma dentro. Servono a riaprire lo stesso file con `Apri linea...` e
+  riprendere il lavoro. Vale anche da riga di comando.
 
 - **`linea.png`** — il **ciclogramma** disegnato. Sempre quello, anche se a
   schermo c'era il pettine: e' il documento che si consegna.
@@ -448,7 +487,7 @@ python ciclogramma.py linea.xlsx              # calcola il ciclogramma
 
 Il modello generato e' gia' compilato con una linea di zincatura d'esempio, in
 modo che si possa lanciare subito e poi modificarlo pezzo per pezzo. Ha cinque
-fogli:
+fogli (sei se ci si salva dentro un ciclogramma):
 
 | foglio | contenuto |
 | --- | --- |
@@ -457,6 +496,7 @@ fogli:
 | `Percorso` | sequenza di vasche attraversate, con le permanenze |
 | `Parametri` | quello che vale per tutta la linea: takt time, cinematiche del carroponte, ingombri, tempi di aggancio/sgancio, opzioni di calcolo |
 | `Zone` | facoltativo: suddivisione manuale delle mosse fra i carroponti. **Lasciandolo vuoto** numero di carroponti e zone vengono scelti automaticamente |
+| `Ciclogramma` | facoltativo: il ciclogramma gia' composto. Lo scrive il programma quando salvi, e riaprendo il file si riprende da li' |
 
 ### Uso da Python
 

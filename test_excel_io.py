@@ -123,6 +123,62 @@ def test_andata_e_ritorno():
         os.unlink(p)
 
 
+def test_foglio_ciclogramma():
+    print("\n[1-bis] il ciclogramma va e torna dal foglio Ciclogramma")
+    from excel_io import FOGLIO_CICLOGRAMMA, scrivi_linea
+
+    p = modello_temporaneo()
+    try:
+        cfg = leggi_problema(p)
+        check(
+            cfg.ciclogramma is None,
+            "il modello d'esempio descrive la linea e basta: nessun ciclogramma",
+        )
+        # Assegnazione volutamente INCOMPLETA: e' il lavoro interrotto quello
+        # che non si vuole rifare, non solo quello finito.
+        ciclo = {
+            "T": 123.45,
+            "n_carroponti": 3,
+            "permanenze": {1: 70.0, 2: 40.0, 3: 215.0, 4: 20.0, 5: 30.0},
+            "assegnazione": {0: 0, 1: 0, 2: 0, 3: 1, 5: 1},
+        }
+        fd, con_ciclo = tempfile.mkstemp(suffix=".xlsx")
+        os.close(fd)
+        try:
+            scrivi_linea(con_ciclo, cfg, ciclo)
+            riletto = leggi_problema(con_ciclo)
+            check(
+                riletto.ciclogramma == ciclo,
+                "takt, carroponti, tempi in vasca e assegnazione tornano identici",
+            )
+            check(
+                4 not in riletto.ciclogramma["assegnazione"],
+                "e la mossa lasciata senza carroponte resta senza",
+            )
+            # La linea deve tornare identica anche lei: scrivere il ciclogramma
+            # non deve alterare la descrizione dell'impianto.
+            check(
+                riletto.data == cfg.data
+                and riletto.max_carroponti == cfg.max_carroponti
+                and riletto.tempo_limite_s == cfg.tempo_limite_s,
+                "e la linea riscritta e' identica all'originale",
+            )
+            # Un foglio rotto non deve passare in silenzio: senza takt time il
+            # ciclogramma non si ricostruisce, e ripartire da zero senza dirlo
+            # sarebbe il modo peggiore di perdere il lavoro di ieri.
+            modifica(con_ciclo, FOGLIO_CICLOGRAMMA, "B1", None)
+            msg = errore_leggendo(con_ciclo)
+            check(
+                f"{FOGLIO_CICLOGRAMMA}!B1" in msg and "takt time" in msg,
+                f"un foglio senza takt time viene segnalato: \"{msg.splitlines()[-1][:60]}\"",
+            )
+        finally:
+            if os.path.exists(con_ciclo):
+                os.unlink(con_ciclo)
+    finally:
+        os.unlink(p)
+
+
 def test_valori_mancanti_e_sbagliati():
     print("\n[2] valori mancanti o non numerici")
     casi = [
@@ -646,6 +702,7 @@ def main():
     print("TEST DI LETTURA E SCRITTURA EXCEL (richiede openpyxl, non OR-Tools)")
     print("=" * 72)
     test_andata_e_ritorno()
+    test_foglio_ciclogramma()
     test_valori_mancanti_e_sbagliati()
     test_corsa_e_scolo_obbligatori()
     test_virgola_decimale()
