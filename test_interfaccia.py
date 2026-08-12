@@ -397,6 +397,19 @@ def test_vista_e_immagine(percorso_linea):
         app._componi_da_zero()
         app.update()
         check(app.vista == "pettine", "'Calcola man' porta invece sul pettine")
+        # ...e tornando al solutore si torna al ciclogramma. Restare sul
+        # pettine dopo un calcolo automatico era il difetto: il disegno era
+        # aggiornato e giusto, ma era il foglio su cui si COMPONE -- e un
+        # risultato del solutore non si compone, si legge.
+        app._calcola_automatico()
+        check(pompa(app), "il calcolo automatico termina")
+        check(
+            app.vista == "ciclogramma"
+            and app.assi.get_title().startswith("Ciclogramma"),
+            "e 'Calcola auto' riporta al ciclogramma, anche venendo dal pettine",
+        )
+        app._componi_da_zero()
+        app.update()
         for k in range(app.dati.n_moves):
             app.carroponte_attivo = 0 if k < 3 else 1
             app._assegna(k, app._istantanea())

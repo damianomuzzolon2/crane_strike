@@ -764,6 +764,10 @@ class Applicazione(tk.Tk):
         # smette di essere una scorciatoia per diventare il passaggio in cui
         # si dichiara l'intenzione.
         self.modifica_aperta = False
+        # ...e si guarda come ciclogramma, sempre. Arrivando da "Calcola man"
+        # la vista era rimasta sul pettine, che e' il foglio su cui si compone:
+        # un risultato del solutore non si compone, si legge.
+        self.vista = "ciclogramma"
         # Il solutore ha gia' verificato: da qui in poi il verdetto resta vivo.
         self.verifica_viva = True
         self._reimposta_grafico()
