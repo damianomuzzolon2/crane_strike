@@ -539,10 +539,32 @@ def test_composizione_da_zero(percorso_linea):
         )
 
         # -- assegnare una mossa per volta -----------------------------------
+        # Il clic vale su TUTTO il tratto disegnato, non solo sul suo estremo:
+        # obbligare a centrare la vasca di partenza e' una precisione chiesta
+        # senza motivo, perche' assegnare una mossa non ha niente a che fare
+        # con un estremo particolare.
         app.carroponte_attivo = 1
+        tratti = [t for t in app._tratti_trasporto() if t[0] == 3]
+        _, ts, xs = tratti[0]
+        colpiti = []
+        for frazione in (0.0, 0.25, 0.5, 0.75, 1.0):
+            i = int(frazione * (len(ts) - 1))
+            px, py = app.assi.transData.transform((ts[i], xs[i]))
+            colpiti.append(app._trasporto_sotto(Clic(app.assi, px, py, ts[i])))
         check(
-            app._assegna(3, app._istantanea()) and app.assegnazione == {3: 1},
-            "un clic assegna la mossa al carroponte attivo, senza toccare le altre",
+            colpiti == [3] * 5,
+            f"il tratto si prende dovunque lo si clicchi, non solo alla "
+            f"partenza ({colpiti})",
+        )
+        # e il gesto completo, premi-e-rilascia, assegna davvero
+        i = len(ts) // 2
+        px, py = app.assi.transData.transform((ts[i], xs[i]))
+        app._su_pressione(Clic(app.assi, px, py, ts[i]))
+        app._su_rilascio(Clic(app.assi, px, py, ts[i]))
+        app.update()
+        check(
+            app.assegnazione == {3: 1},
+            "un clic a meta' salita assegna la mossa al carroponte attivo",
         )
         app.update()
         colori = {l.get_color() for l in app.assi.lines}

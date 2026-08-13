@@ -26,6 +26,7 @@ import threading
 import traceback
 
 import matplotlib
+import numpy as np
 
 matplotlib.use("TkAgg")
 
@@ -1413,6 +1414,54 @@ class Applicazione(tk.Tk):
                     punti.append((k, tempi[k] % T + c * T, y))
         return punti
 
+    def _tratti_trasporto(self):
+        """Per ogni trasporto disegnato: (mossa, istanti, posizioni).
+
+        Sono gli stessi punti che finiscono sul grafico -- presa, traslazione
+        e rilascio campionati col profilo vero -- cosi' "clicca sul trasporto"
+        vuol dire davvero dove lo vedi, e non solo sul suo estremo."""
+        if self.config_linea is None or self.T_corrente is None:
+            return []
+        d, T = self.config_linea.data, self.T_corrente
+        tempi = manuale.catena_pezzo(d, self.permanenze)
+        per_mossa: dict[int, list] = {}
+        for s, k in zip(
+            manuale.segmenti_pezzo(d, tempi), manuale.mosse_del_pettine(d, self.permanenze)
+        ):
+            if s.kind != "wait":  # la sosta non e' un trasporto da assegnare
+                per_mossa.setdefault(k, []).append(s)
+
+        fuori = []
+        for k, elenco in per_mossa.items():
+            ts, xs = [], []
+            for s in elenco:
+                a, b = _sample_segment(s)
+                ts.extend(a)
+                xs.extend(b)
+            ts, xs = np.array(ts), np.array(xs)
+            if self.vista == "pettine":
+                scarti = [p * T for p in range(manuale.RIPETIZIONI_PREDEFINITE)]
+            else:
+                # il ciclogramma li disegna riportati dentro il periodo
+                ts = ts - (tempi[k] // T) * T
+                scarti = [c * T for c in range(3)]
+            for scarto in scarti:
+                fuori.append((k, ts + scarto, xs))
+        return fuori
+
+    def _trasporto_sotto(self, evento):
+        """La mossa il cui tratto passa sotto al puntatore, o None.
+
+        Si misura in PIXEL: in coordinate dati un secondo e un millimetro non
+        sono paragonabili, e la tolleranza sarebbe assurda."""
+        migliore, distanza_min = None, 1e9
+        for k, ts, xs in self._tratti_trasporto():
+            punti = self.assi.transData.transform(np.column_stack([ts, xs]))
+            d = np.hypot(punti[:, 0] - evento.x, punti[:, 1] - evento.y).min()
+            if d < distanza_min:
+                migliore, distanza_min = k, d
+        return migliore if distanza_min <= 12 else None
+
     def _su_pressione(self, evento):
         if evento.inaxes is not self.assi or self.soluzione is None:
             return
@@ -1426,18 +1475,30 @@ class Applicazione(tk.Tk):
             return  # sta navigando: il clic e' della barra, non nostro
         if evento.xdata is None:
             return
-        migliore, distanza_min, istante = None, 1e9, 0.0
+        # Due cose diverse, e vanno cercate separatamente.
+        #
+        # Il PUNTO DI PRELIEVO e' la maniglia per trascinare: il tempo in vasca
+        # si allunga da li', quindi il trascinamento ha senso solo prendendolo
+        # per quell'estremo. Raggio stretto.
+        #
+        # Il TRATTO invece si clicca dove lo vedi, per tutta la sua lunghezza:
+        # assegnare una mossa a un carroponte non ha niente a che fare con un
+        # estremo particolare, e obbligare a centrare la vasca di partenza era
+        # una precisione chiesta senza motivo.
+        maniglia, distanza_min, istante = None, 1e9, 0.0
         for k, t, y in self._punti_prelievo():
             px, py = self.assi.transData.transform((t, y))
-            # in pixel: in coordinate dati un secondo e un metro non sono
-            # paragonabili, e la tolleranza sarebbe assurda
             d = ((px - evento.x) ** 2 + (py - evento.y) ** 2) ** 0.5
             if d < distanza_min:
-                migliore, distanza_min, istante = k, d, t
-        if migliore is None or distanza_min > 30:
+                maniglia, distanza_min, istante = k, d, t
+        if distanza_min > 18:
+            maniglia = None
+        sotto = self._trasporto_sotto(evento)
+        if maniglia is None and sotto is None:
             return
         self._trascinamento = {
-            "mossa": migliore,
+            "mossa": maniglia,  # None = qui non si trascina, si puo' solo cliccare
+            "mossa_clic": sotto if sotto is not None else maniglia,
             "t_iniziale": istante,
             "x_iniziale": evento.xdata,
             "px_iniziale": evento.x,
@@ -1447,8 +1508,10 @@ class Applicazione(tk.Tk):
     def _su_movimento(self, evento):
         if self._trascinamento is None or evento.xdata is None:
             return
-        if self._trascinamento["mossa"] == 0:
-            return  # il primo prelievo e' l'origine dei tempi: non si sposta
+        if self._trascinamento["mossa"] in (None, 0):
+            # None: si e' premuto a meta' di un tratto, non su una maniglia.
+            # 0: il primo prelievo e' l'origine dei tempi, non si sposta.
+            return
         delta = evento.xdata - self._trascinamento["x_iniziale"]
         nuovo = self._trascinamento["t_iniziale"] + delta
         if self._guida is not None:
@@ -1472,9 +1535,9 @@ class Applicazione(tk.Tk):
         # Clic secco o trascinamento? Si misura in PIXEL: in secondi la soglia
         # dipenderebbe da quanto si e' ingrandito il grafico.
         if evento.x is None or abs(evento.x - trascinamento["px_iniziale"]) < 4:
-            self._assegna(k, trascinamento["istantanea"])
+            self._assegna(trascinamento["mossa_clic"], trascinamento["istantanea"])
             return
-        if evento.xdata is None:
+        if k is None or evento.xdata is None:
             return
         if k == 0:
             self._stato(

@@ -65,7 +65,7 @@ aprire una finestra, e la cinematica senza avere OR-Tools installato.
 
 | file | righe | contenuto |
 | --- | ---: | --- |
-| `interfaccia.py` | 1817 | L'**interfaccia grafica** (tkinter). La classe `Applicazione` e' tutta la finestra: caricamento, calcolo in background, grafico incorporato (ciclogramma o pettine, secondo come ci si e' arrivati), la pagina unica in cui il ciclogramma si modifica -- calcolato o composto da zero che sia -- verifica e salvataggio. `autotest()` prova l'installazione da sola. E' il programma che usa un utente normale. |
+| `interfaccia.py` | 1880 | L'**interfaccia grafica** (tkinter). La classe `Applicazione` e' tutta la finestra: caricamento, calcolo in background, grafico incorporato (ciclogramma o pettine, secondo come ci si e' arrivati), la pagina unica in cui il ciclogramma si modifica -- calcolato o composto da zero che sia -- verifica e salvataggio. `autotest()` prova l'installazione da sola. E' il programma che usa un utente normale. |
 | `ciclogramma.py` | 191 | Lo stesso lavoro da **riga di comando**, per chi preferisce il terminale o vuole automatizzare. |
 | `esempio.py` | 198 | La linea di esempio definita **in codice** invece che in Excel, per chi vuole integrare il solutore in qualcos'altro. |
 | `costruisci_exe.py` | 119 | Costruisce l'**eseguibile autonomo** con PyInstaller. Vedi sotto. |
@@ -83,7 +83,7 @@ Non serve pytest.
 | `test_verify.py` | 847 | **Il verificatore.** Risponde a "chi verifica il verificatore?": venti casi, di cui uno solo corretto e tutti gli altri rotti di proposito (collisioni, permanenze fuori tolleranza, periodicita' incoerente, geometrie patologiche, capienze). Un controllore che non segnala mai nulla e' inutile, quindi ogni controllo ha un caso che DEVE farlo scattare. Non richiede OR-Tools: le soluzioni sono costruite a mano. |
 | `test_model.py` | 430 | **Il modello CP-SAT.** Risolve davvero e passa ogni soluzione al verificatore: vasche ravvicinate, tre carroponti, capienza, tempi verticali, e la fedelta' della ricostruzione di una soluzione dai suoi gradi di liberta'. Richiede OR-Tools. |
 | `test_excel_io.py` | 733 | **La lettura e la scrittura Excel.** Quasi tutti i casi sono file compilati male: valori mancanti o non numerici, vasche inesistenti o duplicate, righe riordinate, parametri sbagliati, o un file scritto per la vecchia versione in metri. Piu' l'andata e ritorno del ciclogramma salvato nel file, e la struttura del file dei risultati. Non richiede OR-Tools. |
-| `test_interfaccia.py` | 913 | **Le funzioni dell'interfaccia grafica.** La finestra viene costruita davvero e pilotata da codice — si "premono" i pulsanti chiamando i metodi e si fa girare il ciclo degli eventi con `update()` invece di `mainloop()`. Verifica che i pulsanti si abilitino al momento giusto, che il calcolo in background consegni il risultato, che una soluzione calcolata riletta come tempi in vasca e ricomposta dia esattamente lo stesso ciclogramma, che le modifiche vengano riverificate, che l'immagine salvata sia il ciclogramma anche componendo dal pettine, che la scheda di modifica si apra solo dopo 'Calcola man' o 'Modifica' e mai mentre il solutore lavora, che un ciclogramma salvato si riapra identico anche se lasciato a meta', e che la composizione da zero produca il pettine giusto. Richiede OR-Tools e un ambiente grafico. |
+| `test_interfaccia.py` | 935 | **Le funzioni dell'interfaccia grafica.** La finestra viene costruita davvero e pilotata da codice — si "premono" i pulsanti chiamando i metodi e si fa girare il ciclo degli eventi con `update()` invece di `mainloop()`. Verifica che i pulsanti si abilitino al momento giusto, che il calcolo in background consegni il risultato, che una soluzione calcolata riletta come tempi in vasca e ricomposta dia esattamente lo stesso ciclogramma, che le modifiche vengano riverificate, che l'immagine salvata sia il ciclogramma anche componendo dal pettine, che la scheda di modifica si apra solo dopo 'Calcola man' o 'Modifica' e mai mentre il solutore lavora, che un ciclogramma salvato si riapra identico anche se lasciato a meta', e che la composizione da zero produca il pettine giusto. Richiede OR-Tools e un ambiente grafico. |
 
 `kinematics.py` ha in fondo un autotest che si lancia allo stesso modo
 (`python kinematics.py`).
@@ -270,13 +270,20 @@ Si modifica in tre modi, tutti equivalenti:
 - **Doppio clic su un tempo in vasca**, nella tabella. Le soste successive si
   spostano di conseguenza. La tabella mostra accanto il minimo e il massimo di
   processo, ma **non impedisce** di uscirne: sara' la verifica a dirlo.
-- **Trascinando un prelievo sul grafico** — prendi l'inizio di un trasporto e
-  spostalo. Fa la stessa identica cosa: allunga o accorcia la sosta nella vasca
-  da cui il pezzo parte. Mentre trascini, una guida arancione mostra dove
-  finira'.
+- **Trascinando un prelievo sul grafico** — prendi l'**inizio** di un
+  trasporto e spostalo. Fa la stessa identica cosa: allunga o accorcia la sosta
+  nella vasca da cui il pezzo parte. Mentre trascini, una guida arancione
+  mostra dove finira'.
 - **Clic su un trasporto** per darlo al carroponte attivo (si sceglie col menu
   `attivo`), oppure **doppio clic su una riga di `Assegnazione`** per passarlo
   al carroponte successivo.
+
+Le due cose hanno raggi d'azione diversi, e non per caso. Il **clic** vale su
+tutto il tratto disegnato, dalla vasca di partenza a quella di arrivo:
+assegnare una mossa non ha niente a che fare con un estremo particolare, quindi
+non c'e' ragione di far centrare un punto. Il **trascinamento** invece prende
+solo dall'inizio, perche' li' l'estremo conta davvero — e' da quel punto che la
+sosta si allunga o si accorcia.
 
 `Takt time` e `Carroponti` stanno in alto. Lo spinbox dei carroponti
 **ridistribuisce subito** le mosse in blocchi contigui, senza far girare il
