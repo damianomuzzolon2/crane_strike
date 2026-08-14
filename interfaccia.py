@@ -46,6 +46,7 @@ from plotting import (
     lettura_coordinate,
     plot_cyclogram,
 )
+from simulazione import FinestraSimulazione
 from verify import verify_solution
 
 TITOLO = "Ciclogrammi carroponti"
@@ -176,6 +177,10 @@ class Applicazione(tk.Tk):
         # scorciatoia, e un ciclogramma calcolato non si altera per sbaglio
         # con un trascinamento di troppo.
         self.modifica_aperta = False
+        # La finestra della simulazione, quando e' aperta. Non e' una scheda:
+        # la si guarda ACCANTO al ciclogramma, non al posto suo, e cosi' si
+        # puo' modificare da una parte e vedere l'effetto dall'altra.
+        self.finestra_simulazione: FinestraSimulazione | None = None
         # La verifica, una volta chiesta, si tiene aggiornata da sola. Non
         # parte da sola: comporre da zero vuol dire passare per stati
         # dichiaratamente sbagliati, e un muro di errori rossi mentre si sceglie
@@ -229,10 +234,19 @@ class Applicazione(tk.Tk):
             side=tk.LEFT, fill=tk.Y, padx=12
         )
 
+        # Guardare il ciclogramma muoversi. Non e' un quarto modo di ottenerne
+        # uno: e' il ciclogramma che c'e', mostrato come lo si vedrebbe dal
+        # capannone. Percio' sta dopo il separatore, con il salvataggio: sono
+        # tutte e due cose che si fanno a un ciclogramma gia' fatto.
+        self.btn_simula = ttk.Button(
+            barra, text="Simulazione", command=self._apri_simulazione
+        )
+        self.btn_simula.pack(side=tk.LEFT)
+
         self.btn_salva = ttk.Button(
             barra, text="Salva risultati...", command=self._salva
         )
-        self.btn_salva.pack(side=tk.LEFT)
+        self.btn_salva.pack(side=tk.LEFT, padx=(6, 0))
 
         # Percorso completo, non solo il nome: su un PC di stabilimento lo
         # stesso file esiste in piu' copie (scrivania, cartella di commessa,
@@ -520,6 +534,11 @@ class Applicazione(tk.Tk):
         self.verifica_viva = False
         self._annulla.clear()
         self._reimposta_grafico()  # altra linea, altre quote: si riparte da tutto
+        # La simulazione mostrava la linea di prima: altre vasche, altre
+        # distanze. Non e' aggiornabile, va chiusa.
+        if self.finestra_simulazione is not None:
+            self.finestra_simulazione.destroy()
+            self.finestra_simulazione = None
         d = self.config_linea.data
         self._mostra_percorso(percorso)
         self._scrivi_riepilogo(
@@ -666,6 +685,75 @@ class Applicazione(tk.Tk):
             f"L'Excel contiene anche la linea col ciclogramma: riaprilo con "
             f"'Apri linea...' per riprendere da qui.",
         )
+
+    # ------------------------------------------------------------------
+    # Simulazione
+    # ------------------------------------------------------------------
+
+    def _apri_simulazione(self):
+        """Mostra il ciclogramma corrente in movimento.
+
+        Non ricalcola niente e non modifica niente: legge la soluzione che c'e'
+        e la anima. E' il controllo che nessun diagramma sa dare -- un
+        carroponte che attraversa un altro sul ciclogramma e' un incrocio di
+        linee da cercare, nella linea in movimento e' evidente."""
+        if self.soluzione is None or self.dati is None:
+            return
+        if self.finestra_simulazione is not None:
+            # gia' aperta: la si porta davanti aggiornata, invece di aprirne
+            # una seconda che mostrerebbe la stessa cosa
+            self._aggiorna_simulazione()
+            self.finestra_simulazione.lift()
+            self.finestra_simulazione.focus_force()
+            return
+        try:
+            finestra = FinestraSimulazione(
+                self,
+                self.dati,
+                self.soluzione,
+                carri=self._carri_delle_zone(),
+                titolo_linea=os.path.basename(self.percorso_file or ""),
+            )
+        except Exception as e:
+            self._errore("Impossibile simulare", str(e))
+            return
+        self.finestra_simulazione = finestra
+        finestra.bind("<Destroy>", self._simulazione_chiusa)
+        self._stato("Simulazione aperta: si aggiorna da sola se modifichi il ciclogramma")
+
+    def _simulazione_chiusa(self, evento):
+        # <Destroy> arriva anche per ogni widget interno della finestra: solo
+        # quello della finestra stessa vuol dire che e' stata chiusa.
+        if evento.widget is self.finestra_simulazione:
+            self.finestra_simulazione = None
+
+    def _aggiorna_simulazione(self):
+        """Passa alla simulazione il ciclogramma di adesso.
+
+        Si chiama dopo OGNI ricomposizione: una simulazione che continua a
+        mostrare il ciclogramma di prima, mentre a fianco se ne modifica un
+        altro, sarebbe peggio di non averla."""
+        if self.finestra_simulazione is None:
+            return
+        if self.soluzione is None or self.dati is None:
+            return
+        try:
+            self.finestra_simulazione.aggiorna(
+                self.dati, self.soluzione, carri=self._carri_delle_zone()
+            )
+        except Exception:
+            # un ciclogramma a meta' puo' non essere simulabile (per esempio
+            # senza nessuna mossa assegnata): la finestra resta com'e' invece
+            # di far cadere la modifica che si stava facendo
+            pass
+
+    def _carri_delle_zone(self) -> dict[int, int | None]:
+        """Quale carroponte corrisponde a ogni zona: serve alla simulazione per
+        colorarli come il ciclogramma. Con un'assegnazione parziale i due
+        numeri non coincidono (vedi `_carro_della_zona`)."""
+        return {
+            h: self._carro_della_zona(h) for h in range(len(self.dati.zones or []))
+        }
 
     def _salva_immagine(self, percorso_png: str):
         """Scrive il PNG del CICLOGRAMMA, non di quello che c'e' a schermo.
@@ -1093,6 +1181,9 @@ class Applicazione(tk.Tk):
         else:
             self._disegna_traiettorie()
         self._aggiorna_banner_e_riepilogo()
+        # Qui passa ogni ridisegno, quindi ogni modifica: la simulazione
+        # aperta si aggiorna da sola senza doverla richiamare da dieci posti.
+        self._aggiorna_simulazione()
 
     def _disegna_traiettorie(self):
         """Il ciclogramma vero e proprio: le traiettorie dei carroponti,
@@ -1598,6 +1689,11 @@ class Applicazione(tk.Tk):
         self.btn_salva.configure(
             state=tk.NORMAL if c_e_ciclogramma else tk.DISABLED
         )
+        # Si simula un ciclogramma, non una linea: finche' non ce n'e' uno --
+        # calcolato o composto a mano -- non c'e' niente da far muovere.
+        self.btn_simula.configure(
+            state=tk.NORMAL if c_e_ciclogramma else tk.DISABLED
+        )
         self.btn_modifica.configure(
             state=tk.NORMAL if c_e_ciclogramma else tk.DISABLED
         )
@@ -1715,6 +1811,14 @@ class Applicazione(tk.Tk):
         self._stato(titolo)
 
     def destroy(self):
+        # La simulazione ha un timer che si richiama da solo: va fermata
+        # prima, o continua a chiedere ridisegni su una finestra che non c'e'.
+        if self.finestra_simulazione is not None:
+            finestra, self.finestra_simulazione = self.finestra_simulazione, None
+            try:
+                finestra.destroy()
+            except Exception:
+                pass
         # Le icone dei pulsanti della barra del grafico sono immagini di Tk.
         # Se sopravvivono alla finestra, il garbage collector prova a
         # cancellarle su un interprete Tk che non esiste piu' e stampa un

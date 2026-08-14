@@ -879,6 +879,65 @@ def test_ciclogramma_si_riprende(percorso_linea):
             os.unlink(riapribile)
 
 
+def test_simulazione_dal_pulsante(percorso_linea):
+    print("\n[11] la simulazione si apre solo quando c'e' un ciclogramma")
+    from interfaccia import Applicazione
+
+    app = Applicazione(percorso_linea)
+    try:
+        for _ in range(50):
+            app.update()
+            if app.config_linea is not None:
+                break
+            time.sleep(0.02)
+        # Si simula un ciclogramma, non una linea: appena caricato il file non
+        # c'e' ancora niente da far muovere.
+        check(
+            str(app.btn_simula["state"]) == "disabled",
+            "con la sola linea caricata il pulsante e' spento",
+        )
+        app._componi_da_zero()
+        app.update()
+        check(
+            str(app.btn_simula["state"]) == "normal",
+            "composto il ciclogramma, si accende",
+        )
+
+        app._apri_simulazione()
+        app.update()
+        finestra = app.finestra_simulazione
+        check(finestra is not None, "la finestra si apre")
+        finestra.avvia_o_ferma()  # in pausa: qui il tempo lo muoviamo noi
+        check(
+            abs(finestra.sim.T - app.T_corrente) < 1e-9,
+            f"mostra il ciclogramma che c'e' (T={finestra.sim.T:.2f} s)",
+        )
+
+        # riaprirla non ne fa una seconda: ne esiste una, e mostra quella
+        app._apri_simulazione()
+        app.update()
+        check(app.finestra_simulazione is finestra, "premendo ancora non se ne apre una seconda")
+
+        # modificando il ciclogramma la simulazione segue: una che continuasse
+        # a mostrare quello di prima sarebbe peggio di non averla
+        app.var_takt.set(f"{app.T_corrente + 7.0:.2f}")
+        app._modifica_takt()
+        app.update()
+        check(
+            abs(finestra.sim.T - app.T_corrente) < 1e-9,
+            f"cambiato il takt, la simulazione lo recepisce (T={finestra.sim.T:.2f} s)",
+        )
+
+        finestra.destroy()
+        app.update()
+        check(
+            app.finestra_simulazione is None,
+            "chiudendola l'applicazione se ne accorge",
+        )
+    finally:
+        chiudi(app)
+
+
 def test_file_illeggibile():
     print("\n[3] file non valido: messaggio, non schianto")
     from interfaccia import Applicazione
@@ -921,6 +980,7 @@ def main():
         test_da_zero_poi_automatico(linea)
         test_scheda_chiusa_durante_il_calcolo(linea)
         test_ciclogramma_si_riprende(linea)
+        test_simulazione_dal_pulsante(linea)
         test_file_illeggibile()
     finally:
         os.unlink(linea)

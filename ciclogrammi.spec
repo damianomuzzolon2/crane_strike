@@ -43,6 +43,7 @@ nascosti += [
     "manuale",
     "model",
     "plotting",
+    "simulazione",
     "verify",
 ]
 

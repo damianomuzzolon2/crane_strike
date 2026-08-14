@@ -140,6 +140,24 @@ class HoistZone:
     hi: int  # indice dell'ultima mossa gestita
 
 
+@dataclass(frozen=True)
+class LiftPhase:
+    """Un tratto della movimentazione VERTICALE sopra una vasca.
+
+    Le quote sono riferite alla quota di TRASPORTO, che vale 0: il fondo corsa
+    (telaio immerso) sta quindi a -lift_height. Un riferimento assoluto sul
+    pavimento non servirebbe a niente -- delle vasche si conosce la corsa, non
+    la profondita' -- e obbligherebbe a inventare un dato che nessuno ha
+    dichiarato."""
+
+    name: str  # etichetta leggibile: si legge nella simulazione
+    duration: float  # [s]
+    z_start: float  # [mm] quota iniziale del gancio (0 = quota di trasporto)
+    z_end: float  # [mm] quota finale
+    kin: Optional[Kinematics]  # profilo del moto, None se la quota non cambia
+    loaded: bool  # se il telaio e' appeso al gancio durante questa fase
+
+
 @dataclass
 class ProblemData:
     tanks: dict[str, Tank]
@@ -358,16 +376,64 @@ class ProblemData:
         """Sgocciolamento [s] sopra la vasca della tappa data."""
         return self.tanks[self.route[station_idx].tank_id].drain_time
 
+    def pick_phases(self, station_idx: int) -> list["LiftPhase"]:
+        """La PRESA scomposta nei suoi movimenti verticali, in ordine.
+
+        Il ciclogramma ha bisogno della sola durata totale, ma chi deve
+        MOSTRARE la presa -- la simulazione -- ha bisogno di sapere dove sta il
+        gancio istante per istante. Le fasi sono la definizione, e la durata e'
+        la loro somma: cosi' i due usi non possono divergere."""
+        h = self.lift_height_at(station_idx)
+        return [
+            LiftPhase(
+                "discesa del gancio",
+                self._lift_seconds(h, self.kin_lift_empty),
+                0.0,
+                -h,
+                self.kin_lift_empty,
+                False,
+            ),
+            LiftPhase("aggancio", self.engage_time, -h, -h, None, False),
+            LiftPhase(
+                "sollevamento del telaio",
+                self._lift_seconds(h, self.kin_lift_loaded),
+                -h,
+                0.0,
+                self.kin_lift_loaded,
+                True,
+            ),
+            LiftPhase(
+                "sgocciolamento", self.drain_time_at(station_idx), 0.0, 0.0, None, True
+            ),
+        ]
+
+    def release_phases(self, station_idx: int) -> list["LiftPhase"]:
+        """Il RILASCIO scomposto nei suoi movimenti verticali, in ordine."""
+        h = self.lift_height_at(station_idx)
+        return [
+            LiftPhase(
+                "immersione del telaio",
+                self._lift_seconds(h, self.kin_lift_loaded),
+                0.0,
+                -h,
+                self.kin_lift_loaded,
+                True,
+            ),
+            LiftPhase("sgancio", self.disengage_time, -h, -h, None, True),
+            LiftPhase(
+                "risalita del gancio",
+                self._lift_seconds(h, self.kin_lift_empty),
+                -h,
+                0.0,
+                self.kin_lift_empty,
+                False,
+            ),
+        ]
+
     def pick_time_at(self, station_idx: int) -> float:
         """Tempo di PRESA [s] alla stazione data: discesa del gancio scarico,
         aggancio, risalita col telaio, sgocciolamento sopra la vasca."""
-        h = self.lift_height_at(station_idx)
-        return (
-            self._lift_seconds(h, self.kin_lift_empty)
-            + self.engage_time
-            + self._lift_seconds(h, self.kin_lift_loaded)
-            + self.drain_time_at(station_idx)
-        )
+        return sum(f.duration for f in self.pick_phases(station_idx))
 
     def release_time_at(self, station_idx: int) -> float:
         """Tempo di RILASCIO [s] alla stazione data: discesa col telaio,
@@ -377,12 +443,7 @@ class ProblemData:
         tratte (una a vuoto e una a carico) in ordine invertito, quindi
         differiscono solo per i tempi morti -- aggancio e sgocciolamento da una
         parte, sgancio dall'altra."""
-        h = self.lift_height_at(station_idx)
-        return (
-            self._lift_seconds(h, self.kin_lift_loaded)
-            + self.disengage_time
-            + self._lift_seconds(h, self.kin_lift_empty)
-        )
+        return sum(f.duration for f in self.release_phases(station_idx))
 
     def slot_occupancy_seconds(self, station_idx: int, dwell: float) -> float:
         """Per quanto tempo [s] un pezzo tiene occupato un POSTO nella vasca
@@ -428,12 +489,22 @@ class ProblemData:
 class Segment:
     """Un tratto della traiettoria di un carroponte entro un ciclo."""
 
-    kind: str  # 'loaded' | 'empty' | 'wait'
+    kind: str  # 'pick' | 'loaded' | 'release' | 'empty' | 'wait'
     t_start: float  # [s], relativo all'inizio del ciclo (puo' iniziare prima di 0)
     t_end: float  # [s]
     x_start: float  # [m]
     x_end: float  # [m]
     kin: Optional[Kinematics] = None  # None per 'wait'
+    # A quale MOSSA appartiene il tratto, per i soli tratti che ne fanno parte:
+    # presa, traslazione a carico, rilascio. E' None per attesa e rientro a
+    # vuoto, che non sono di nessuna mossa -- stanno FRA due mosse, e
+    # attribuirli all'una o all'altra sarebbe una convenzione arbitraria.
+    #
+    # Serve a chi deve risalire dalla traiettoria alla VASCA: la presa della
+    # mossa k avviene sulla stazione k, il rilascio sulla k+1, e da li' si
+    # ricavano corsa verticale e sgocciolamento. Dedurlo dalla posizione
+    # sbaglierebbe appena due vasche stessero alla stessa quota.
+    move: Optional[int] = None
 
 
 @dataclass
@@ -1394,10 +1465,12 @@ def _build_zone_trajectory(
         t_arrive = t_pick_end + data.horizontal_loaded_seconds(k)
         t1 = t_arrive + data.release_time_at(k + 1)
         if t_pick_end > t0:
-            segs.append(Segment("pick", t0, t_pick_end, x0, x0, None))
-        segs.append(Segment("loaded", t_pick_end, t_arrive, x0, x1, data.kin_loaded))
+            segs.append(Segment("pick", t0, t_pick_end, x0, x0, None, move=k))
+        segs.append(
+            Segment("loaded", t_pick_end, t_arrive, x0, x1, data.kin_loaded, move=k)
+        )
         if t1 > t_arrive:
-            segs.append(Segment("release", t_arrive, t1, x1, x1, None))
+            segs.append(Segment("release", t_arrive, t1, x1, x1, None, move=k))
 
         is_last = i == n - 1
         nxt_k = order[0] if is_last else order[i + 1]
