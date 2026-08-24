@@ -139,11 +139,24 @@ def test_apertura_e_proposta(percorso_linea):
             str(app.btn_modifica["state"]) == "normal",
             "adesso 'Modifica' si accende",
         )
+        # 'Calcola man' apre gia' la modifica, quindi quel pulsante e' l'uscita
+        check(
+            app.modifica_aperta
+            and app.schede.index(app.schede.select()) == 1
+            and str(app.btn_modifica["text"]) == "Fine modifica",
+            "'Calcola man' porta gia' nella scheda dove si modifica",
+        )
         app._vai_a_modifica()
         app.update()
         check(
-            app.schede.index(app.schede.select()) == 1,
-            "e porta alla scheda dove si modifica",
+            not app.modifica_aperta and app.vista == "ciclogramma",
+            "premendolo si esce e si torna a guardare il ciclogramma",
+        )
+        app._vai_a_modifica()
+        app.update()
+        check(
+            app.schede.index(app.schede.select()) == 1 and app.vista == "pettine",
+            "e premendolo ancora si rientra, sul pettine",
         )
     finally:
         chiudi(app)
@@ -408,6 +421,38 @@ def test_vista_e_immagine(percorso_linea):
             and app.assi.get_title().startswith("Ciclogramma"),
             "e 'Calcola auto' riporta al ciclogramma, anche venendo dal pettine",
         )
+        # 'Modifica' su un risultato del solutore porta sul PETTINE, non sul
+        # ciclogramma. Nel ciclogramma si disegnano solo le traiettorie dei
+        # carroponti: un trasporto che non e' di nessuno -- o che si e' appena
+        # tolto a qualcuno -- non compare, e resterebbe invisibile pur essendo
+        # cliccabile.
+        app._vai_a_modifica()
+        app.update()
+        check(
+            app.vista == "pettine" and app.assi.get_title().startswith("Pettine"),
+            f"'Modifica' su un calcolo automatico porta sul pettine ({app.vista})",
+        )
+        check(
+            str(app.btn_modifica["text"]) == "Fine modifica",
+            f"e il pulsante diventa l'uscita ({app.btn_modifica['text']})",
+        )
+        # e la stessa manovra riporta a guardare il ciclogramma, richiudendo
+        # la scheda: senza uscita, chi ha ritoccato un tempo in vasca non
+        # rivedrebbe piu' il ciclogramma se non ricalcolandolo da capo
+        app._vai_a_modifica()
+        app.update()
+        check(
+            app.vista == "ciclogramma"
+            and app.assi.get_title().startswith("Ciclogramma")
+            and not app.modifica_aperta
+            and str(app.schede.tab(1, "state")) == "disabled",
+            "'Fine modifica' riporta al ciclogramma e richiude la scheda",
+        )
+        check(
+            str(app.btn_modifica["text"]) == "Modifica",
+            "e il pulsante torna a proporre la modifica",
+        )
+
         app._componi_da_zero()
         app.update()
         for k in range(app.dati.n_moves):

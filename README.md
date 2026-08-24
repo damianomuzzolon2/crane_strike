@@ -66,7 +66,7 @@ aprire una finestra, e la cinematica senza avere OR-Tools installato.
 
 | file | righe | contenuto |
 | --- | ---: | --- |
-| `interfaccia.py` | 2013 | L'**interfaccia grafica** (tkinter). La classe `Applicazione` e' tutta la finestra: caricamento, calcolo in background, grafico incorporato (ciclogramma o pettine, secondo come ci si e' arrivati), la pagina unica in cui il ciclogramma si modifica -- calcolato o composto da zero che sia -- simulazione, verifica e salvataggio. `autotest()` prova l'installazione da sola. E' il programma che usa un utente normale. |
+| `interfaccia.py` | 2053 | L'**interfaccia grafica** (tkinter). La classe `Applicazione` e' tutta la finestra: caricamento, calcolo in background, grafico incorporato (ciclogramma o pettine, secondo come ci si e' arrivati), la pagina unica in cui il ciclogramma si modifica -- calcolato o composto da zero che sia -- simulazione, verifica e salvataggio. `autotest()` prova l'installazione da sola. E' il programma che usa un utente normale. |
 | `ciclogramma.py` | 191 | Lo stesso lavoro da **riga di comando**, per chi preferisce il terminale o vuole automatizzare. |
 | `esempio.py` | 198 | La linea di esempio definita **in codice** invece che in Excel, per chi vuole integrare il solutore in qualcos'altro. |
 | `costruisci_exe.py` | 119 | Costruisce l'**eseguibile autonomo** con PyInstaller. Vedi sotto. |
@@ -85,7 +85,7 @@ Non serve pytest.
 | `test_model.py` | 430 | **Il modello CP-SAT.** Risolve davvero e passa ogni soluzione al verificatore: vasche ravvicinate, tre carroponti, capienza, tempi verticali, e la fedelta' della ricostruzione di una soluzione dai suoi gradi di liberta'. Richiede OR-Tools. |
 | `test_excel_io.py` | 733 | **La lettura e la scrittura Excel.** Quasi tutti i casi sono file compilati male: valori mancanti o non numerici, vasche inesistenti o duplicate, righe riordinate, parametri sbagliati, o un file scritto per la vecchia versione in metri. Piu' l'andata e ritorno del ciclogramma salvato nel file, e la struttura del file dei risultati. Non richiede OR-Tools. |
 | `test_simulazione.py` | 587 | **La simulazione.** Il controllo che conta e' incrociato: ogni pezzo appeso deve stare *esattamente* dove sta il gancio di un carroponte che lo tiene, e ogni carroponte che tiene qualcosa deve avere un pezzo li'. Se simulazione e ciclogramma raccontassero due storie diverse, una delle due sarebbe sbagliata. Lo stesso controllo viene rifatto sulle quote **disegnate**, che non sono quelle vere: il telaio deve restare appeso al bilancino anche dopo il rimappaggio delle profondita'. Le vasche di prova hanno corse verticali **diverse fra loro** apposta: con corse tutte uguali, prendere la corsa della vasca sbagliata darebbe comunque il risultato giusto. In fondo, i casi in cui la geometria del disegno degenera: corse e ingombri tutti a zero, tutte le tappe nella stessa vasca. Non richiede OR-Tools. |
-| `test_interfaccia.py` | 1036 | **Le funzioni dell'interfaccia grafica.** La finestra viene costruita davvero e pilotata da codice — si "premono" i pulsanti chiamando i metodi e si fa girare il ciclo degli eventi con `update()` invece di `mainloop()`. Verifica che i pulsanti si abilitino al momento giusto, che il calcolo in background consegni il risultato, che una soluzione calcolata riletta come tempi in vasca e ricomposta dia esattamente lo stesso ciclogramma, che le modifiche vengano riverificate, che l'immagine salvata sia il ciclogramma anche componendo dal pettine, che la scheda di modifica si apra solo dopo 'Calcola man' o 'Modifica' e mai mentre il solutore lavora, che un ciclogramma salvato si riapra identico anche se lasciato a meta', che la composizione da zero produca il pettine giusto, che un trasporto assegnato si possa togliere con lo stesso gesto con cui lo si e' assegnato, e che la simulazione si apra solo quando un ciclogramma c'e' davvero e segua le modifiche mentre e' aperta. Richiede OR-Tools e un ambiente grafico. |
+| `test_interfaccia.py` | 1081 | **Le funzioni dell'interfaccia grafica.** La finestra viene costruita davvero e pilotata da codice — si "premono" i pulsanti chiamando i metodi e si fa girare il ciclo degli eventi con `update()` invece di `mainloop()`. Verifica che i pulsanti si abilitino al momento giusto, che il calcolo in background consegni il risultato, che una soluzione calcolata riletta come tempi in vasca e ricomposta dia esattamente lo stesso ciclogramma, che le modifiche vengano riverificate, che l'immagine salvata sia il ciclogramma anche componendo dal pettine, che la scheda di modifica si apra solo dopo 'Calcola man' o 'Modifica' e mai mentre il solutore lavora, che un ciclogramma salvato si riapra identico anche se lasciato a meta', che la composizione da zero produca il pettine giusto, che un trasporto assegnato si possa togliere con lo stesso gesto con cui lo si e' assegnato, e che la simulazione si apra solo quando un ciclogramma c'e' davvero e segua le modifiche mentre e' aperta. Richiede OR-Tools e un ambiente grafico. |
 
 `kinematics.py` ha in fondo un autotest che si lancia allo stesso modo
 (`python kinematics.py`).
@@ -129,7 +129,7 @@ programma.
 | `Nuovo modello Excel...` | Crea il file da compilare, gia' pieno con una linea di zincatura d'esempio, e chiede se aprirlo subito. E' il modo consigliato di cominciare: si parte da qualcosa che funziona e lo si modifica. |
 | `Calcola auto` | Cerca il numero minimo di carroponti, la suddivisione migliore della linea e il takt time piu' basso. Puo' durare da qualche secondo a qualche minuto: la barra in basso a destra si muove, i pulsanti si spengono e la scheda *Ciclogramma* si chiude finche' non ha finito. La finestra **non si blocca**. |
 | `Calcola man` | Butta via il ciclogramma corrente e riparte dai tempi minimi di processo, con **nessun trasporto assegnato**, per comporlo a mano (vedi sotto). |
-| `Modifica` | Apre alla modifica il ciclogramma che c'e'. Non cambia niente, ma e' il passaggio obbligato: senza, la scheda *Ciclogramma* resta chiusa. |
+| `Modifica` / `Fine modifica` | Apre alla modifica il ciclogramma che c'e', portando sul **pettine** — che e' il foglio su cui si assegna. Non cambia niente, ma e' il passaggio obbligato: senza, la scheda *Ciclogramma* resta chiusa. Premuto di nuovo chiude la modifica e riporta a guardare il ciclogramma. |
 | `Simulazione` | Apre una finestra a parte in cui la linea si vede **di fronte e in movimento**: i carroponti che scorrono, calano il gancio, tirano su il telaio, lo portano e lo immergono. Si accende solo quando un ciclogramma c'e' — calcolato o composto a mano, e' lo stesso oggetto. Vedi sotto. |
 | `Salva risultati...` | Scrive l'Excel dei risultati e, accanto, l'immagine del ciclogramma. **Lo stesso Excel si riapre con `Apri linea...`** per riprendere il lavoro: contiene anche la linea e il ciclogramma. Si abilita solo quando c'e' qualcosa da salvare. |
 
@@ -146,12 +146,19 @@ modo in cui sei arrivato.
 
 | disegno | quando compare | cosa mostra |
 | --- | --- | --- |
-| **ciclogramma** | dopo `Calcola auto` e dopo `Ottimizza con questi carroponti` | le traiettorie dei **carroponti**, su due cicli: chi si muove quando, chi rischia di incontrare chi |
-| **pettine** | dopo `Calcola man` | le scalinate dei **pezzi**, dieci, una ogni takt time: e' il foglio su cui si compone, e le pedate **sono** i tempi in vasca |
+| **ciclogramma** | dopo `Calcola auto`, dopo `Ottimizza con questi carroponti` e dopo `Fine modifica` | le traiettorie dei **carroponti**, su due cicli: chi si muove quando, chi rischia di incontrare chi |
+| **pettine** | dopo `Calcola man` e dopo `Modifica` | le scalinate dei **pezzi**, dieci, una ogni takt time: e' il foglio su cui si compone, e le pedate **sono** i tempi in vasca |
 
 Vale anche tornando indietro: se stavi componendo a mano e premi `Calcola
 auto`, il disegno torna al ciclogramma. Il pettine e' il foglio su cui si
 **compone**, e un risultato del solutore non si compone: si legge.
+
+**Si modifica sempre sul pettine**, anche un ciclogramma appena calcolato. Non
+e' una preferenza: nel ciclogramma si disegnano solo le traiettorie dei
+carroponti, quindi un trasporto che non e' ancora di nessuno — o che hai appena
+tolto a qualcuno — li' **non compare affatto**, pur restando cliccabile. Non lo
+vedi e ci inciampi, che e' la combinazione peggiore. Nel pettine il pezzo passa
+comunque, grigio finche' nessuno lo porta.
 
 Un interruttore fra i due c'e' stato ed e' stato tolto: le tabelle della scheda
 *Ciclogramma* permettono di modificare tutto — tempi in vasca, assegnazione,
@@ -401,6 +408,7 @@ aprirla. La regola sta in tre righe:
 | linea appena aperta | chiusa: non c'e' niente da modificare |
 | dopo `Calcola auto` | chiusa: c'e' un risultato da **leggere** |
 | dopo `Calcola man` o `Modifica` | aperta |
+| dopo `Fine modifica` | chiusa di nuovo |
 | mentre il solutore lavora | chiusa, sempre |
 
 Un risultato del solutore si guarda prima di toccarlo, e premere `Modifica` e'
@@ -408,6 +416,14 @@ il momento in cui si dichiara di volerci mettere le mani. Cosi' non lo si
 altera per sbaglio con un trascinamento di troppo — il grafico e' fuori dalla
 scheda, quindi ha lo stesso cancello — e i tre pulsanti diventano tre stati
 veri: leggi, componi, modifica.
+
+Aperta la modifica, **lo stesso pulsante diventa `Fine modifica`**: chiude la
+scheda e riporta a guardare il ciclogramma. Serve perche' la modifica porta sul
+pettine, e senza un'uscita chi ha ritoccato un tempo in vasca non rivedrebbe
+piu' il ciclogramma se non ricalcolandolo da capo. Non e' l'interruttore fra le
+due viste — quello e' stato tolto apposta — ma l'uscita da uno stato di lavoro:
+chiudendo si torna a leggere, e il ciclogramma non si altera piu' per un clic
+di troppo.
 
 #### Mentre il calcolo gira
 
@@ -1186,7 +1202,7 @@ python esempio.py           # risoluzione reale + verifica + grafico
 ```
 
 Ognuno stampa cosa ha provato e finisce con `RISULTATO: n ok, m falliti`.
-Nessuna dipendenza da pytest. Stato attuale: **66, 69, 41, 24 e 89 asserzioni,
+Nessuna dipendenza da pytest. Stato attuale: **66, 69, 41, 24 e 95 asserzioni,
 zero fallimenti**.
 
 **La risoluzione CP-SAT e' eseguita e verificata end-to-end.** Sull'esempio

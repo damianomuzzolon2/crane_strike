@@ -225,8 +225,10 @@ class Applicazione(tk.Tk):
             barra, text="Calcola man", command=self._componi_da_zero
         )
         self.btn_proposta.pack(side=tk.LEFT, padx=(6, 0))
+        # larghezza fissa: l'etichetta cambia in "Fine modifica" quando la
+        # modifica e' aperta, e senza non starebbe ferma
         self.btn_modifica = ttk.Button(
-            barra, text="Modifica", command=self._vai_a_modifica
+            barra, text="Modifica", width=13, command=self._vai_a_modifica
         )
         self.btn_modifica.pack(side=tk.LEFT, padx=(6, 0))
 
@@ -906,22 +908,48 @@ class Applicazione(tk.Tk):
         return True
 
     def _vai_a_modifica(self):
-        """Apre il ciclogramma che c'e' alla modifica.
-
-        Non sceglie fra una versione automatica e una manuale -- ce n'e' una
-        sola -- ne' cambia qualcosa: sblocca la scheda e ci porta. E' il
-        momento in cui si dichiara di voler mettere le mani su un risultato,
-        che e' diverso dal guardarlo."""
+        """Apre alla modifica il ciclogramma che c'e', o la chiude se e' gia'
+        aperta. Non sceglie fra una versione automatica e una manuale -- ce
+        n'e' una sola -- ne' cambia niente: e' il momento in cui si dichiara di
+        voler mettere le mani su un risultato, che e' diverso dal guardarlo."""
         if self.soluzione is None:
             return
+        if self.modifica_aperta:
+            self._chiudi_modifica()
+            return
         self.modifica_aperta = True
+        # Si modifica sul PETTINE, sempre, sia che il ciclogramma venga dal
+        # solutore sia che lo si stia componendo. Il ciclogramma disegna le
+        # traiettorie dei carroponti, e un trasporto che non e' ancora di
+        # nessuno -- o che si e' appena tolto a qualcuno -- li' non compare:
+        # resterebbe invisibile e per giunta cliccabile, che e' il peggio.
+        # Nel pettine il pezzo passa comunque, grigio finche' nessuno lo porta.
+        self.vista = "pettine"
+        self._reimposta_grafico()  # altra scala dei tempi: si riparte da tutto
         self._aggiorna_stato_pulsanti()  # prima si sblocca, poi si seleziona
         self.schede.select(1)
+        self._mostra_ciclogramma()
         self._stato(
             "Modifica: trascina un prelievo sul grafico, cambia un tempo in "
             "vasca, oppure clicca un trasporto per assegnarlo (e di nuovo per "
             "toglierlo)"
         )
+
+    def _chiudi_modifica(self):
+        """Torna a guardare il ciclogramma, e richiude la scheda.
+
+        Serve perche' la modifica porta sul pettine: senza un modo di uscirne,
+        chi ha ritoccato un tempo in vasca non rivedrebbe piu' il ciclogramma
+        se non ricalcolandolo da capo. Non e' un interruttore fra due viste --
+        quello e' stato tolto apposta -- ma l'uscita da uno stato di lavoro:
+        chiudendo si torna a leggere, e il ciclogramma non si altera piu' per
+        un clic di troppo."""
+        self.modifica_aperta = False
+        self.vista = "ciclogramma"
+        self._reimposta_grafico()
+        self._aggiorna_stato_pulsanti()
+        self._mostra_ciclogramma()
+        self._stato("Modifica chiusa: si guarda il ciclogramma")
 
     def _componi_da_zero(self):
         """Butta via tutto e riparte dai tempi minimi di processo."""
@@ -1230,7 +1258,18 @@ class Applicazione(tk.Tk):
                 ax=self.assi,
             )
         except Exception as e:
-            self._grafico_vuoto(f"Impossibile disegnare: {e}")
+            # Il caso normale, non un guasto: senza nessun trasporto assegnato
+            # non c'e' nessuna traiettoria di carroponte da tracciare. Dirlo
+            # com'e' evita di far leggere un messaggio di errore a chi sta
+            # semplicemente cominciando.
+            if not self.assegnazione:
+                self._grafico_vuoto(
+                    "Nessun trasporto assegnato a un carroponte:\n"
+                    "il ciclogramma e' ancora vuoto.\n"
+                    "Premi 'Modifica' e assegnali sul pettine."
+                )
+            else:
+                self._grafico_vuoto(f"Impossibile disegnare: {e}")
         self.figura.tight_layout()
         self._riapplica_vista(vista)
         self.tela.draw()
@@ -1724,7 +1763,8 @@ class Applicazione(tk.Tk):
             state=tk.NORMAL if c_e_ciclogramma else tk.DISABLED
         )
         self.btn_modifica.configure(
-            state=tk.NORMAL if c_e_ciclogramma else tk.DISABLED
+            state=tk.NORMAL if c_e_ciclogramma else tk.DISABLED,
+            text="Fine modifica" if self.modifica_aperta else "Modifica",
         )
         self.btn_verifica.configure(
             state=tk.NORMAL if c_e_ciclogramma else tk.DISABLED
