@@ -66,7 +66,7 @@ aprire una finestra, e la cinematica senza avere OR-Tools installato.
 
 | file | righe | contenuto |
 | --- | ---: | --- |
-| `interfaccia.py` | 1984 | L'**interfaccia grafica** (tkinter). La classe `Applicazione` e' tutta la finestra: caricamento, calcolo in background, grafico incorporato (ciclogramma o pettine, secondo come ci si e' arrivati), la pagina unica in cui il ciclogramma si modifica -- calcolato o composto da zero che sia -- simulazione, verifica e salvataggio. `autotest()` prova l'installazione da sola. E' il programma che usa un utente normale. |
+| `interfaccia.py` | 2013 | L'**interfaccia grafica** (tkinter). La classe `Applicazione` e' tutta la finestra: caricamento, calcolo in background, grafico incorporato (ciclogramma o pettine, secondo come ci si e' arrivati), la pagina unica in cui il ciclogramma si modifica -- calcolato o composto da zero che sia -- simulazione, verifica e salvataggio. `autotest()` prova l'installazione da sola. E' il programma che usa un utente normale. |
 | `ciclogramma.py` | 191 | Lo stesso lavoro da **riga di comando**, per chi preferisce il terminale o vuole automatizzare. |
 | `esempio.py` | 198 | La linea di esempio definita **in codice** invece che in Excel, per chi vuole integrare il solutore in qualcos'altro. |
 | `costruisci_exe.py` | 119 | Costruisce l'**eseguibile autonomo** con PyInstaller. Vedi sotto. |
@@ -85,7 +85,7 @@ Non serve pytest.
 | `test_model.py` | 430 | **Il modello CP-SAT.** Risolve davvero e passa ogni soluzione al verificatore: vasche ravvicinate, tre carroponti, capienza, tempi verticali, e la fedelta' della ricostruzione di una soluzione dai suoi gradi di liberta'. Richiede OR-Tools. |
 | `test_excel_io.py` | 733 | **La lettura e la scrittura Excel.** Quasi tutti i casi sono file compilati male: valori mancanti o non numerici, vasche inesistenti o duplicate, righe riordinate, parametri sbagliati, o un file scritto per la vecchia versione in metri. Piu' l'andata e ritorno del ciclogramma salvato nel file, e la struttura del file dei risultati. Non richiede OR-Tools. |
 | `test_simulazione.py` | 587 | **La simulazione.** Il controllo che conta e' incrociato: ogni pezzo appeso deve stare *esattamente* dove sta il gancio di un carroponte che lo tiene, e ogni carroponte che tiene qualcosa deve avere un pezzo li'. Se simulazione e ciclogramma raccontassero due storie diverse, una delle due sarebbe sbagliata. Lo stesso controllo viene rifatto sulle quote **disegnate**, che non sono quelle vere: il telaio deve restare appeso al bilancino anche dopo il rimappaggio delle profondita'. Le vasche di prova hanno corse verticali **diverse fra loro** apposta: con corse tutte uguali, prendere la corsa della vasca sbagliata darebbe comunque il risultato giusto. In fondo, i casi in cui la geometria del disegno degenera: corse e ingombri tutti a zero, tutte le tappe nella stessa vasca. Non richiede OR-Tools. |
-| `test_interfaccia.py` | 995 | **Le funzioni dell'interfaccia grafica.** La finestra viene costruita davvero e pilotata da codice — si "premono" i pulsanti chiamando i metodi e si fa girare il ciclo degli eventi con `update()` invece di `mainloop()`. Verifica che i pulsanti si abilitino al momento giusto, che il calcolo in background consegni il risultato, che una soluzione calcolata riletta come tempi in vasca e ricomposta dia esattamente lo stesso ciclogramma, che le modifiche vengano riverificate, che l'immagine salvata sia il ciclogramma anche componendo dal pettine, che la scheda di modifica si apra solo dopo 'Calcola man' o 'Modifica' e mai mentre il solutore lavora, che un ciclogramma salvato si riapra identico anche se lasciato a meta', che la composizione da zero produca il pettine giusto, e che la simulazione si apra solo quando un ciclogramma c'e' davvero e segua le modifiche mentre e' aperta. Richiede OR-Tools e un ambiente grafico. |
+| `test_interfaccia.py` | 1036 | **Le funzioni dell'interfaccia grafica.** La finestra viene costruita davvero e pilotata da codice — si "premono" i pulsanti chiamando i metodi e si fa girare il ciclo degli eventi con `update()` invece di `mainloop()`. Verifica che i pulsanti si abilitino al momento giusto, che il calcolo in background consegni il risultato, che una soluzione calcolata riletta come tempi in vasca e ricomposta dia esattamente lo stesso ciclogramma, che le modifiche vengano riverificate, che l'immagine salvata sia il ciclogramma anche componendo dal pettine, che la scheda di modifica si apra solo dopo 'Calcola man' o 'Modifica' e mai mentre il solutore lavora, che un ciclogramma salvato si riapra identico anche se lasciato a meta', che la composizione da zero produca il pettine giusto, che un trasporto assegnato si possa togliere con lo stesso gesto con cui lo si e' assegnato, e che la simulazione si apra solo quando un ciclogramma c'e' davvero e segua le modifiche mentre e' aperta. Richiede OR-Tools e un ambiente grafico. |
 
 `kinematics.py` ha in fondo un autotest che si lancia allo stesso modo
 (`python kinematics.py`).
@@ -355,12 +355,22 @@ Si modifica in tre modi, tutti equivalenti:
   `attivo`), oppure **doppio clic su una riga di `Assegnazione`** per passarlo
   al carroponte successivo.
 
-Le due cose hanno raggi d'azione diversi, e non per caso. Il **clic** vale su
-tutto il tratto disegnato, dalla vasca di partenza a quella di arrivo:
-assegnare una mossa non ha niente a che fare con un estremo particolare, quindi
-non c'e' ragione di far centrare un punto. Il **trascinamento** invece prende
-solo dall'inizio, perche' li' l'estremo conta davvero — e' da quel punto che la
-sosta si allunga o si accorcia.
+**Per togliere un'assegnazione** si rifa' la stessa cosa: un secondo clic sul
+trasporto lo toglie al carroponte attivo, e il tratto torna grigio. Dalla
+tabella, il doppio clic dopo l'ultimo carroponte passa per *non assegnato*
+prima di ricominciare il giro. Lo stesso gesto fa e disfa perche' assegnare per
+sbaglio costa un clic, e il carroponte a cui si vuole togliere una mossa e'
+quasi sempre quello a cui si sta lavorando — cioe' proprio quello attivo.
+Togliere non puo' mai essere rifiutato: i carroponti si scavalcano per quello
+che *fanno*, e una mossa in meno non obbliga nessuno a passare da nessuna
+parte.
+
+Il clic e il trascinamento hanno raggi d'azione diversi, e non per caso. Il
+**clic** vale su tutto il tratto disegnato, dalla vasca di partenza a quella di
+arrivo: assegnare una mossa non ha niente a che fare con un estremo
+particolare, quindi non c'e' ragione di far centrare un punto. Il
+**trascinamento** invece prende solo dall'inizio, perche' li' l'estremo conta
+davvero — e' da quel punto che la sosta si allunga o si accorcia.
 
 `Takt time` e `Carroponti` stanno in alto. Lo spinbox dei carroponti
 **ridistribuisce subito** le mosse in blocchi contigui, senza far girare il
@@ -1176,7 +1186,7 @@ python esempio.py           # risoluzione reale + verifica + grafico
 ```
 
 Ognuno stampa cosa ha provato e finisce con `RISULTATO: n ok, m falliti`.
-Nessuna dipendenza da pytest. Stato attuale: **66, 69, 41, 24 e 85 asserzioni,
+Nessuna dipendenza da pytest. Stato attuale: **66, 69, 41, 24 e 89 asserzioni,
 zero fallimenti**.
 
 **La risoluzione CP-SAT e' eseguita e verificata end-to-end.** Sull'esempio

@@ -580,7 +580,48 @@ def test_composizione_da_zero(percorso_linea):
             [app._carro_della_zona(i) for i in range(len(app.dati.zones))] == [None, 1],
             "la zona senza mosse assegnate non e' di nessuno, l'altra e' del 2",
         )
+
+        # -- e lo stesso clic la toglie --------------------------------------
+        # Assegnare per sbaglio costa un clic: senza il modo di tornare
+        # indietro l'unica strada sarebbe ricominciare da capo.
+        app._su_pressione(Clic(app.assi, px, py, ts[i]))
+        app._su_rilascio(Clic(app.assi, px, py, ts[i]))
+        app.update()
+        check(
+            app.assegnazione == {},
+            f"cliccando di nuovo la mossa torna non assegnata "
+            f"({app.assegnazione})",
+        )
+        check(
+            _HOIST_COLORS[1] not in {l.get_color() for l in app.assi.lines},
+            "e sul grafico il colore del carroponte sparisce: torna tutto grigio",
+        )
         app._annulla_modifica()
+        app.update()
+        check(
+            app.assegnazione == {3: 1},
+            f"'Annulla modifica' rimette l'assegnazione tolta ({app.assegnazione})",
+        )
+
+        # -- il giro del doppio clic in tabella passa da 'nessuno' -----------
+        righe = app.tabella_assegnazione.get_children()
+        riquadro = app.tabella_assegnazione.bbox(righe[3])
+        if riquadro:
+            fatto = []
+            for _ in range(3):
+                app._assegna_da_tabella(Clic(None, 0, riquadro[1] + riquadro[3] // 2, 0))
+                app.update()
+                fatto.append(app.assegnazione.get(3))
+            check(
+                fatto == [None, 0, 1],
+                f"il doppio clic gira sui carroponti e passa per 'nessuno' ({fatto})",
+            )
+        else:
+            check(False, "riga della tabella non visibile: prova non eseguita")
+
+        # si riparte da zero assegnazioni, per il seguito della prova
+        app.assegnazione = {}
+        app._ricomponi("")
         app.update()
         # A lavoro finito NIENTE deve restare grigio: il grigio vuol dire
         # "ancora da assegnare", e una sosta in vasca lasciata grigia

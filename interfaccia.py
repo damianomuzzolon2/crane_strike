@@ -454,8 +454,9 @@ class Applicazione(tk.Tk):
         self.tabella_assegnazione.bind("<Double-1>", self._assegna_da_tabella)
         ttk.Label(
             cornice,
-            text="Doppio clic per passare il trasporto al carroponte successivo,\n"
-            "oppure clic sul trasporto nel grafico per darlo a quello attivo.",
+            text="Doppio clic per passare il trasporto al carroponte successivo;\n"
+            "dopo l'ultimo torna non assegnato. Sul grafico, clic sul trasporto\n"
+            "per darlo al carroponte attivo, e di nuovo per toglierglielo.",
             foreground="#777777",
         ).pack(anchor=tk.W, pady=(2, 0))
 
@@ -918,7 +919,8 @@ class Applicazione(tk.Tk):
         self.schede.select(1)
         self._stato(
             "Modifica: trascina un prelievo sul grafico, cambia un tempo in "
-            "vasca, oppure clicca un trasporto per assegnarlo"
+            "vasca, oppure clicca un trasporto per assegnarlo (e di nuovo per "
+            "toglierlo)"
         )
 
     def _componi_da_zero(self):
@@ -1121,13 +1123,31 @@ class Applicazione(tk.Tk):
         editore.bind("<Escape>", lambda e: editore.destroy())
 
     def _assegna(self, k: int, prima) -> bool:
-        """Da' la mossa k al carroponte attivo, se la rotaia lo consente."""
+        """Da' la mossa k al carroponte attivo -- o gliela toglie, se era gia'
+        sua, e il trasporto torna grigio.
+
+        Lo stesso gesto fa e disfa. Assegnare per sbaglio e' facile quanto un
+        clic di troppo, e senza un modo di tornare indietro l'unica strada
+        sarebbe ricominciare da capo. Il carroponte a cui si vuole togliere una
+        mossa e' quasi sempre quello a cui si sta lavorando, cioe' proprio
+        quello attivo: percio' la stessa manovra basta a tutte e due le cose,
+        senza inventare un secondo tasto o un altro tipo di clic."""
         d = self.config_linea.data
         if self.assegnazione.get(k) == self.carroponte_attivo:
-            self._stato(
-                f"La mossa {k} e' gia' del carroponte {self.carroponte_attivo + 1}"
+            prova = dict(self.assegnazione)
+            del prova[k]
+            self.assegnazione = prova
+            # Togliere non puo' mai rendere impossibile una disposizione: i
+            # carroponti si scavalcano per quello che FANNO, e una mossa in
+            # meno non obbliga nessuno a passare da nessuna parte. Nessun
+            # controllo, quindi -- e nessuna manovra che si rifiuta di tornare
+            # indietro, che sarebbe la cosa peggiore.
+            self._ricomponi(
+                f"Mossa {k} ({d.route[k].tank_id} -> {d.route[k + 1].tank_id}) "
+                f"tolta al carroponte {self.carroponte_attivo + 1}",
+                prima,
             )
-            return False
+            return True
         prova = dict(self.assegnazione)
         prova[k] = self.carroponte_attivo
         motivo = manuale.perche_non_va(d, prova)
@@ -1147,21 +1167,30 @@ class Applicazione(tk.Tk):
         if not riga:
             return
         k = int(self.tabella_assegnazione.item(riga, "values")[0])
-        # a ogni doppio clic si passa al carroponte successivo: e' il modo piu'
-        # rapido di correggere senza dover cambiare il carroponte attivo
-        attuale = self.assegnazione.get(k, -1)
         d = self.config_linea.data
-        # si prova il carroponte successivo, e se scavalcherebbe si continua a
-        # girare: cosi' il doppio clic propone solo assegnazioni possibili
-        for passo in range(1, self.n_carroponti + 1):
-            candidato = (attuale + passo) % self.n_carroponti
+        # A ogni doppio clic si passa al carroponte successivo, e dopo l'ultimo
+        # si torna a NESSUNO: cosi' il giro comprende anche il togliere, che
+        # altrimenti dalla tabella non si potrebbe fare. Se un carroponte
+        # scavalcherebbe i vicini si tira dritto al prossimo, quindi il doppio
+        # clic propone solo cose possibili.
+        giro = list(range(self.n_carroponti)) + [None]
+        attuale = self.assegnazione.get(k)
+        da = giro.index(attuale) if attuale in giro else len(giro) - 1
+        for passo in range(1, len(giro) + 1):
+            candidato = giro[(da + passo) % len(giro)]
             prova = dict(self.assegnazione)
-            prova[k] = candidato
-            if manuale.perche_non_va(d, prova) is None:
+            if candidato is None:
+                prova.pop(k, None)
+            else:
+                prova[k] = candidato
+            if candidato is None or manuale.perche_non_va(d, prova) is None:
                 prima = self._istantanea()
                 self.assegnazione = prova
                 self._ricomponi(
-                    f"Mossa {k} al carroponte {candidato + 1}", prima
+                    f"Mossa {k} non assegnata"
+                    if candidato is None
+                    else f"Mossa {k} al carroponte {candidato + 1}",
+                    prima,
                 )
                 return
         self._stato(
