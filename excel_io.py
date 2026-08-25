@@ -31,6 +31,7 @@ from typing import Optional
 from kinematics import Kinematics
 from model import HoistZone, ProblemData, StationSpec, Tank
 
+FOGLIO_ISTRUZIONI = "Istruzioni"
 FOGLIO_VASCHE = "Vasche"
 FOGLIO_PERCORSO = "Percorso"
 FOGLIO_PARAMETRI = "Parametri"
@@ -806,7 +807,7 @@ def _aggiungi_fogli_linea(
     # Tutte le spiegazioni stanno QUI e non nei fogli dei dati: una nota
     # scritta in una colonna che poi viene letta verrebbe scambiata per un
     # dato, ed e' un errore facilissimo da fare.
-    ws = wb.create_sheet("Istruzioni")
+    ws = wb.create_sheet(FOGLIO_ISTRUZIONI)
     ws.column_dimensions["A"].width = 110
     for testo, stile in [
         ("Come compilare questo file", titolo_par),
@@ -1135,6 +1136,64 @@ def _utilizzo_carroponti(solution, T: float) -> list[float]:
     return out
 
 
+# Le due meta' del file dei risultati. I colori finiscono sulla linguetta, che
+# e' l'unico posto in cui si guarda quando si cerca un foglio.
+_COLORE_INGRESSO = "4F81BD"  # blu
+_COLORE_REFERTO = "6AA84F"  # verde
+
+
+# Una riga per foglio, da mettere nel cartello del suo gruppo.
+_COSA_CONTIENE = {
+    FOGLIO_ISTRUZIONI: "come si compila il file, foglio per foglio",
+    FOGLIO_VASCHE: "le vasche: posizione, posti, corsa verticale, sgocciolamento",
+    FOGLIO_PERCORSO: "la ricetta: in che ordine il pezzo visita le vasche, e per quanto",
+    FOGLIO_PARAMETRI: "carroponti, tolleranze, distanze di sicurezza",
+    FOGLIO_ZONE: "quale carroponte serve quale tratto di linea (facoltativo)",
+    FOGLIO_CICLOGRAMMA: "il ciclogramma nei suoi tre gradi di liberta', per riprenderlo",
+    "Riepilogo": "takt time, produttivita', carroponti, esito della verifica",
+    "Movimenti": "ogni tratto di ogni carroponte: quando, da dove, a dove",
+    "FlussoPezzo": "il percorso di un pezzo, vasca per vasca",
+    "Verifica": "i rilievi del verificatore indipendente, divisi per gravita'",
+}
+
+
+def _cartello(wb, titolo: str, colore: str, sottotitolo: str, da: int):
+    """Mette un cartello davanti al gruppo di fogli che comincia in posizione
+    `da`, ed elenca cosa c'e' dentro.
+
+    Il file dei risultati e' due cose insieme -- la linea da riaprire e il
+    referto da leggere -- e con dodici linguette di fila non si capisce dove
+    finisce una e comincia l'altra. Il cartello non contiene dati: dice cosa
+    viene dopo, e la sua linguetta colorata si vede senza leggere niente.
+
+    L'elenco NON e' scritto a mano: si ricava dai fogli che ci sono davvero in
+    quel momento. Un elenco fisso resterebbe indietro il giorno che si
+    aggiunge o si toglie un foglio, e un indice che mente e' peggio di nessun
+    indice."""
+    from openpyxl.styles import Font, PatternFill
+
+    gruppo = list(wb.sheetnames[da:])
+    ws = wb.create_sheet(titolo)
+    ws.sheet_properties.tabColor = colore
+    ws.column_dimensions["A"].width = 22
+    ws.column_dimensions["B"].width = 96
+    ws.append([titolo.upper()])
+    ws.cell(1, 1).font = Font(bold=True, size=18, color=colore)
+    ws.append([sottotitolo])
+    ws.cell(2, 1).font = Font(italic=True, color="808080")
+    ws.append([])
+    ws.append(["foglio", "cosa contiene"])
+    for col in (1, 2):
+        ws.cell(4, col).font = Font(bold=True, color="FFFFFF")
+        ws.cell(4, col).fill = PatternFill("solid", fgColor=colore)
+    for nome in gruppo:
+        ws.append([nome, _COSA_CONTIENE.get(nome, "")])
+        ws.cell(ws.max_row, 1).font = Font(bold=True)
+    # nasce in coda al gruppo e lo si porta davanti
+    wb.move_sheet(ws, offset=-len(gruppo))
+    return ws
+
+
 def scrivi_risultati(
     percorso_file: str,
     data: ProblemData,
@@ -1146,10 +1205,15 @@ def scrivi_risultati(
 ) -> str:
     """Scrive UN file Excel che e' due cose insieme.
 
-    Davanti il referto -- Riepilogo, Movimenti, FlussoPezzo, Verifica -- da
-    leggere e da consegnare. Dietro, se si passano `cfg` e `ciclogramma`, la
-    linea nel formato di INGRESSO col ciclogramma dentro: cosi' lo stesso file
-    si riapre con "Apri linea..." e il lavoro riprende da dov'era.
+    Prima la linea nel formato di INGRESSO col ciclogramma dentro -- se si
+    passano `cfg` e `ciclogramma` -- cosi' lo stesso file si riapre con "Apri
+    linea..." e il lavoro riprende da dov'era. Poi il REFERTO: Riepilogo,
+    Movimenti, FlussoPezzo, Verifica, da leggere e da consegnare.
+
+    I due gruppi sono separati da un cartello colorato, `Input` e `Output`, e
+    stanno in quest'ordine perche' e' quello in cui le cose sono successe: si
+    parte da una linea e se ne ricava un risultato. Il file si apre comunque
+    sul Riepilogo, che e' quello che si va a leggere.
 
     Due file separati sarebbero due cose da tenere insieme e da non
     confondere; `leggi_problema` cerca i fogli per nome e ignora gli altri,
@@ -1169,6 +1233,30 @@ def scrivi_risultati(
 
     T = solution.T
     wb = Workbook()
+    wb.remove(wb.active)  # il foglio vuoto che openpyxl crea da solo
+
+    # -- prima la linea, cosi' com'e' entrata ------------------------------
+    # I fogli si creano nell'ordine in cui devono comparire, non riordinandoli
+    # alla fine: chi legge il codice vede la stessa sequenza che vedra' nel
+    # file. I cartelli si mettono dopo il loro gruppo e si spostano davanti,
+    # cosi' possono elencare i fogli che ci sono davvero.
+    if cfg is not None:
+        _aggiungi_fogli_linea(
+            wb,
+            *_righe_da_configurazione(dataclasses.replace(cfg, data=data)),
+            data=data,
+            ciclogramma=ciclogramma,
+        )
+        _cartello(
+            wb,
+            "Input",
+            _COLORE_INGRESSO,
+            "I fogli che seguono sono la LINEA, nello stesso formato del file di "
+            "ingresso: questo file si riapre con 'Apri linea...' e il lavoro "
+            "riprende da dov'era.",
+            da=0,
+        )
+    inizio_referto = len(wb.sheetnames)
 
     def tabella(ws, titoli, larghezze, righe, formati=None):
         ws.append(titoli)
@@ -1187,8 +1275,7 @@ def scrivi_risultati(
         ws.freeze_panes = "A2"
 
     # -- Riepilogo -------------------------------------------------------
-    ws = wb.active
-    ws.title = "Riepilogo"
+    ws = wb.create_sheet("Riepilogo")
     ws.column_dimensions["A"].width = 34
     ws.column_dimensions["B"].width = 26
     ws.column_dimensions["C"].width = 46
@@ -1462,15 +1549,18 @@ def scrivi_risultati(
     )
     voce("Risoluzione temporale", data.time_scale, "tick al secondo")
 
-    # -- e in coda la linea, per poterla riaprire --------------------------
     if cfg is not None:
-        _aggiungi_fogli_linea(
+        _cartello(
             wb,
-            *_righe_da_configurazione(dataclasses.replace(cfg, data=data)),
-            data=data,
-            ciclogramma=ciclogramma,
+            "Output",
+            _COLORE_REFERTO,
+            "I fogli che seguono sono il RISULTATO del calcolo: si leggono e si "
+            "consegnano. Riaprendo il file, 'Apri linea...' non li guarda.",
+            da=inizio_referto,
         )
-    wb.active = 0  # si apre sul Riepilogo, che e' quello che si va a leggere
+    # Si apre sul Riepilogo, che e' quello che si va a leggere -- non sul
+    # primo foglio, che adesso e' il cartello dell'ingresso.
+    wb.active = wb.sheetnames.index("Riepilogo")
 
     wb.save(percorso_file)
     return percorso_file

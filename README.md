@@ -58,7 +58,7 @@ aprire una finestra, e la cinematica senza avere OR-Tools installato.
 
 | file | righe | contenuto |
 | --- | ---: | --- |
-| `excel_io.py` | 1483 | Tutto l'Excel: `scrivi_modello()` genera il file da compilare, `leggi_problema()` lo rilegge raccogliendo **tutti** gli errori di compilazione con foglio e cella, `scrivi_risultati()` produce il file dei risultati -- che e' anche un file di ingresso, col ciclogramma dentro, per poterlo riaprire. |
+| `excel_io.py` | 1573 | Tutto l'Excel: `scrivi_modello()` genera il file da compilare, `leggi_problema()` lo rilegge raccogliendo **tutti** gli errori di compilazione con foglio e cella, `scrivi_risultati()` produce il file dei risultati -- che e' anche un file di ingresso, col ciclogramma dentro, per poterlo riaprire, diviso in due meta' (`Input` e `Output`) dietro due cartelli colorati. |
 | `plotting.py` | 175 | `plot_cyclogram()`: disegna il ciclogramma (posizione lungo la rotaia contro tempo) con il profilo cinematico vero, non con segmenti diritti. |
 | `simulazione.py` | 1093 | La **simulazione**: la linea vista di fronte, in movimento. `Simulazione` e' la parte che conta e non importa tkinter — dato un istante dice dove sta ogni carroponte (posizione, quota del gancio, cosa sta facendo) e ogni pezzo; `FinestraSimulazione` e' solo la finestra che la anima. Non calcola niente di nuovo: legge `segments_per_hoist` e `actual_time` della soluzione, cioe' gli stessi oggetti che disegnano il ciclogramma. |
 
@@ -83,7 +83,7 @@ Non serve pytest.
 | --- | ---: | --- |
 | `test_verify.py` | 847 | **Il verificatore.** Risponde a "chi verifica il verificatore?": venti casi, di cui uno solo corretto e tutti gli altri rotti di proposito (collisioni, permanenze fuori tolleranza, periodicita' incoerente, geometrie patologiche, capienze). Un controllore che non segnala mai nulla e' inutile, quindi ogni controllo ha un caso che DEVE farlo scattare. Non richiede OR-Tools: le soluzioni sono costruite a mano. |
 | `test_model.py` | 430 | **Il modello CP-SAT.** Risolve davvero e passa ogni soluzione al verificatore: vasche ravvicinate, tre carroponti, capienza, tempi verticali, e la fedelta' della ricostruzione di una soluzione dai suoi gradi di liberta'. Richiede OR-Tools. |
-| `test_excel_io.py` | 733 | **La lettura e la scrittura Excel.** Quasi tutti i casi sono file compilati male: valori mancanti o non numerici, vasche inesistenti o duplicate, righe riordinate, parametri sbagliati, o un file scritto per la vecchia versione in metri. Piu' l'andata e ritorno del ciclogramma salvato nel file, e la struttura del file dei risultati. Non richiede OR-Tools. |
+| `test_excel_io.py` | 847 | **La lettura e la scrittura Excel.** Quasi tutti i casi sono file compilati male: valori mancanti o non numerici, vasche inesistenti o duplicate, righe riordinate, parametri sbagliati, o un file scritto per la vecchia versione in metri. Piu' l'andata e ritorno del ciclogramma salvato nel file, e la struttura del file dei risultati: l'ordine dei fogli, i due cartelli colorati, e che l'elenco dentro un cartello dica davvero i fogli che seguono. Non richiede OR-Tools. |
 | `test_simulazione.py` | 587 | **La simulazione.** Il controllo che conta e' incrociato: ogni pezzo appeso deve stare *esattamente* dove sta il gancio di un carroponte che lo tiene, e ogni carroponte che tiene qualcosa deve avere un pezzo li'. Se simulazione e ciclogramma raccontassero due storie diverse, una delle due sarebbe sbagliata. Lo stesso controllo viene rifatto sulle quote **disegnate**, che non sono quelle vere: il telaio deve restare appeso al bilancino anche dopo il rimappaggio delle profondita'. Le vasche di prova hanno corse verticali **diverse fra loro** apposta: con corse tutte uguali, prendere la corsa della vasca sbagliata darebbe comunque il risultato giusto. In fondo, i casi in cui la geometria del disegno degenera: corse e ingombri tutti a zero, tutte le tappe nella stessa vasca. Non richiede OR-Tools. |
 | `test_interfaccia.py` | 1081 | **Le funzioni dell'interfaccia grafica.** La finestra viene costruita davvero e pilotata da codice — si "premono" i pulsanti chiamando i metodi e si fa girare il ciclo degli eventi con `update()` invece di `mainloop()`. Verifica che i pulsanti si abilitino al momento giusto, che il calcolo in background consegni il risultato, che una soluzione calcolata riletta come tempi in vasca e ricomposta dia esattamente lo stesso ciclogramma, che le modifiche vengano riverificate, che l'immagine salvata sia il ciclogramma anche componendo dal pettine, che la scheda di modifica si apra solo dopo 'Calcola man' o 'Modifica' e mai mentre il solutore lavora, che un ciclogramma salvato si riapra identico anche se lasciato a meta', che la composizione da zero produca il pettine giusto, che un trasporto assegnato si possa togliere con lo stesso gesto con cui lo si e' assegnato, e che la simulazione si apra solo quando un ciclogramma c'e' davvero e segua le modifiche mentre e' aperta. Richiede OR-Tools e un ambiente grafico. |
 
@@ -554,7 +554,15 @@ si guarda dove il conto non torna: li' non c'e' niente da trovare, si vede.
 Sia l'interfaccia sia la riga di comando producono, accanto al file di
 ingresso:
 
-- **`linea_risultati.xlsx`** — il referto, in quattro fogli:
+- **`linea_risultati.xlsx`** — dodici fogli, in **due meta'**, ciascuna dietro
+  un cartello con la linguetta colorata:
+
+  **`Input`** (linguetta blu) — quello che segue e' la **linea nel formato di
+  ingresso**, col ciclogramma dentro: `Istruzioni`, `Vasche`, `Percorso`,
+  `Parametri`, `Zone`, `Ciclogramma`. Serve a riaprire lo stesso file con
+  `Apri linea...` e riprendere il lavoro. Vale anche da riga di comando.
+
+  **`Output`** (linguetta verde) — il referto:
 
   | foglio | contenuto |
   | --- | --- |
@@ -563,10 +571,15 @@ ingresso:
   | `FlussoPezzo` | il percorso di **un** pezzo lungo tutta la linea: ingresso e uscita da ogni vasca, permanenza effettiva, margine rispetto ai limiti di processo, posti occupati |
   | `Verifica` | l'elenco dei rilievi del verificatore indipendente, colorati per gravita' |
 
-  ...piu' altri sei in coda — `Istruzioni`, `Vasche`, `Percorso`, `Parametri`,
-  `Zone`, `Ciclogramma` — che sono la **linea nel formato di ingresso**, col
-  ciclogramma dentro. Servono a riaprire lo stesso file con `Apri linea...` e
-  riprendere il lavoro. Vale anche da riga di comando.
+  L'ordine e' quello in cui le cose sono successe: si parte da una linea e se
+  ne ricava un risultato. I due cartelli non contengono dati, dicono cosa viene
+  dopo — e l'elenco che c'e' dentro non e' scritto a mano ma ricavato dai fogli
+  che ci sono davvero, cosi' non puo' restare indietro il giorno che se ne
+  aggiunge uno. Il file si apre comunque sul `Riepilogo`, che e' quello che si
+  va a leggere.
+
+  Chiedendo solo il referto, senza la linea dentro, i cartelli non compaiono:
+  non ci sarebbe niente da dividere.
 
 - **`linea.png`** — il **ciclogramma** disegnato. Sempre quello, anche se a
   schermo c'era il pettine: e' il documento che si consegna.
@@ -1202,7 +1215,7 @@ python esempio.py           # risoluzione reale + verifica + grafico
 ```
 
 Ognuno stampa cosa ha provato e finisce con `RISULTATO: n ok, m falliti`.
-Nessuna dipendenza da pytest. Stato attuale: **66, 69, 41, 24 e 95 asserzioni,
+Nessuna dipendenza da pytest. Stato attuale: **66, 78, 41, 24 e 95 asserzioni,
 zero fallimenti**.
 
 **La risoluzione CP-SAT e' eseguita e verificata end-to-end.** Sull'esempio
@@ -1218,7 +1231,7 @@ I cinque file rispondono a domande diverse e si completano:
   patologiche). Le soluzioni sono costruite a mano, quindi non serve OR-Tools.
 - `test_model.py` — 9 casi. *Il modello produce soluzioni fisicamente valide?*
   Risolve davvero e passa ogni risultato al verificatore.
-- `test_excel_io.py` — 20 casi. *Un file compilato male viene respinto con un
+- `test_excel_io.py` — 22 casi. *Un file compilato male viene respinto con un
   messaggio utile, e i risultati escono corretti?* In ingresso: valori mancanti
   o non numerici, vasche inesistenti o duplicate, righe riordinate, parametri
   sbagliati, zone incomplete, e un file della vecchia versione in metri. In uscita: struttura dei fogli, corrispondenza

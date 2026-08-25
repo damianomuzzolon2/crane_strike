@@ -697,6 +697,119 @@ def test_risultati_verifica():
         os.unlink(percorso)
 
 
+def test_risultati_due_meta():
+    """Il file dei risultati e' due cose insieme, e si vede: prima la linea
+    com'e' entrata, poi il referto, ciascuno dietro il suo cartello."""
+    print("\n[18] il file dei risultati e' diviso in Input e Output")
+    from openpyxl import load_workbook
+
+    from excel_io import (
+        FOGLIO_CICLOGRAMMA,
+        FOGLIO_PARAMETRI,
+        FOGLIO_PERCORSO,
+        FOGLIO_VASCHE,
+        FOGLIO_ZONE,
+        leggi_problema,
+        scrivi_modello,
+        scrivi_risultati,
+    )
+    from model import proposta_semplice
+    from verify import verify_solution
+
+    cartella = tempfile.mkdtemp()
+    linea = os.path.join(cartella, "linea.xlsx")
+    scrivi_modello(linea)
+    cfg = leggi_problema(linea)
+    sol, dati = proposta_semplice(cfg.data)
+    risultati = os.path.join(cartella, "risultati.xlsx")
+    scrivi_risultati(
+        risultati,
+        dati,
+        sol,
+        verify_solution(dati, sol),
+        sorgente=linea,
+        cfg=cfg,
+        ciclogramma={
+            "T": sol.T,
+            "n_carroponti": 1,
+            "permanenze": {},
+            "assegnazione": {k: 0 for k in range(dati.n_moves)},
+        },
+    )
+    wb = load_workbook(risultati)
+    atteso = [
+        "Input",
+        "Istruzioni",
+        FOGLIO_VASCHE,
+        FOGLIO_PERCORSO,
+        FOGLIO_PARAMETRI,
+        FOGLIO_ZONE,
+        FOGLIO_CICLOGRAMMA,
+        "Output",
+        "Riepilogo",
+        "Movimenti",
+        "FlussoPezzo",
+        "Verifica",
+    ]
+    check(wb.sheetnames == atteso, f"prima l'ingresso, poi il referto: {wb.sheetnames}")
+    colori = {
+        n: (wb[n].sheet_properties.tabColor.rgb if wb[n].sheet_properties.tabColor else None)
+        for n in wb.sheetnames
+    }
+    check(
+        colori["Input"] is not None
+        and colori["Output"] is not None
+        and colori["Input"] != colori["Output"],
+        f"i due cartelli hanno la linguetta colorata, di due colori diversi "
+        f"({colori['Input']}, {colori['Output']})",
+    )
+    check(
+        all(colori[n] is None for n in wb.sheetnames if n not in ("Input", "Output")),
+        "e gli altri fogli no: il colore serve a trovare la divisione",
+    )
+    check(wb.active.title == "Riepilogo", f"si apre sul Riepilogo ({wb.active.title})")
+
+    # L'elenco dentro un cartello deve dire i fogli che vengono davvero dopo:
+    # un indice scritto a mano resterebbe indietro alla prima aggiunta, e un
+    # indice che mente e' peggio di nessun indice.
+    def elencati(nome):
+        ws = wb[nome]
+        return [ws.cell(r, 1).value for r in range(5, ws.max_row + 1)]
+
+    taglio = atteso.index("Output")
+    check(
+        elencati("Input") == atteso[1:taglio],
+        f"il cartello Input elenca i fogli che seguono ({elencati('Input')})",
+    )
+    check(
+        elencati("Output") == atteso[taglio + 1 :],
+        f"il cartello Output elenca i fogli che seguono ({elencati('Output')})",
+    )
+    check(
+        all(bool(wb[n].cell(r, 2).value) for n in ("Input", "Output")
+            for r in range(5, wb[n].max_row + 1)),
+        "e ogni voce ha la sua descrizione, non solo il nome",
+    )
+
+    # I cartelli non devono disturbare la rilettura: leggi_problema cerca i
+    # fogli per nome e ignora gli altri.
+    riletto = leggi_problema(risultati)
+    check(
+        riletto.data.n_stations == cfg.data.n_stations
+        and riletto.ciclogramma is not None,
+        "e il file resta riapribile con i cartelli dentro",
+    )
+
+    # Senza la linea non c'e' niente da separare: il file e' solo il referto.
+    solo = os.path.join(cartella, "solo_referto.xlsx")
+    scrivi_risultati(solo, dati, sol, verify_solution(dati, sol))
+    check(
+        load_workbook(solo).sheetnames
+        == ["Riepilogo", "Movimenti", "FlussoPezzo", "Verifica"],
+        "senza la linea dentro, nessun cartello: non dividerebbe niente",
+    )
+
+
 def main():
     print("=" * 72)
     print("TEST DI LETTURA E SCRITTURA EXCEL (richiede openpyxl, non OR-Tools)")
@@ -723,6 +836,7 @@ def main():
     test_risultati_movimenti()
     test_risultati_flusso_pezzo()
     test_risultati_verifica()
+    test_risultati_due_meta()
     print("\n" + "=" * 72)
     print(f"RISULTATO: {_n_pass} ok, {_n_fail} falliti")
     print("=" * 72)
