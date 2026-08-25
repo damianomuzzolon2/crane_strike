@@ -60,7 +60,7 @@ aprire una finestra, e la cinematica senza avere OR-Tools installato.
 | --- | ---: | --- |
 | `excel_io.py` | 1573 | Tutto l'Excel: `scrivi_modello()` genera il file da compilare, `leggi_problema()` lo rilegge raccogliendo **tutti** gli errori di compilazione con foglio e cella, `scrivi_risultati()` produce il file dei risultati -- che e' anche un file di ingresso, col ciclogramma dentro, per poterlo riaprire, diviso in due meta' (`Input` e `Output`) dietro due cartelli colorati. |
 | `plotting.py` | 175 | `plot_cyclogram()`: disegna il ciclogramma (posizione lungo la rotaia contro tempo) con il profilo cinematico vero, non con segmenti diritti. |
-| `simulazione.py` | 1140 | La **simulazione**: la linea vista di fronte, in movimento. `Simulazione` e' la parte che conta e non importa tkinter — dato un istante dice dove sta ogni carroponte (posizione, quota del gancio, cosa sta facendo) e ogni pezzo; `FinestraSimulazione` e' solo la finestra che la anima. Non calcola niente di nuovo: legge `segments_per_hoist` e `actual_time` della soluzione, cioe' gli stessi oggetti che disegnano il ciclogramma. |
+| `simulazione.py` | 1239 | La **simulazione**: la linea vista di fronte, in movimento. `Simulazione` e' la parte che conta e non importa tkinter — dato un istante dice dove sta ogni carroponte (posizione, quota del gancio, cosa sta facendo) e ogni pezzo; `FinestraSimulazione` e' solo la finestra che la anima. Non calcola niente di nuovo: legge `segments_per_hoist` e `actual_time` della soluzione, cioe' gli stessi oggetti che disegnano il ciclogramma. |
 
 ### Programmi da lanciare
 
@@ -84,7 +84,7 @@ Non serve pytest.
 | `test_verify.py` | 847 | **Il verificatore.** Risponde a "chi verifica il verificatore?": venti casi, di cui uno solo corretto e tutti gli altri rotti di proposito (collisioni, permanenze fuori tolleranza, periodicita' incoerente, geometrie patologiche, capienze). Un controllore che non segnala mai nulla e' inutile, quindi ogni controllo ha un caso che DEVE farlo scattare. Non richiede OR-Tools: le soluzioni sono costruite a mano. |
 | `test_model.py` | 430 | **Il modello CP-SAT.** Risolve davvero e passa ogni soluzione al verificatore: vasche ravvicinate, tre carroponti, capienza, tempi verticali, e la fedelta' della ricostruzione di una soluzione dai suoi gradi di liberta'. Richiede OR-Tools. |
 | `test_excel_io.py` | 847 | **La lettura e la scrittura Excel.** Quasi tutti i casi sono file compilati male: valori mancanti o non numerici, vasche inesistenti o duplicate, righe riordinate, parametri sbagliati, o un file scritto per la vecchia versione in metri. Piu' l'andata e ritorno del ciclogramma salvato nel file, e la struttura del file dei risultati: l'ordine dei fogli, i due cartelli colorati, e che l'elenco dentro un cartello dica davvero i fogli che seguono. Non richiede OR-Tools. |
-| `test_simulazione.py` | 630 | **La simulazione.** Il controllo che conta e' incrociato: ogni pezzo appeso deve stare *esattamente* dove sta il gancio di un carroponte che lo tiene, e ogni carroponte che tiene qualcosa deve avere un pezzo li'. Se simulazione e ciclogramma raccontassero due storie diverse, una delle due sarebbe sbagliata. Lo stesso controllo viene rifatto sulle quote **disegnate**, che non sono quelle vere: il telaio deve restare appeso al bilancino anche dopo il rimappaggio delle profondita'. Le vasche di prova hanno corse verticali **diverse fra loro** apposta: con corse tutte uguali, prendere la corsa della vasca sbagliata darebbe comunque il risultato giusto. In fondo, i casi in cui la geometria del disegno degenera: corse e ingombri tutti a zero, tutte le tappe nella stessa vasca. Non richiede OR-Tools. |
+| `test_simulazione.py` | 691 | **La simulazione.** Il controllo che conta e' incrociato: ogni pezzo appeso deve stare *esattamente* dove sta il gancio di un carroponte che lo tiene, e ogni carroponte che tiene qualcosa deve avere un pezzo li'. Se simulazione e ciclogramma raccontassero due storie diverse, una delle due sarebbe sbagliata. Lo stesso controllo viene rifatto sulle quote **disegnate**, che non sono quelle vere: il telaio deve restare appeso al bilancino anche dopo il rimappaggio delle profondita'. Le vasche di prova hanno corse verticali **diverse fra loro** apposta: con corse tutte uguali, prendere la corsa della vasca sbagliata darebbe comunque il risultato giusto. In fondo, i casi in cui la geometria del disegno degenera: corse e ingombri tutti a zero, tutte le tappe nella stessa vasca. Non richiede OR-Tools. |
 | `test_interfaccia.py` | 1081 | **Le funzioni dell'interfaccia grafica.** La finestra viene costruita davvero e pilotata da codice — si "premono" i pulsanti chiamando i metodi e si fa girare il ciclo degli eventi con `update()` invece di `mainloop()`. Verifica che i pulsanti si abilitino al momento giusto, che il calcolo in background consegni il risultato, che una soluzione calcolata riletta come tempi in vasca e ricomposta dia esattamente lo stesso ciclogramma, che le modifiche vengano riverificate, che l'immagine salvata sia il ciclogramma anche componendo dal pettine, che la scheda di modifica si apra solo dopo 'Calcola man' o 'Modifica' e mai mentre il solutore lavora, che un ciclogramma salvato si riapra identico anche se lasciato a meta', che la composizione da zero produca il pettine giusto, che un trasporto assegnato si possa togliere con lo stesso gesto con cui lo si e' assegnato, e che la simulazione si apra solo quando un ciclogramma c'e' davvero e segua le modifiche mentre e' aperta. Richiede OR-Tools e un ambiente grafico. |
 
 `kinematics.py` ha in fondo un autotest che si lancia allo stesso modo
@@ -259,6 +259,13 @@ Cosa c'e' da guardare:
   che resta fra due carrelli vicini si vede per quello che e'. Sotto il
   carrello ci sono l'argano, le due funi e il bilancino a cui il telaio si
   appende: la lunghezza delle funi dice a che punto e' la discesa.
+- **un carroponte che deposita un telaio e resta li'** ad aspettare, per
+  prenderne un altro dalla stessa vasca, **tiene il gancio calato** per tutta
+  l'attesa: si stacca appena dal telaio, aspetta in basso, e si riaccosta solo
+  all'ultimo, prima di agganciare. Alzarlo per ricalarlo subito dopo non serve
+  a niente e a vederlo sembra un difetto. **Non e' un tempo che si guadagna**:
+  il telaio successivo viene agganciato nello stesso identico istante di prima,
+  e il ciclogramma resta quello — cambia solo dove il gancio passa l'attesa.
 - **le tappe senza corsa verticale** (tipicamente carico e scarico) sono
   disegnate come piattaforme e non come vasche col bagno: il telaio li' non
   scende, e mostrarle piene direbbe una cosa falsa proprio sulle due tappe che
@@ -1229,7 +1236,7 @@ python esempio.py           # risoluzione reale + verifica + grafico
 ```
 
 Ognuno stampa cosa ha provato e finisce con `RISULTATO: n ok, m falliti`.
-Nessuna dipendenza da pytest. Stato attuale: **66, 78, 46, 24 e 95 asserzioni,
+Nessuna dipendenza da pytest. Stato attuale: **66, 78, 51, 24 e 95 asserzioni,
 zero fallimenti**.
 
 **La risoluzione CP-SAT e' eseguita e verificata end-to-end.** Sull'esempio

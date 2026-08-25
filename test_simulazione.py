@@ -534,6 +534,66 @@ def test_vasca_a_piu_posti():
     )
 
 
+def test_gancio_resta_giu(d: ProblemData):
+    """Chi deposita un telaio e resta li' ad aspettare per prenderne un altro
+    dalla stessa vasca non tira su il gancio per ricalarlo subito dopo."""
+    print("\n[11] il gancio resta calato durante l'attesa in vasca")
+    from simulazione import _tratti_col_gancio_giu
+
+    sol, dati = proposta_semplice(d)
+    sim = Simulazione(dati, sol)
+    tratti = [c.giu for c in sim._carri]
+    check(
+        any(tratti),
+        f"la prova serve a qualcosa: ci sono tratti col gancio giu' ({tratti})",
+    )
+
+    risalite, attaccati, attese = 0, 0, 0
+    for _, ist in campioni(sim):
+        fermi = [c for c in ist.carri if c.fase == "attesa in vasca"]
+        attese += len(fermi)
+        for c in fermi:
+            corsa = dati.tanks[c.vasca].lift_height
+            if c.z > -0.5 * corsa:
+                risalite += 1
+            # e comunque staccato dal telaio, altrimenti sembra che lo tenga
+            if any(
+                abs(p.x - c.x) < 1e-6 and abs(p.z - c.z) < 1e-6 for p in ist.pezzi
+            ):
+                attaccati += 1
+    check(attese > 0, f"e si vedono in {attese} istanti su 1501")
+    check(risalite == 0, f"in attesa il gancio non risale mai in alto ({risalite})")
+    # Qualche istante attaccato c'e' e ci deve essere: sono quelli in cui il
+    # gancio sta mollando il telaio o si sta riaccostando per riprenderlo.
+    # Sono il poco che serve a staccarsi, non l'attesa.
+    check(
+        attaccati < attese * 0.1,
+        f"e per l'attesa resta staccato dal telaio che ha appena mollato "
+        f"({attaccati} istanti attaccato su {attese})",
+    )
+
+    # Il tempo NON cambia: il telaio successivo viene agganciato nello stesso
+    # istante di prima. Cambia solo dove il gancio passa l'attesa. Se non
+    # fosse cosi', il pezzo appeso non starebbe piu' dove sta il gancio -- ed
+    # e' quello che controlla il caso [3], su questo stesso ciclogramma.
+    segs = sorted(sol.segments_per_hoist[0], key=lambda s: s.t_start)
+    giu = _tratti_col_gancio_giu(segs)
+    durate = {
+        i: round(segs[i].t_end - segs[i].t_start, 9) for i in sorted(giu)
+    }
+    attese_previste = {}
+    for i, stazione in giu.items():
+        s = segs[i]
+        if s.kind == "release":
+            attese_previste[i] = round(dati.release_time_at(stazione), 9)
+        elif s.kind == "pick":
+            attese_previste[i] = round(dati.pick_time_at(stazione), 9)
+    check(
+        all(durate[i] == atteso for i, atteso in attese_previste.items()),
+        f"presa e rilascio durano quanto prima ({durate})",
+    )
+
+
 def test_disegno_casi_limite():
     """Il disegno ha una geometria tutta sua -- profondita' delle vasche,
     altezza della trave, larghezza del carrello -- ricavata dai dati. Su una
@@ -615,6 +675,7 @@ def main() -> int:
     test_pezzo_da_seguire(d)
     test_assegnazione_parziale(d)
     test_vasca_a_piu_posti()
+    test_gancio_resta_giu(d)
     try:
         test_finestra(d)
         test_disegno_casi_limite()
