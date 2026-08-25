@@ -376,6 +376,49 @@ def test_finestra(d: ProblemData):
         f._trascinato(None)
         check(abs(f.t - meta) < 1e-9, "il cursore porta dove lo si trascina")
 
+        # -- un fotogramma per volta, avanti e indietro ---------------------
+        passo = f._fotogramma()
+        f.avanti()
+        f.avanti()
+        check(
+            abs(f.t - (meta + 2 * passo)) < 1e-9,
+            f"due passi avanti fanno due fotogrammi ({2 * passo:.2f} s)",
+        )
+        f.indietro()
+        check(
+            abs(f.t - (meta + passo)) < 1e-9, "e uno indietro ne torna esattamente uno"
+        )
+        # il passo a mano dev'essere lo STESSO salto dell'andatura normale,
+        # altrimenti le due sequenze mostrerebbero istanti diversi
+        f.t = meta
+        f._in_moto = True
+        f._passo()
+        f._in_moto = False
+        f._passo()
+        da_solo = f.t
+        f.t = meta
+        f.avanti()
+        check(
+            abs(f.t - da_solo) < 1e-9,
+            f"e coincide con quello che fa da sola ({f.t:.3f} vs {da_solo:.3f} s)",
+        )
+        # il giro si richiude anche all'indietro
+        f.t = 0.0
+        f.indietro()
+        check(
+            abs(f.t - (f.sim.durata - passo)) < 1e-9,
+            f"indietro dall'inizio si finisce in fondo ({f.t:.2f} s)",
+        )
+        # e premere Avanti mentre va la mette in pausa
+        f.t = meta
+        f._in_moto = True
+        f.btn_avvia.configure(text="Pausa")
+        f.avanti()
+        check(
+            not f._in_moto and abs(f.t - (meta + passo)) < 1e-9,
+            "premuto mentre va, il passo la ferma invece di sommarsi",
+        )
+
         # il giro si richiude: oltre la durata si riparte da capo
         f.t = f.sim.durata - 0.01
         f._in_moto = True

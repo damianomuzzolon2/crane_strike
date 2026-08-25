@@ -554,8 +554,18 @@ class FinestraSimulazione(tk.Toplevel):
 
         comandi = ttk.Frame(self, padding=(10, 6))
         comandi.pack(fill=tk.X)
+        # Un fotogramma per volta, avanti e indietro. Guardare la linea in
+        # movimento fa vedere cosa succede; per capire ESATTAMENTE quando due
+        # carroponti si sfiorano bisogna potersi fermare sull'istante e
+        # spostarsi di poco, avanti e indietro, senza rincorrere il cursore.
+        ttk.Button(comandi, text="Indietro", width=9, command=self.indietro).pack(
+            side=tk.LEFT
+        )
         self.btn_avvia = ttk.Button(comandi, text="Avvia", width=9, command=self.avvia_o_ferma)
-        self.btn_avvia.pack(side=tk.LEFT)
+        self.btn_avvia.pack(side=tk.LEFT, padx=(6, 0))
+        ttk.Button(comandi, text="Avanti", width=9, command=self.avanti).pack(
+            side=tk.LEFT, padx=(6, 0)
+        )
         ttk.Button(comandi, text="Da capo", width=9, command=self.da_capo).pack(
             side=tk.LEFT, padx=(6, 0)
         )
@@ -569,10 +579,16 @@ class FinestraSimulazione(tk.Toplevel):
             values=self.VELOCITA,
         ).pack(side=tk.LEFT)
         self.var_t = tk.DoubleVar(value=0.0)
+        # takefocus=False perche' anche il cursore risponde alle frecce: se se
+        # le prendesse lui, ogni freccia muoverebbe due volte il tempo -- una
+        # per il cursore e una per il passo a passo qui sotto.
         self.cursore = ttk.Scale(
-            comandi, from_=0.0, to=1.0, variable=self.var_t, command=self._trascinato
+            comandi, from_=0.0, to=1.0, variable=self.var_t,
+            command=self._trascinato, takefocus=False,
         )
         self.cursore.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(16, 12))
+        self.bind("<Left>", lambda e: self.indietro())
+        self.bind("<Right>", lambda e: self.avanti())
 
         self.etichetta = ttk.Label(self, text="", padding=(10, 0, 10, 6), anchor=tk.W)
         self.etichetta.pack(fill=tk.X)
@@ -986,6 +1002,38 @@ class FinestraSimulazione(tk.Toplevel):
         self.t = 0.0
         self._disegna()
 
+    def _fotogramma(self) -> float:
+        """Di quanti secondi di simulazione avanza un fotogramma.
+
+        E' la stessa quantita' che usa l'animazione, e viene di qui apposta:
+        "un fotogramma" premendo `Avanti` dev'essere esattamente il salto che
+        farebbe andando avanti da sola, altrimenti passo a passo e andatura
+        normale mostrerebbero due sequenze diverse.
+
+        Dipende dalla velocita' scelta, e va bene cosi': a 20x un passo e' otto
+        decimi di secondo per scorrere il ciclo, a mezza velocita' e' un
+        centesimo per fermarsi sull'istante in cui due carri si sfiorano. La
+        stessa manopola regola l'andatura e la finezza del passo."""
+        return float(self.var_velocita.get().rstrip("x")) * self.PASSO_MS / 1000.0
+
+    def avanti(self):
+        self._passo_a_mano(+1)
+
+    def indietro(self):
+        self._passo_a_mano(-1)
+
+    def _passo_a_mano(self, verso: int):
+        if self.sim is None:
+            return
+        if self._in_moto:
+            # Passo a passo e andatura non convivono: chi preme `Avanti`
+            # vuole guardare un istante, non inseguirlo.
+            self.avvia_o_ferma()
+        # il modulo tiene il tempo dentro il giro in tutti e due i versi:
+        # indietro dall'inizio si finisce in fondo, che e' lo stesso istante
+        self.t = (self.t + verso * self._fotogramma()) % self.sim.durata
+        self._disegna()
+
     def _passo(self):
         # Si adotta il timer in corso invece di affiancarglisi. Senza questa
         # riga ogni chiamata che non venga dal timer -- una prova, un comando
@@ -1000,8 +1048,7 @@ class FinestraSimulazione(tk.Toplevel):
             self._lavoro = None
         if not self._in_moto or self.sim is None:
             return
-        fattore = float(self.var_velocita.get().rstrip("x"))
-        self.t += fattore * self.PASSO_MS / 1000.0
+        self.t += self._fotogramma()
         if self.t >= self.sim.durata:
             # si ricomincia: in regime la linea a t = durata e' identica a
             # quella a t = 0, quindi il salto non si vede
