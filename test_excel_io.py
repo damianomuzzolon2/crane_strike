@@ -532,7 +532,8 @@ def test_risultati_struttura():
     percorso, data, solution, report, wb = _risultati_su_file()
     try:
         check(
-            wb.sheetnames == ["Riepilogo", "Movimenti", "FlussoPezzo", "Verifica"],
+            wb.sheetnames
+            == ["Riepilogo", "Movimenti", "TempiVerticali", "FlussoPezzo", "Verifica"],
             f"fogli: {wb.sheetnames}",
         )
         testo = "\n".join(
@@ -748,6 +749,7 @@ def test_risultati_due_meta():
         "Output",
         "Riepilogo",
         "Movimenti",
+        "TempiVerticali",
         "FlussoPezzo",
         "Verifica",
     ]
@@ -805,9 +807,78 @@ def test_risultati_due_meta():
     scrivi_risultati(solo, dati, sol, verify_solution(dati, sol))
     check(
         load_workbook(solo).sheetnames
-        == ["Riepilogo", "Movimenti", "FlussoPezzo", "Verifica"],
+        == ["Riepilogo", "Movimenti", "TempiVerticali", "FlussoPezzo", "Verifica"],
         "senza la linea dentro, nessun cartello: non dividerebbe niente",
     )
+
+
+def test_tempi_verticali():
+    """Una presa da 26 secondi su una corsa da un metro e mezzo sembra un
+    errore di calcolo, finche' non si vede che dieci di quei secondi sono lo
+    sgocciolamento dichiarato. Il foglio deve dirlo."""
+    print("\n[19] foglio TempiVerticali: dove va il tempo di presa e rilascio")
+    from openpyxl import load_workbook
+
+    from excel_io import leggi_problema, scrivi_modello, scrivi_risultati
+    from model import proposta_semplice
+    from verify import verify_solution
+
+    # Serve una linea con le corse verticali vere: il caso di riferimento dei
+    # test del verificatore le ha a zero, e senza corsa non c'e' nessuna presa
+    # da spiegare.
+    cartella = tempfile.mkdtemp()
+    linea = os.path.join(cartella, "linea.xlsx")
+    scrivi_modello(linea)
+    cfg = leggi_problema(linea)
+    solution, data = proposta_semplice(cfg.data)
+    percorso = os.path.join(cartella, "risultati.xlsx")
+    scrivi_risultati(percorso, data, solution, verify_solution(data, solution))
+    wb = load_workbook(percorso)
+    try:
+        ws = wb["TempiVerticali"]
+        righe = [
+            [ws.cell(r, c).value for c in range(1, 12)]
+            for r in range(2, ws.max_row + 1)
+            if isinstance(ws.cell(r, 2).value, (int, float))
+        ]
+        vasche = {r[0] for r in righe}
+        check(
+            vasche == set(data.tanks),
+            f"una riga per vasca, senza ripetere ({len(righe)} righe)",
+        )
+        # Le colonne di dettaglio devono sommare ai totali: sono la stessa
+        # cosa detta due volte, e se divergessero il foglio mentirebbe proprio
+        # dove serve a chiarire.
+        somme = all(
+            abs(sum(r[2:6]) - r[6]) < 5e-3 and abs(sum(r[7:10]) - r[10]) < 5e-3
+            for r in righe
+        )
+        check(somme, "il dettaglio somma ai totali di presa e rilascio")
+
+        # ...e i totali devono essere le durate che compaiono nei Movimenti,
+        # che e' la domanda da cui si parte: perche' quella riga dura tanto?
+        mov = wb["Movimenti"]
+        durate = {}
+        for r in range(2, mov.max_row + 1):
+            fase, vasca, durata = (
+                mov.cell(r, 2).value,
+                mov.cell(r, 3).value,
+                mov.cell(r, 7).value,
+            )
+            if fase in ("presa dalla vasca", "rilascio nella vasca"):
+                durate.setdefault((fase, vasca), set()).add(round(durata, 2))
+        totali = {r[0]: (round(r[6], 2), round(r[10], 2)) for r in righe}
+        coerenti = all(
+            valori == {totali[vasca][0 if fase.startswith("presa") else 1]}
+            for (fase, vasca), valori in durate.items()
+        )
+        check(
+            coerenti and durate,
+            f"e coincidono con le durate del foglio Movimenti ({len(durate)} "
+            f"combinazioni fase/vasca)",
+        )
+    finally:
+        os.unlink(percorso)
 
 
 def main():
@@ -837,6 +908,7 @@ def main():
     test_risultati_flusso_pezzo()
     test_risultati_verifica()
     test_risultati_due_meta()
+    test_tempi_verticali()
     print("\n" + "=" * 72)
     print(f"RISULTATO: {_n_pass} ok, {_n_fail} falliti")
     print("=" * 72)

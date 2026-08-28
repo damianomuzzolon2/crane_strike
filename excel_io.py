@@ -850,13 +850,18 @@ def _aggiungi_fogli_linea(
         ),
         ("delle righe a definire la sequenza, non la colonna n.", None),
         (
-            "  permanenza    tempo EFFETTIVO in bagno, da fine immersione a inizio "
-            "emersione:",
+            "  permanenza    tempo EFFETTIVO in bagno, da quando il telaio e' immerso "
+            "a quando ricomincia a salire.",
             None,
         ),
         (
-            "                le fasi verticali si sommano a parte (vedi tempo_presa "
-            "e tempo_rilascio).",
+            "                Comprende le corse a vuoto del gancio: dopo lo sgancio "
+            "il gancio risale e il pezzo",
+            None,
+        ),
+        (
+            "                resta giu', e per riprenderlo deve ricalare mentre il "
+            "pezzo e' ancora immerso.",
             None,
         ),
         (
@@ -1046,10 +1051,16 @@ def _scrivi_foglio_ciclogramma(wb, data, ciclogramma, intestazione, sfondo, nota
 # --------------------------------------------------------------------------
 
 # etichette leggibili per i tipi di segmento
+# Attenzione ai nomi: "presa" e "rilascio" NON sono la sola corsa verticale.
+# Chiamarli "emersione" e "immersione" -- come si e' fatto per un po' -- fa
+# cercare in quella durata solo il tempo di salita, non trovarcelo, e sospettare
+# un errore di calcolo. Comprendono anche la corsa a vuoto del gancio, i tempi
+# morti di aggancio e sgancio, e per la presa lo sgocciolamento: cosa c'e'
+# dentro lo dice la nota in fondo al foglio.
 _FASI = {
-    "pick": "presa (emersione)",
+    "pick": "presa dalla vasca",
     "loaded": "trasporto con pezzo",
-    "release": "rilascio (immersione)",
+    "release": "rilascio nella vasca",
     "empty": "spostamento a vuoto",
     "wait": "attesa",
 }
@@ -1152,6 +1163,7 @@ _COSA_CONTIENE = {
     FOGLIO_CICLOGRAMMA: "il ciclogramma nei suoi tre gradi di liberta', per riprenderlo",
     "Riepilogo": "takt time, produttivita', carroponti, esito della verifica",
     "Movimenti": "ogni tratto di ogni carroponte: quando, da dove, a dove",
+    "TempiVerticali": "dove va il tempo di presa e di rilascio, vasca per vasca",
     "FlussoPezzo": "il percorso di un pezzo, vasca per vasca",
     "Verifica": "i rilievi del verificatore indipendente, divisi per gravita'",
 }
@@ -1393,10 +1405,71 @@ def scrivi_risultati(
         formati={5: "0.00", 6: "0.00", 7: "0.00", 8: "0.000", 9: "0.000"},
     )
     ws.append([])
+    for testo in (
+        f"Tempi in secondi dall'origine del ciclo. Il ciclo si ripete "
+        f"identico ogni {T:.2f} s.",
+        "La 'presa dalla vasca' non e' la sola emersione: comprende la discesa "
+        "del gancio a vuoto, l'aggancio, il sollevamento del telaio e lo "
+        "sgocciolamento sopra la vasca. Il 'rilascio nella vasca' comprende "
+        "l'immersione, lo sgancio e la risalita del gancio a vuoto. Sono quindi "
+        "sempre piu' lunghi della sola corsa verticale: il dettaglio per vasca "
+        "e' nel foglio TempiVerticali.",
+    ):
+        ws.append([testo])
+        ws.cell(ws.max_row, 1).font = Font(italic=True, color="808080")
+
+    # -- Tempi verticali -------------------------------------------------
+    # Dove va a finire il tempo di presa e di rilascio, vasca per vasca. Senza,
+    # una presa da 26 secondi su una corsa da un metro e mezzo sembra un errore
+    # di calcolo -- e non c'e' modo di scoprire che dieci di quei secondi sono
+    # lo sgocciolamento che si e' dichiarato.
+    ws = wb.create_sheet("TempiVerticali")
+    righe = []
+    viste = set()
+    for s in range(data.n_stations):
+        tid = data.route[s].tank_id
+        if tid in viste:
+            continue  # stessa vasca, stessi tempi: non si ripete
+        viste.add(tid)
+        presa = data.pick_phases(s)
+        rilascio = data.release_phases(s)
+        righe.append(
+            [
+                tid,
+                data.lift_height_at(s),
+                *[round(f.duration, 3) for f in presa],
+                round(sum(f.duration for f in presa), 3),
+                *[round(f.duration, 3) for f in rilascio],
+                round(sum(f.duration for f in rilascio), 3),
+            ]
+        )
+    tabella(
+        ws,
+        [
+            "vasca",
+            "corsa [mm]",
+            "discesa gancio [s]",
+            "aggancio [s]",
+            "sollevamento [s]",
+            "sgocciolamento [s]",
+            "PRESA totale [s]",
+            "immersione [s]",
+            "sgancio [s]",
+            "risalita gancio [s]",
+            "RILASCIO totale [s]",
+        ],
+        [20, 12, 18, 13, 17, 18, 17, 15, 12, 18, 19],
+        righe,
+        formati={c: "0.00" for c in range(2, 12)},
+    )
+    ws.append([])
     ws.append(
         [
-            f"Tempi in secondi dall'origine del ciclo. Il ciclo si ripete "
-            f"identico ogni {T:.2f} s."
+            "I tempi verticali non si dichiarano: si ricavano dalla corsa della "
+            "vasca e dalle cinematiche di sollevamento, con lo stesso profilo "
+            "trapezoidale del moto orizzontale. Le colonne in maiuscolo sono la "
+            "somma di quelle alla loro sinistra, e sono le durate che compaiono "
+            "nel foglio Movimenti."
         ]
     )
     ws.cell(ws.max_row, 1).font = Font(italic=True, color="808080")
@@ -1411,8 +1484,20 @@ def scrivi_risultati(
         if s == 0:
             arrivo, partenza, permanenza = 0.0, at[0] if at else 0.0, 0.0
         elif s < data.n_moves:
-            arrivo = at[s - 1] + data.loaded_leg_seconds(s - 1)
-            partenza = at[s]
+            # `arrivo` e `partenza` sono gli istanti in cui il PEZZO entra e
+            # esce dal bagno, non quelli in cui il gancio smette e riprende a
+            # muoversi: il telaio e' gia' immerso mentre il gancio che lo ha
+            # deposto risale, e ancora immerso mentre quello che verra' a
+            # riprenderlo ricala. La permanenza e' la differenza fra i due, ed
+            # e' su quella che valgono i limiti di processo.
+            a_vuoto = data.empty_lift_seconds(s)
+            arrivo = (
+                at[s - 1]
+                + data.loaded_leg_seconds(s - 1)
+                - data.disengage_time
+                - a_vuoto
+            )
+            partenza = at[s] + a_vuoto + data.engage_time
             permanenza = partenza - arrivo
         else:
             arrivo = at[s - 1] + data.loaded_leg_seconds(s - 1) if at else 0.0
@@ -1474,8 +1559,11 @@ def scrivi_risultati(
     ws.append(
         [
             "Tempi assoluti di UN pezzo lungo tutta la linea: possono superare il "
-            "takt time, perche' piu' pezzi sono in lavorazione insieme. La "
-            "permanenza e' il tempo effettivo in bagno."
+            "takt time, perche' piu' pezzi sono in lavorazione insieme. Ingresso e "
+            "uscita sono quelli del PEZZO, non del gancio: il telaio e' gia' immerso "
+            "mentre il gancio che lo ha deposto risale, e ancora immerso mentre "
+            "quello che verra' a riprenderlo ricala. E' su questa permanenza che "
+            "valgono i limiti di processo."
         ]
     )
     ws.cell(ws.max_row, 1).font = Font(italic=True, color="808080")

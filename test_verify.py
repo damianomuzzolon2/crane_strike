@@ -483,10 +483,25 @@ def test_capienza_vasca():
         engage_time=2.0,
         disengage_time=1.0,
     )
-    atteso = 50.0 + data_v.pick_time_at(2) + data_v.release_time_at(2)
+    # Il posto e' occupato da quando il telaio comincia a calare a quando ha
+    # finito di emergere e di sgocciolare. Le corse a VUOTO del gancio non
+    # contano: quelle stanno gia' dentro il bagno, e sommarle di nuovo qui
+    # sarebbe doppio conteggio.
+    presa = data_v.pick_phases(2)
+    rilascio = data_v.release_phases(2)
+    immersione = rilascio[0].duration
+    sollevamento, sgocciolamento = presa[2].duration, presa[3].duration
+    atteso = immersione + 50.0 + sollevamento + sgocciolamento
     check(
         abs(data_v.slot_occupancy_seconds(2, 50.0) - atteso) < 1e-9,
-        f"occupazione posto = rilascio + bagno + presa ({atteso:.2f} s)",
+        f"occupazione posto = immersione + bagno + emersione + sgocciolamento "
+        f"({atteso:.2f} s)",
+    )
+    # e il bagno comprende le due corse a vuoto del gancio piu' i tempi morti
+    check(
+        abs(data_v.bath_extra_seconds(2) - (1.0 + 2 * presa[0].duration + 2.0)) < 1e-9,
+        f"bagno = intervallo fra i movimenti + {data_v.bath_extra_seconds(2):.2f} s "
+        f"(risalita, discesa, sgancio, aggancio)",
     )
 
 

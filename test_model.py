@@ -228,6 +228,58 @@ def test_fasi_verticali_e_capienza():
         check(occ_ok, f"capienza rispettata: {r.tank_occupancy}")
 
 
+def test_bagno_comprende_le_corse_a_vuoto():
+    """Il pezzo e' immerso anche mentre il gancio che lo ha deposto risale e
+    mentre quello che verra' a riprenderlo ricala. Contare la permanenza fra i
+    soli movimenti del gancio faceva sforare il massimo di processo senza che
+    nessuno lo dicesse -- su una linea reale, sei vasche su dieci."""
+    print("\n[5-bis] la permanenza in vasca comprende le corse a vuoto del gancio")
+    lento = Kinematics(v_max=100, a_max=100)  # sollevamento lento apposta
+    comune = dict(
+        lift_height=1500,
+        kin_lift_empty=lento,
+        kin_lift_loaded=lento,
+        engage_time=1.0,
+        disengage_time=1.0,
+        takt_min=25.0,
+        takt_max=200.0,
+    )
+    # finestra di processo piu' stretta del bagno inevitabile: la vecchia
+    # versione ci stava dentro con la permanenza "fra i movimenti" e sforava
+    # sul bagno vero
+    data = linea(4, 1500, [HoistZone(0, 1), HoistZone(2, 3)], dwell=(20, 45), **comune)
+    inevitabile = data.bath_extra_seconds(1)
+    check(
+        inevitabile > 20.0,
+        f"su questa linea il bagno inevitabile e' {inevitabile:.1f} s, piu' del "
+        f"minimo di processo (20 s)",
+    )
+    sol, r = risolvi_e_verifica(data, "bagno stretto", time_limit=60.0)
+    check(r is not None and r.ok, _esito(sol, r, "soluzione valida"))
+    if r is not None and sol.actual_time:
+        at = sol.actual_time
+        bagni = [
+            at[k] - (at[k - 1] + data.loaded_leg_seconds(k - 1))
+            + data.bath_extra_seconds(k)
+            for k in range(1, data.n_moves)
+        ]
+        check(
+            all(20.0 - 0.1 <= b <= 45.0 + 0.1 for b in bagni),
+            f"ogni bagno vero sta dentro 20..45 s ({[round(b, 1) for b in bagni]})",
+        )
+
+    # e se la finestra non ci sta proprio, lo si dice invece di restituire un
+    # INFEASIBLE muto che manderebbe a cercare la causa dove non c'e'
+    try:
+        linea(4, 1500, [HoistZone(0, 1), HoistZone(2, 3)], dwell=(5, 15), **comune)
+        check(False, "una permanenza massima irraggiungibile viene respinta")
+    except ValueError as e:
+        check(
+            "in bagno almeno" in str(e) and "gancio" in str(e),
+            f'e il motivo e\' scritto: "{str(e)[:80]}..."',
+        )
+
+
 def test_passo_controllo():
     print("\n[6] passo di controllo: piu' fitto = meno cautelativo, sempre sicuro")
     risultati = {}
@@ -416,6 +468,7 @@ def main():
     test_un_carroponte()
     test_tre_carroponti()
     test_fasi_verticali_e_capienza()
+    test_bagno_comprende_le_corse_a_vuoto()
     test_passo_controllo()
     test_scelta_automatica()
     test_vasca_ripetuta()

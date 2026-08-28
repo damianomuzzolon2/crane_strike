@@ -284,7 +284,25 @@ class ProblemData:
         for s_idx in range(1, len(self.route) - 1):
             spec = self.route[s_idx]
             cap = self.tank_capacity(s_idx)
-            occ_min = self.slot_occupancy_seconds(s_idx, spec.dwell_min)
+            # Bagno inevitabile: anche prelevando il pezzo appena il gancio che
+            # lo ha deposto si e' tolto di mezzo, resta immerso per le due
+            # corse a vuoto e i tempi morti. Se il processo non lo tollera, la
+            # linea e' irrealizzabile e va detto adesso -- non con un
+            # INFEASIBLE muto, che manderebbe a cercare la causa dove non c'e'.
+            minimo_fisico = self.bath_extra_seconds(s_idx)
+            if spec.dwell_max < minimo_fisico - 1e-9:
+                raise ValueError(
+                    f"vasca '{spec.tank_id}' (stazione {s_idx}): il pezzo resta "
+                    f"in bagno almeno {minimo_fisico:.1f}s -- il gancio deve "
+                    f"risalire dopo averlo deposto e ricalare per riprenderlo, "
+                    f"e il pezzo e' immerso tutto il tempo -- ma la permanenza "
+                    f"massima dichiarata e' {spec.dwell_max:.1f}s. Alza la "
+                    f"permanenza massima, oppure velocizza il sollevamento a "
+                    f"vuoto o riduci la corsa verticale della vasca."
+                )
+            occ_min = self.slot_occupancy_seconds(
+                s_idx, max(spec.dwell_min, minimo_fisico)
+            )
             if occ_min > cap * self.takt_max:
                 raise ValueError(
                     f"vasca '{spec.tank_id}' (stazione {s_idx}): un pezzo occupa "
@@ -445,16 +463,45 @@ class ProblemData:
         parte, sgancio dall'altra."""
         return sum(f.duration for f in self.release_phases(station_idx))
 
-    def slot_occupancy_seconds(self, station_idx: int, dwell: float) -> float:
-        """Per quanto tempo [s] un pezzo tiene occupato un POSTO nella vasca
-        `station_idx`, dato il suo tempo in bagno `dwell`.
+    def bath_extra_seconds(self, station_idx: int) -> float:
+        """Quanto il pezzo resta in bagno OLTRE l'intervallo fra i movimenti
+        del gancio, alla stazione data.
 
-        Non coincide col dwell: il telaio ingombra il posto dall'inizio
-        dell'immersione fino alla fine dell'emersione, quindi va aggiunto il
-        rilascio in entrata e la presa in uscita. E' questa la grandezza da
-        confrontare con `capacity * T`, non il solo tempo in bagno."""
+        Il gancio che ha appena sganciato deve risalire, e quello che verra' a
+        riprendere il pezzo deve ricalare: due corse a vuoto che avvengono
+        mentre il pezzo e' gia' -- o ancora -- immerso. Piu' i tempi morti di
+        sgancio e aggancio, che il telaio passa anch'essi in fondo alla vasca.
+
+        Sono secondi di bagno a tutti gli effetti, e non contarli era un
+        errore vero: su una linea con corsa 1500 mm fanno oltre quindici
+        secondi, abbastanza da sforare il massimo di processo senza che
+        nessuno lo dicesse. Il tempo in bagno e' quindi
+
+            bagno = (istante del prelievo - istante in cui il rilascio finisce)
+                    + bath_extra_seconds
+
+        e sono i limiti del PROCESSO -- `dwell_min` e `dwell_max` -- ad
+        applicarsi al bagno, non all'intervallo fra i movimenti."""
+        a_vuoto = self.empty_lift_seconds(station_idx)
+        return self.disengage_time + a_vuoto + a_vuoto + self.engage_time
+
+    def empty_lift_seconds(self, station_idx: int) -> float:
+        """Durata [s] di UNA corsa verticale a gancio scarico, alla stazione
+        data: quella che il gancio fa per risalire dopo lo sgancio, e di nuovo
+        per ricalare prima dell'aggancio."""
+        return self._lift_seconds(self.lift_height_at(station_idx), self.kin_lift_empty)
+
+    def slot_occupancy_seconds(self, station_idx: int, bath: float) -> float:
+        """Per quanto tempo [s] un pezzo tiene occupato un POSTO nella vasca
+        `station_idx`, dato il suo tempo in bagno.
+
+        Non coincide col bagno: il telaio ingombra il posto da quando comincia
+        a calare a quando ha finito di emergere e di sgocciolare. E' questa la
+        grandezza da confrontare con `capacity * T`."""
         return (
-            self.release_time_at(station_idx) + dwell + self.pick_time_at(station_idx)
+            self.release_time_at(station_idx)
+            + (bath - self.bath_extra_seconds(station_idx))
+            + self.pick_time_at(station_idx)
         )
 
     def loaded_leg_seconds(self, k: int) -> float:
@@ -738,8 +785,18 @@ def solve(
             k  # la vasca k viene raggiunta dalla mossa k-1 e lasciata dalla mossa k
         )
         spec = data.route[station]
-        dwell_min = T_(spec.dwell_min)
-        dwell_max = T_(spec.dwell_max)
+        # I limiti di processo valgono sul BAGNO, e il bagno comprende anche
+        # le corse a vuoto del gancio che vanno e vengono col pezzo gia'
+        # immerso (vedi `bath_extra_seconds`). Fra i due istanti che il
+        # modello maneggia -- fine del rilascio e inizio della presa -- resta
+        # quindi una finestra piu' stretta, di una costante nota in anticipo:
+        # il vincolo si sposta e basta, non cambia forma.
+        extra = T_(data.bath_extra_seconds(station))
+        # Il gancio che deposita si toglie di mezzo prima che arrivi quello
+        # che preleva: la finestra non puo' diventare negativa, per corta che
+        # la faccia un bagno minimo piccolo.
+        dwell_min = max(0, T_(spec.dwell_min) - extra)
+        dwell_max = T_(spec.dwell_max) - extra
         arrival = actual_time[k - 1] + travel_loaded[k - 1]
         model.Add(actual_time[k] >= arrival + dwell_min)
         model.Add(actual_time[k] <= arrival + dwell_max)
@@ -1271,7 +1328,11 @@ def build_solution(
     actual_time = [float(local_pick[k]) for k in range(data.n_moves)]
     for k in range(1, data.n_moves):
         arrivo = actual_time[k - 1] + data.loaded_leg_seconds(k - 1)
-        minimo = arrivo + data.route[k].dwell_min
+        # il minimo di processo vale sul BAGNO, che comprende le corse a vuoto
+        # del gancio: fra i due istanti maneggiati qui resta di meno
+        minimo = arrivo + max(
+            0.0, data.route[k].dwell_min - data.bath_extra_seconds(k)
+        )
         # Si sale di periodi interi: la FASE resta quella scelta dall'utente.
         # La tolleranza sul ceil non e' un dettaglio. Quando la permanenza
         # cade esattamente sul minimo -- il caso tipico di una soluzione
@@ -1362,7 +1423,9 @@ def estrai_gradi_di_liberta(
     extra: dict[int, int] = {}
     for k in range(1, data.n_moves):
         arrivo = at[k - 1] + data.loaded_leg_seconds(k - 1)
-        minimo = arrivo + data.route[k].dwell_min
+        minimo = arrivo + max(
+            0.0, data.route[k].dwell_min - data.bath_extra_seconds(k)
+        )
         base = local_pick[k]
         n_min = max(0, math.ceil((minimo - base) / T - data.eps_seconds / T))
         n_reale = round((at[k] - base) / T)
