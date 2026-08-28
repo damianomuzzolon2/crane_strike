@@ -633,6 +633,10 @@ class FinestraSimulazione(tk.Toplevel):
     # secondo: piu' fitto non si distingue, meno fitto si vede scattare.
     PASSO_MS = 40
     VELOCITA = ["0.5x", "1x", "2x", "5x", "10x", "20x"]
+    # Quanto va tenuto premuto `Avanti` o `Indietro` prima che parta la
+    # raffica. Serve un'attesa: senza, ogni clic un po' lento ne farebbe due,
+    # e un pulsante che a volte fa un passo e a volte due non si controlla.
+    ATTESA_RAFFICA_MS = 350
 
     def __init__(self, padre, data, solution, carri=None, titolo_linea=""):
         super().__init__(padre)
@@ -644,6 +648,7 @@ class FinestraSimulazione(tk.Toplevel):
         self.t = 0.0
         self._in_moto = False
         self._lavoro = None  # identificativo del timer di tkinter
+        self._raffica = None  # il timer del pulsante tenuto premuto
         self._muovo_io = False  # per non farsi rimbalzare indietro dal cursore
 
         self.figura = Figure(figsize=(11, 4.6), dpi=100)
@@ -657,14 +662,10 @@ class FinestraSimulazione(tk.Toplevel):
         # movimento fa vedere cosa succede; per capire ESATTAMENTE quando due
         # carroponti si sfiorano bisogna potersi fermare sull'istante e
         # spostarsi di poco, avanti e indietro, senza rincorrere il cursore.
-        ttk.Button(comandi, text="Indietro", width=9, command=self.indietro).pack(
-            side=tk.LEFT
-        )
+        self._pulsante_passo(comandi, "Indietro", -1).pack(side=tk.LEFT)
         self.btn_avvia = ttk.Button(comandi, text="Avvia", width=9, command=self.avvia_o_ferma)
         self.btn_avvia.pack(side=tk.LEFT, padx=(6, 0))
-        ttk.Button(comandi, text="Avanti", width=9, command=self.avanti).pack(
-            side=tk.LEFT, padx=(6, 0)
-        )
+        self._pulsante_passo(comandi, "Avanti", +1).pack(side=tk.LEFT, padx=(6, 0))
         ttk.Button(comandi, text="Da capo", width=9, command=self.da_capo).pack(
             side=tk.LEFT, padx=(6, 0)
         )
@@ -1121,6 +1122,48 @@ class FinestraSimulazione(tk.Toplevel):
     def indietro(self):
         self._passo_a_mano(-1)
 
+    def _pulsante_passo(self, cornice, testo: str, verso: int):
+        """Un pulsante che fa un passo se lo si preme, e continua se lo si
+        TIENE premuto.
+
+        Il comando non si attacca a `command` ma a pressione e rilascio: cosi'
+        un clic secco vale esattamente un passo, mentre `command` -- che
+        scatta al rilascio -- ne farebbe uno in piu' alla fine di ogni raffica.
+
+        Tenendolo premuto la simulazione scorre in quel verso all'andatura
+        scelta col menu della velocita': e' la stessa manopola, e per andare
+        veloci si mette a 20x. All'indietro non c'e' altro modo di farlo."""
+        pulsante = ttk.Button(cornice, text=testo, width=9)
+        pulsante.bind("<ButtonPress-1>", lambda e: self._inizia_raffica(verso))
+        pulsante.bind("<ButtonRelease-1>", lambda e: self._ferma_raffica())
+        return pulsante
+
+    def _inizia_raffica(self, verso: int):
+        self._ferma_raffica()
+        self._passo_a_mano(verso)
+        self._raffica = self.after(
+            self.ATTESA_RAFFICA_MS, lambda: self._continua_raffica(verso)
+        )
+
+    def _continua_raffica(self, verso: int):
+        # Si adotta il timer in corso invece di affiancarglisi, come fa
+        # `_passo`: chiamata da qualcosa che non sia il timer -- una prova, un
+        # comando futuro -- questa riga evita di lasciarne uno orfano, che poi
+        # scatta su una finestra chiusa e finisce nel gestore degli errori.
+        self._ferma_raffica()
+        self._passo_a_mano(verso)
+        self._raffica = self.after(
+            self.PASSO_MS, lambda: self._continua_raffica(verso)
+        )
+
+    def _ferma_raffica(self):
+        if self._raffica is not None:
+            try:
+                self.after_cancel(self._raffica)
+            except Exception:
+                pass
+            self._raffica = None
+
     def _passo_a_mano(self, verso: int):
         if self.sim is None:
             return
@@ -1225,6 +1268,7 @@ class FinestraSimulazione(tk.Toplevel):
         return "     |     ".join(pezzi)
 
     def destroy(self):
+        self._ferma_raffica()
         if self._lavoro is not None:
             try:
                 self.after_cancel(self._lavoro)
@@ -1232,6 +1276,16 @@ class FinestraSimulazione(tk.Toplevel):
                 pass
             self._lavoro = None
         self._in_moto = False
+        # `draw_idle` lascia un ridisegno in coda che scatta appena Tk e'
+        # libero. Chiudendo la finestra subito dopo un passo, quel ridisegno
+        # si sveglierebbe su una tela che non esiste piu' e finirebbe nel
+        # gestore degli errori di sfondo -- invisibile in un eseguibile senza
+        # console, ma pur sempre un errore. Lo si lascia finire adesso, che
+        # tutto e' ancora in piedi.
+        try:
+            self.update_idletasks()
+        except Exception:
+            pass
         try:
             self.tela.get_tk_widget().destroy()
         except Exception:

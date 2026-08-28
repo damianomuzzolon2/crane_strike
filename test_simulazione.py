@@ -402,6 +402,47 @@ def test_finestra(d: ProblemData):
             abs(f.t - da_solo) < 1e-9,
             f"e coincide con quello che fa da sola ({f.t:.3f} vs {da_solo:.3f} s)",
         )
+        # -- tenendo premuto, la raffica ------------------------------------
+        # Un clic secco vale un passo e basta: se `command` fosse rimasto
+        # attaccato al pulsante, alla fine di ogni raffica ne farebbe uno in
+        # piu' -- e un pulsante che a volte fa un passo e a volte due non si
+        # controlla.
+        f.t = meta
+        f._inizia_raffica(+1)
+        check(
+            abs(f.t - (meta + passo)) < 1e-9 and f._raffica is not None,
+            "premuto: un passo subito, e il timer della raffica in attesa",
+        )
+        f._ferma_raffica()
+        check(
+            abs(f.t - (meta + passo)) < 1e-9 and f._raffica is None,
+            "rilasciato subito: resta un passo solo",
+        )
+        radice.update_idletasks()
+        pendenti = set(radice.tk.call("after", "info"))
+        f._inizia_raffica(-1)
+        for _ in range(5):
+            f._continua_raffica(-1)
+        check(
+            abs(f.t - (meta - 5 * passo)) < 1e-9,
+            f"tenuto premuto indietro: un passo per volta, senza saltare "
+            f"({f.t:.2f} s)",
+        )
+        f._ferma_raffica()
+        radice.update_idletasks()
+        orfani = set(radice.tk.call("after", "info")) - pendenti
+        check(
+            not orfani,
+            f"e la raffica lascia UN timer solo, non uno per passo ({len(orfani)} "
+            f"rimasti in giro)",
+        )
+        prima_del_rilascio = f.t
+        radice.update()
+        check(
+            f._raffica is None and f.t == prima_del_rilascio,
+            "e al rilascio si ferma li'",
+        )
+
         # il giro si richiude anche all'indietro
         f.t = 0.0
         f.indietro()
@@ -441,11 +482,14 @@ def test_finestra(d: ProblemData):
             "non sono assegnati" in f.avviso["text"],
             "e avvisa che un trasporto non lo fa nessuno",
         )
+        # chiusa mentre un pulsante e' ancora premuto: il timer della raffica
+        # continuerebbe a chiedere ridisegni su una finestra che non c'e' piu'
+        f._inizia_raffica(+1)
         f.destroy()
         radice.update()
         check(
-            f._lavoro is None and not f.winfo_exists(),
-            "si chiude senza lasciare timer in giro",
+            f._lavoro is None and f._raffica is None and not f.winfo_exists(),
+            "si chiude senza lasciare timer in giro, raffica compresa",
         )
     finally:
         try:
