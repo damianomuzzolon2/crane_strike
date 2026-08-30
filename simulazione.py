@@ -88,6 +88,11 @@ class StatoCarro:
     fase: str  # etichetta leggibile
     vasca: Optional[str]  # sopra quale vasca, se e' fermo su una
     corsia: float = 0.0  # su quale POSTO della vasca sta lavorando (vedi _corsia)
+    # Corsa verticale a cui la quota `z` si riferisce. Serve al disegno, che
+    # non mostra i millimetri ma il punto a cui e' arrivata la discesa: senza,
+    # bisognerebbe risalire alla vasca dal nome, e mentre il carroponte trasla
+    # a gancio basso non e' sopra nessuna vasca.
+    corsa: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -103,6 +108,7 @@ class StatoPezzo:
     appeso: bool  # in mano a un carroponte (altrimenti e' fermo in vasca)
     vasca: Optional[str]
     corsia: float = 0.0  # in quale POSTO della vasca sta (vedi _corsia)
+    corsa: float = 0.0  # corsa verticale a cui `z` si riferisce
 
 
 @dataclass(frozen=True)
@@ -282,7 +288,11 @@ class Simulazione:
                 _Traiettoria(
                     numero, ordinati, [s.t_start for s in ordinati],
                     ordinati[0].t_start, inizi_mossa,
-                    _tratti_col_gancio_giu(ordinati),
+                    # Col gancio che trasla basso non c'e' niente da
+                    # correggere: quando e' scarico e' gia' giu' comunque.
+                    {}
+                    if data.empty_hook_travels_low
+                    else _tratti_col_gancio_giu(ordinati),
                 )
             )
 
@@ -393,7 +403,9 @@ class Simulazione:
             i = max(0, bisect.bisect_right(c.inizi, tau) - 1)
             s = c.segmenti[i]
             x = _valuta(tau, s.t_start, s.t_end, s.x_start, s.x_end, s.kin)
-            z, con_pezzo, fase, vasca = self._fase_verticale(s, tau, c.giu.get(i))
+            z, con_pezzo, fase, vasca, corsa = self._fase_verticale(
+                s, tau, c.giu.get(i)
+            )
             fuori.append(
                 StatoCarro(
                     carro=c.numero,
@@ -403,6 +415,7 @@ class Simulazione:
                     fase=fase,
                     vasca=vasca,
                     corsia=self._corsia_carro(c, s, tau, t),
+                    corsa=corsa,
                 )
             )
         return fuori
@@ -440,9 +453,16 @@ class Simulazione:
         `_tratti_col_gancio_giu`)."""
         d = self.data
         if s.kind == "loaded":
-            return 0.0, True, "trasporto", None
+            return 0.0, True, "trasporto", None, 0.0
+        if s.kind in ("empty", "wait") and d.empty_hook_travels_low:
+            # Il gancio scarico non risale: trasla basso, e alla vasca dopo ci
+            # arriva gia' in fondo. Sopra la vasca da cui parte, che e' quella
+            # in cui e' sceso l'ultima volta.
+            corsa = self._corsa_a(s.x_start)
+            etichetta = "rientro a vuoto" if s.kind == "empty" else "attesa"
+            return -corsa, False, etichetta, self._vasca_a(s.x_start), corsa
         if s.kind == "empty":
-            return 0.0, False, "rientro a vuoto", None
+            return 0.0, False, "rientro a vuoto", None, 0.0
         if s.kind == "pick" and s.move is not None:
             stazione = s.move
             fasi = d.pick_phases(stazione)
@@ -464,29 +484,40 @@ class Simulazione:
                 )
         elif giu is not None:
             # attesa col gancio calato, fra un rilascio e il prelievo successivo
+            corsa = d.lift_height_at(giu)
             return (
-                _quota_di_attesa(d.lift_height_at(giu)),
+                _quota_di_attesa(corsa),
                 False,
                 "attesa in vasca",
                 d.route[giu].tank_id,
+                corsa,
             )
         else:
             # attesa sopra una vasca: il gancio e' in alto, vuoto
-            return 0.0, False, "attesa", self._vasca_a(s.x_start)
+            return 0.0, False, "attesa", self._vasca_a(s.x_start), 0.0
         vasca = d.route[stazione].tank_id
+        corsa = d.lift_height_at(stazione)
         dt = tau - s.t_start
         for f in fasi:
             if dt <= f.duration or f is fasi[-1]:
                 z = _valuta(dt, 0.0, f.duration, f.z_start, f.z_end, f.kin)
-                return z, f.loaded, f.name, vasca
+                return z, f.loaded, f.name, vasca, corsa
             dt -= f.duration
-        return 0.0, False, s.kind, vasca
+        return 0.0, False, s.kind, vasca, corsa
 
     def _vasca_a(self, x: float) -> Optional[str]:
         for st in self.data.route:
             if abs(self.data.tanks[st.tank_id].position - x) < 1e-6:
                 return st.tank_id
         return None
+
+    def _corsa_a(self, x: float) -> float:
+        """Corsa verticale della vasca che sta in `x`, o zero se li' non ce
+        n'e' nessuna."""
+        for i in range(self.data.n_stations):
+            if abs(self.data.station_position(i) - x) < 1e-6:
+                return self.data.lift_height_at(i)
+        return 0.0
 
     def _stato_pezzi(self, t: float) -> list[StatoPezzo]:
         # quali pezzi sono in linea adesso: quelli entrati fra t-vita e t
@@ -512,6 +543,7 @@ class Simulazione:
             appeso=f.appeso,
             vasca=f.vasca,
             corsia=self._corsia_fra(indice, f.st_da, f.st_a, frazione),
+            corsa=self.data.lift_height_at(f.st_da if f.st_da == f.st_a else f.st_a),
         )
 
 
@@ -1246,9 +1278,9 @@ class FinestraSimulazione(tk.Toplevel):
         carroponti sia per i pezzi, ed e' l'unico modo perche' continuino a
         stare nello stesso posto -- la coerenza fra i due la si controlla sulle
         quote VERE, in `Simulazione`, dove nessuno ha rimappato niente."""
-        if stato.vasca is None or stato.z >= 0.0:
+        if stato.z >= 0.0:
             return 0.0
-        corsa = self.dati.tanks[stato.vasca].lift_height
+        corsa = stato.corsa
         if corsa <= 0:
             return 0.0
         return min(1.0, -stato.z / corsa) * self.quota_immersione

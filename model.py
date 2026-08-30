@@ -195,6 +195,17 @@ class ProblemData:
     # Corsa e sgocciolamento no: cambiano da vasca a vasca e si dichiarano li'.
     kin_lift_empty: Optional[Kinematics] = None  # sollevamento a gancio scarico
     kin_lift_loaded: Optional[Kinematics] = None  # sollevamento col telaio
+    # Se il carroponte puo' traslare tenendo il gancio SCARICO in basso, senza
+    # urtare le vasche. E' come sono fatti quasi tutti gli impianti, ed e' il
+    # comportamento predefinito: il gancio scende una volta sola, all'inizio
+    # del giro, e non risale piu' finche' non ha un telaio da tirare su.
+    #
+    # Cambia i tempi, non solo il disegno: senza le due corse a vuoto -- quella
+    # per risalire dopo lo sgancio e quella per ricalare prima dell'aggancio --
+    # ogni presa e ogni rilascio si accorciano, e il pezzo resta in bagno di
+    # meno. Mettere `False` le rimette, per un impianto in cui il gancio calato
+    # non passa fra le vasche.
+    empty_hook_travels_low: bool = True
     engage_time: float = 0.0  # [s] aggancio del telaio, prima del sollevamento
     disengage_time: float = 0.0  # [s] sgancio, dopo l'immersione
     # Ogni quanti millimetri viene verificata la distanza fra due carroponti
@@ -248,14 +259,25 @@ class ProblemData:
                     f"drain_time della vasca '{t.id}' deve essere >= 0"
                 )
         serve_cinematica = any(t.lift_height > 0 for t in self.tanks.values())
-        if serve_cinematica and (
-            self.kin_lift_empty is None or self.kin_lift_loaded is None
+        if serve_cinematica and self.kin_lift_loaded is None:
+            raise ValueError(
+                "almeno una vasca ha una corsa verticale (lift_height) ma manca "
+                "kin_lift_loaded: senza non si sa quanto ci mette il telaio a "
+                "uscire dal bagno e a rientrarci."
+            )
+        # Il sollevamento a vuoto serve SOLO all'impianto in cui il gancio
+        # calato non passa fra le vasche: se puo' traslare basso -- il caso
+        # normale -- quelle corse non le fa nessuno, e pretendere il dato
+        # sarebbe chiedere un numero per non usarlo.
+        if (
+            serve_cinematica
+            and not self.empty_hook_travels_low
+            and self.kin_lift_empty is None
         ):
             raise ValueError(
-                "almeno una vasca ha una corsa verticale (lift_height) ma "
-                "mancano le cinematiche di sollevamento: servono sia "
-                "kin_lift_empty sia kin_lift_loaded per calcolare i tempi di "
-                "presa e rilascio."
+                "l'impianto e' dichiarato senza traslazione a gancio basso, "
+                "quindi il gancio scarico deve risalire e ricalare a ogni "
+                "vasca: serve kin_lift_empty per sapere quanto ci mette."
             )
         if self.clearance_step_mm <= 0:
             raise ValueError(
@@ -400,17 +422,26 @@ class ProblemData:
         Il ciclogramma ha bisogno della sola durata totale, ma chi deve
         MOSTRARE la presa -- la simulazione -- ha bisogno di sapere dove sta il
         gancio istante per istante. Le fasi sono la definizione, e la durata e'
-        la loro somma: cosi' i due usi non possono divergere."""
+        la loro somma: cosi' i due usi non possono divergere.
+
+        Col gancio che trasla basso -- il caso normale -- la discesa non c'e'
+        proprio: il carroponte e' arrivato con il gancio gia' in fondo."""
         h = self.lift_height_at(station_idx)
-        return [
-            LiftPhase(
-                "discesa del gancio",
-                self._lift_seconds(h, self.kin_lift_empty),
-                0.0,
-                -h,
-                self.kin_lift_empty,
-                False,
-            ),
+        discesa = (
+            []
+            if self.empty_hook_travels_low
+            else [
+                LiftPhase(
+                    "discesa del gancio",
+                    self._lift_seconds(h, self.kin_lift_empty),
+                    0.0,
+                    -h,
+                    self.kin_lift_empty,
+                    False,
+                )
+            ]
+        )
+        return discesa + [
             LiftPhase("aggancio", self.engage_time, -h, -h, None, False),
             LiftPhase(
                 "sollevamento del telaio",
@@ -426,8 +457,25 @@ class ProblemData:
         ]
 
     def release_phases(self, station_idx: int) -> list["LiftPhase"]:
-        """Il RILASCIO scomposto nei suoi movimenti verticali, in ordine."""
+        """Il RILASCIO scomposto nei suoi movimenti verticali, in ordine.
+
+        Col gancio che trasla basso -- il caso normale -- la risalita non c'e':
+        sganciato il telaio, il carroponte riparte con il gancio in fondo."""
         h = self.lift_height_at(station_idx)
+        risalita = (
+            []
+            if self.empty_hook_travels_low
+            else [
+                LiftPhase(
+                    "risalita del gancio",
+                    self._lift_seconds(h, self.kin_lift_empty),
+                    -h,
+                    0.0,
+                    self.kin_lift_empty,
+                    False,
+                )
+            ]
+        )
         return [
             LiftPhase(
                 "immersione del telaio",
@@ -438,29 +486,18 @@ class ProblemData:
                 True,
             ),
             LiftPhase("sgancio", self.disengage_time, -h, -h, None, True),
-            LiftPhase(
-                "risalita del gancio",
-                self._lift_seconds(h, self.kin_lift_empty),
-                -h,
-                0.0,
-                self.kin_lift_empty,
-                False,
-            ),
-        ]
+        ] + risalita
 
     def pick_time_at(self, station_idx: int) -> float:
-        """Tempo di PRESA [s] alla stazione data: discesa del gancio scarico,
-        aggancio, risalita col telaio, sgocciolamento sopra la vasca."""
+        """Tempo di PRESA [s] alla stazione data: aggancio, sollevamento col
+        telaio, sgocciolamento -- piu' la discesa del gancio scarico, se
+        l'impianto non lascia traslare il gancio calato."""
         return sum(f.duration for f in self.pick_phases(station_idx))
 
     def release_time_at(self, station_idx: int) -> float:
-        """Tempo di RILASCIO [s] alla stazione data: discesa col telaio,
-        sgancio, risalita del gancio scarico.
-
-        Nota: a parita' di corsa, presa e rilascio percorrono le stesse due
-        tratte (una a vuoto e una a carico) in ordine invertito, quindi
-        differiscono solo per i tempi morti -- aggancio e sgocciolamento da una
-        parte, sgancio dall'altra."""
+        """Tempo di RILASCIO [s] alla stazione data: immersione col telaio e
+        sgancio -- piu' la risalita del gancio scarico, se l'impianto non
+        lascia traslare il gancio calato."""
         return sum(f.duration for f in self.release_phases(station_idx))
 
     def bath_extra_seconds(self, station_idx: int) -> float:
@@ -481,14 +518,22 @@ class ProblemData:
                     + bath_extra_seconds
 
         e sono i limiti del PROCESSO -- `dwell_min` e `dwell_max` -- ad
-        applicarsi al bagno, non all'intervallo fra i movimenti."""
+        applicarsi al bagno, non all'intervallo fra i movimenti.
+
+        Col gancio che trasla basso le due corse a vuoto non ci sono, e restano
+        i soli tempi morti di sgancio e aggancio."""
         a_vuoto = self.empty_lift_seconds(station_idx)
         return self.disengage_time + a_vuoto + a_vuoto + self.engage_time
 
     def empty_lift_seconds(self, station_idx: int) -> float:
         """Durata [s] di UNA corsa verticale a gancio scarico, alla stazione
         data: quella che il gancio fa per risalire dopo lo sgancio, e di nuovo
-        per ricalare prima dell'aggancio."""
+        per ricalare prima dell'aggancio.
+
+        Zero se l'impianto lascia traslare il gancio calato, che e' il caso
+        normale: quelle corse non le fa nessuno."""
+        if self.empty_hook_travels_low:
+            return 0.0
         return self._lift_seconds(self.lift_height_at(station_idx), self.kin_lift_empty)
 
     def slot_occupancy_seconds(self, station_idx: int, bath: float) -> float:

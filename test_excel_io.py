@@ -377,13 +377,48 @@ def test_sollevamento_incoerente():
         wb = load_workbook(p)
         ws = wb[FOGLIO_PARAMETRI]
         for riga in range(2, ws.max_row + 1):
-            if str(ws.cell(riga, 1).value or "").startswith("v_max_sollevamento"):
+            if str(ws.cell(riga, 1).value or "").startswith("v_max_sollevamento_carico"):
                 ws.cell(riga, 2).value = None
         wb.save(p)
         msg = errore_leggendo(p)
         check(
-            "cinematiche di sollevamento" in msg,
-            "corsa dichiarata ma cinematica mancante: segnalato",
+            "kin_lift_loaded" in msg,
+            "corsa dichiarata ma manca il sollevamento a carico: segnalato",
+        )
+    finally:
+        os.unlink(p)
+
+    # Il sollevamento a VUOTO invece non serve: col gancio che trasla basso --
+    # lo standard -- quelle corse non le fa nessuno, e pretendere il dato
+    # sarebbe chiedere un numero per non usarlo.
+    p = modello_temporaneo()
+    try:
+        from openpyxl import load_workbook
+
+        wb = load_workbook(p)
+        ws = wb[FOGLIO_PARAMETRI]
+        for riga in range(2, ws.max_row + 1):
+            if str(ws.cell(riga, 1).value or "").startswith(
+                ("v_max_sollevamento_vuoto", "a_max_sollevamento_vuoto")
+            ):
+                ws.cell(riga, 2).value = None
+        wb.save(p)
+        cfg = leggi_problema(p)
+        check(
+            cfg.data.empty_lift_seconds(1) == 0.0,
+            "senza sollevamento a vuoto la linea si legge lo stesso",
+        )
+        # ...ma dichiarando un impianto in cui il gancio DEVE risalire, serve
+        wb = load_workbook(p)
+        ws = wb[FOGLIO_PARAMETRI]
+        for riga in range(2, ws.max_row + 1):
+            if str(ws.cell(riga, 1).value or "") == "traslazione_con_gancio_basso":
+                ws.cell(riga, 2).value = 0
+        wb.save(p)
+        msg = errore_leggendo(p)
+        check(
+            "gancio basso" in msg and "kin_lift_empty" in msg,
+            f"e li' invece viene chiesto: \"{msg.splitlines()[-1][:70]}...\"",
         )
     finally:
         os.unlink(p)

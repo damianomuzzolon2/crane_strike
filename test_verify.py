@@ -487,21 +487,40 @@ def test_capienza_vasca():
     # finito di emergere e di sgocciolare. Le corse a VUOTO del gancio non
     # contano: quelle stanno gia' dentro il bagno, e sommarle di nuovo qui
     # sarebbe doppio conteggio.
-    presa = data_v.pick_phases(2)
-    rilascio = data_v.release_phases(2)
-    immersione = rilascio[0].duration
-    sollevamento, sgocciolamento = presa[2].duration, presa[3].duration
-    atteso = immersione + 50.0 + sollevamento + sgocciolamento
+    # le fasi si prendono per nome: col gancio che trasla basso le corse a
+    # vuoto non ci sono, e per indice si prenderebbe quella sbagliata
+    durate = {
+        f.name: f.duration
+        for f in data_v.pick_phases(2) + data_v.release_phases(2)
+    }
+    atteso = (
+        durate["immersione del telaio"]
+        + 50.0
+        + durate["sollevamento del telaio"]
+        + durate["sgocciolamento"]
+    )
     check(
         abs(data_v.slot_occupancy_seconds(2, 50.0) - atteso) < 1e-9,
         f"occupazione posto = immersione + bagno + emersione + sgocciolamento "
         f"({atteso:.2f} s)",
     )
-    # e il bagno comprende le due corse a vuoto del gancio piu' i tempi morti
+    # Col gancio che trasla basso -- lo standard -- il bagno eccede l'intervallo
+    # fra i movimenti dei soli tempi morti: le corse a vuoto non le fa nessuno.
     check(
-        abs(data_v.bath_extra_seconds(2) - (1.0 + 2 * presa[0].duration + 2.0)) < 1e-9,
-        f"bagno = intervallo fra i movimenti + {data_v.bath_extra_seconds(2):.2f} s "
-        f"(risalita, discesa, sgancio, aggancio)",
+        abs(data_v.bath_extra_seconds(2) - 3.0) < 1e-9
+        and "discesa del gancio" not in durate,
+        f"col gancio che trasla basso il bagno eccede di soli sgancio+aggancio "
+        f"({data_v.bath_extra_seconds(2):.2f} s)",
+    )
+    # ...e sull'impianto che obbliga il gancio a risalire ci si aggiungono le
+    # due corse a vuoto, che il pezzo passa anch'esse immerso.
+    alto = dataclasses.replace(data_v, empty_hook_travels_low=False)
+    a_vuoto = alto.empty_lift_seconds(2)
+    check(
+        a_vuoto > 0
+        and abs(alto.bath_extra_seconds(2) - (3.0 + 2 * a_vuoto)) < 1e-9,
+        f"e senza traslazione bassa ci si aggiungono le due corse a vuoto "
+        f"({alto.bath_extra_seconds(2):.2f} s)",
     )
 
 
@@ -626,15 +645,26 @@ def test_fasi_verticali():
     # cinematiche di sollevamento (una tratta a vuoto + una a carico)
     t_vuoto = kinematics_travel_time(800, KIN_LIFT_EMPTY)
     t_carico = kinematics_travel_time(800, KIN_LIFT_LOADED)
+    # Col gancio che trasla basso -- lo standard -- il gancio scarico non si
+    # muove mai in verticale: e' arrivato gia' in fondo e riparte da li'.
     check(
-        abs(data.pick_time_at(0) - (t_vuoto + 2.0 + t_carico + 4.0)) < 1e-9,
-        f"presa = discesa a vuoto + aggancio + risalita a carico + "
-        f"sgocciolamento ({data.pick_time_at(0):.2f} s)",
+        abs(data.pick_time_at(0) - (2.0 + t_carico + 4.0)) < 1e-9,
+        f"presa = aggancio + risalita a carico + sgocciolamento "
+        f"({data.pick_time_at(0):.2f} s)",
     )
     check(
-        abs(data.release_time_at(1) - (t_carico + 1.0 + t_vuoto)) < 1e-9,
-        f"rilascio = discesa a carico + sgancio + risalita a vuoto "
-        f"({data.release_time_at(1):.2f} s) -- nessuno sgocciolamento",
+        abs(data.release_time_at(1) - (t_carico + 1.0)) < 1e-9,
+        f"rilascio = discesa a carico + sgancio ({data.release_time_at(1):.2f} s) "
+        f"-- nessuno sgocciolamento e nessuna risalita",
+    )
+    # ...e sull'impianto in cui il gancio calato non passa fra le vasche, le
+    # due corse a vuoto tornano e ogni mossa si allunga di conseguenza.
+    alto = dataclasses.replace(data, empty_hook_travels_low=False)
+    check(
+        abs(alto.pick_time_at(0) - (t_vuoto + 2.0 + t_carico + 4.0)) < 1e-9
+        and abs(alto.release_time_at(1) - (t_carico + 1.0 + t_vuoto)) < 1e-9,
+        f"senza traslazione bassa tornano le corse a vuoto "
+        f"(+{alto.pick_time_at(0) - data.pick_time_at(0):.2f} s sulla presa)",
     )
     check(
         abs((data.pick_time_at(0) - data.release_time_at(0)) - (2.0 + 4.0 - 1.0))

@@ -58,7 +58,7 @@ def check(condition: bool, description: str):
         print(f"  FAIL {description}")
 
 
-def dati_prova() -> ProblemData:
+def dati_prova(gancio_basso: bool = True) -> ProblemData:
     tanks = {
         nome: Tank(nome, pos, 1, lift_height=corsa, drain_time=scolo)
         for nome, pos, corsa, scolo in VASCHE
@@ -83,6 +83,7 @@ def dati_prova() -> ProblemData:
         kin_lift_loaded=KIN_LIFT_LOADED,
         engage_time=3.0,
         disengage_time=2.0,
+        empty_hook_travels_low=gancio_basso,
     )
 
 
@@ -111,27 +112,49 @@ def test_fasi_verticali(d: ProblemData):
             for a, b in zip(fasi, fasi[1:]):
                 if abs(a.z_end - b.z_start) > 1e-9:
                     ok_catena = False
-            if abs(fasi[0].z_start) > 1e-9 or abs(fasi[-1].z_end) > 1e-9:
-                ok_estremi = False
             if h > 0 and min(f.z_end for f in fasi) != -h:
                 ok_estremi = False
     check(ok_somma, "la durata di presa e rilascio e' la somma delle loro fasi")
     check(ok_catena, "le fasi si attaccano una all'altra senza salti di quota")
+    check(ok_estremi, "si passa sempre dal fondo corsa")
+
+    # Col gancio che trasla basso -- lo standard -- la presa comincia da giu'
+    # e il rilascio finisce giu': le due corse a vuoto non le fa nessuno.
+    presa, rilascio = d.pick_phases(1), d.release_phases(1)
+    h = d.lift_height_at(1)
     check(
-        ok_estremi,
-        "si parte e si torna alla quota di trasporto, passando dal fondo corsa",
+        [f.name for f in presa] == ["aggancio", "sollevamento del telaio", "sgocciolamento"]
+        and abs(presa[0].z_start + h) < 1e-9,
+        f"la presa comincia col gancio gia' in fondo ({[f.name for f in presa]})",
+    )
+    check(
+        [f.name for f in rilascio] == ["immersione del telaio", "sgancio"]
+        and abs(rilascio[-1].z_end + h) < 1e-9,
+        f"e il rilascio finisce li', senza risalire ({[f.name for f in rilascio]})",
     )
     # una fase si riconosce da chi tiene il telaio: e' l'unica cosa che
     # distingue il pezzo dal gancio, ed e' quella che la simulazione usa
-    presa = d.pick_phases(1)
     check(
-        [f.loaded for f in presa] == [False, False, True, True],
+        [f.loaded for f in presa] == [False, True, True],
         "nella presa il telaio e' appeso solo dopo l'aggancio",
     )
-    rilascio = d.release_phases(1)
     check(
-        [f.loaded for f in rilascio] == [True, True, False],
+        [f.loaded for f in rilascio] == [True, True],
         "nel rilascio il telaio resta appeso fino allo sgancio",
+    )
+
+    # ...e sull'impianto in cui il gancio calato non passa fra le vasche le
+    # due corse tornano, agli estremi.
+    alto = dati_prova(gancio_basso=False)
+    presa_alta = alto.pick_phases(1)
+    rilascio_alto = alto.release_phases(1)
+    check(
+        presa_alta[0].name == "discesa del gancio"
+        and abs(presa_alta[0].z_start) < 1e-9
+        and rilascio_alto[-1].name == "risalita del gancio"
+        and abs(rilascio_alto[-1].z_end) < 1e-9,
+        f"dichiarando l'impianto senza traslazione bassa, le corse a vuoto "
+        f"tornano ({alto.pick_time_at(1) - d.pick_time_at(1):+.1f} s sulla presa)",
     )
 
 
@@ -579,62 +602,59 @@ def test_vasca_a_piu_posti():
 
 
 def test_gancio_resta_giu(d: ProblemData):
-    """Chi deposita un telaio e resta li' ad aspettare per prenderne un altro
-    dalla stessa vasca non tira su il gancio per ricalarlo subito dopo."""
-    print("\n[11] il gancio resta calato durante l'attesa in vasca")
-    from simulazione import _tratti_col_gancio_giu
-
+    """Il gancio scarico non risale: trasla basso e alla vasca dopo ci arriva
+    gia' in fondo. E' lo standard, e cambia i tempi -- non solo il disegno."""
+    print("\n[11] il gancio scarico resta calato")
     sol, dati = proposta_semplice(d)
     sim = Simulazione(dati, sol)
-    tratti = [c.giu for c in sim._carri]
-    check(
-        any(tratti),
-        f"la prova serve a qualcosa: ci sono tratti col gancio giu' ({tratti})",
-    )
 
-    risalite, attaccati, attese = 0, 0, 0
+    risalite, alto = 0, 0
     for _, ist in campioni(sim):
-        fermi = [c for c in ist.carri if c.fase == "attesa in vasca"]
-        attese += len(fermi)
-        for c in fermi:
-            corsa = dati.tanks[c.vasca].lift_height
-            if c.z > -0.5 * corsa:
+        for c in ist.carri:
+            if c.con_pezzo or c.corsa <= 0:
+                continue  # col telaio in mano il gancio sta in alto, e deve
+            alto += 1
+            if c.z > -0.5 * c.corsa:
                 risalite += 1
-            # e comunque staccato dal telaio, altrimenti sembra che lo tenga
-            if any(
-                abs(p.x - c.x) < 1e-6 and abs(p.z - c.z) < 1e-6 for p in ist.pezzi
-            ):
-                attaccati += 1
-    check(attese > 0, f"e si vedono in {attese} istanti su 1501")
-    check(risalite == 0, f"in attesa il gancio non risale mai in alto ({risalite})")
-    # Qualche istante attaccato c'e' e ci deve essere: sono quelli in cui il
-    # gancio sta mollando il telaio o si sta riaccostando per riprenderlo.
-    # Sono il poco che serve a staccarsi, non l'attesa.
+    check(alto > 0, f"il gancio passa {alto} istanti scarico sopra una vasca")
     check(
-        attaccati < attese * 0.1,
-        f"e per l'attesa resta staccato dal telaio che ha appena mollato "
-        f"({attaccati} istanti attaccato su {attese})",
+        risalite == 0,
+        f"e non lo si vede mai tornare in alto a vuoto ({risalite} istanti)",
     )
 
-    # Il tempo NON cambia: il telaio successivo viene agganciato nello stesso
-    # istante di prima. Cambia solo dove il gancio passa l'attesa. Se non
-    # fosse cosi', il pezzo appeso non starebbe piu' dove sta il gancio -- ed
-    # e' quello che controlla il caso [3], su questo stesso ciclogramma.
-    segs = sorted(sol.segments_per_hoist[0], key=lambda s: s.t_start)
-    giu = _tratti_col_gancio_giu(segs)
-    durate = {
-        i: round(segs[i].t_end - segs[i].t_start, 9) for i in sorted(giu)
-    }
-    attese_previste = {}
-    for i, stazione in giu.items():
-        s = segs[i]
-        if s.kind == "release":
-            attese_previste[i] = round(dati.release_time_at(stazione), 9)
-        elif s.kind == "pick":
-            attese_previste[i] = round(dati.pick_time_at(stazione), 9)
+    # Anche traslando: e' li' che si vedeva risalire per niente.
+    in_viaggio = [
+        c
+        for _, ist in campioni(sim, 400)
+        for c in ist.carri
+        if c.fase == "rientro a vuoto"
+    ]
     check(
-        all(durate[i] == atteso for i, atteso in attese_previste.items()),
-        f"presa e rilascio durano quanto prima ({durate})",
+        in_viaggio and all(c.z < -0.5 * c.corsa for c in in_viaggio if c.corsa > 0),
+        f"nemmeno mentre trasla da una vasca all'altra ({len(in_viaggio)} istanti)",
+    )
+
+    # E i tempi lo seguono: senza le due corse a vuoto, presa e rilascio si
+    # accorciano di quel tanto, e il pezzo resta in bagno di meno.
+    alto_d = dati_prova(gancio_basso=False)
+    check(
+        d.pick_time_at(1) < alto_d.pick_time_at(1)
+        and d.release_time_at(1) < alto_d.release_time_at(1)
+        and d.bath_extra_seconds(1) < alto_d.bath_extra_seconds(1),
+        f"presa {d.pick_time_at(1):.1f} s contro {alto_d.pick_time_at(1):.1f}, "
+        f"rilascio {d.release_time_at(1):.1f} contro {alto_d.release_time_at(1):.1f}",
+    )
+
+    # Sull'impianto in cui il gancio DEVE risalire resta il caso in cui non
+    # avrebbe senso farlo: quando aspetta sulla stessa vasca per riprendere.
+    from simulazione import _tratti_col_gancio_giu
+
+    sol_a, dati_a = proposta_semplice(alto_d)
+    sim_a = Simulazione(dati_a, sol_a)
+    check(
+        any(c.giu for c in sim_a._carri),
+        f"e li' l'attesa sulla stessa vasca si fa comunque col gancio calato "
+        f"({[c.giu for c in sim_a._carri]})",
     )
 
 

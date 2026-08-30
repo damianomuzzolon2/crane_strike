@@ -243,6 +243,10 @@ def test_bagno_comprende_le_corse_a_vuoto():
         disengage_time=1.0,
         takt_min=25.0,
         takt_max=200.0,
+        # L'impianto in cui il gancio calato NON passa fra le vasche: e' li'
+        # che le corse a vuoto pesano sul bagno, perche' il gancio le fa a
+        # ogni vasca e il pezzo e' immerso tutto il tempo.
+        empty_hook_travels_low=False,
     )
     # finestra di processo piu' stretta del bagno inevitabile: la vecchia
     # versione ci stava dentro con la permanenza "fra i movimenti" e sforava

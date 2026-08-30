@@ -214,12 +214,13 @@ def test_calcolo_automatico(percorso_linea):
             "e da li' in poi il trascinamento funziona",
         )
         app._trascinamento = None
-        # Il takt di riferimento e' sceso da 127.39 a 112.49 s quando la
-        # permanenza ha smesso di escludere le corse a vuoto del gancio: prima
-        # ogni vasca col minimo vincolante teneva il pezzo in bagno piu' del
-        # necessario, e il ciclo si allungava di conseguenza.
+        # Il takt di riferimento e' sceso da 127.39 a 110.00 s -- il minimo
+        # dichiarato, cioe' il vincolo non e' piu' il processo -- correggendo
+        # due volte il conto della permanenza: prima contandoci le corse a
+        # vuoto del gancio (che il pezzo passa immerso), poi togliendole del
+        # tutto, perche' il gancio scarico trasla basso e non le fa.
         check(
-            len(app.dati.zones) == 2 and abs(app.soluzione.T - 112.49) < 1.0,
+            len(app.dati.zones) == 2 and abs(app.soluzione.T - 110.00) < 1.0,
             f"{len(app.dati.zones)} carroponti, T={app.soluzione.T:.2f}s "
             f"(come da riga di comando)",
         )

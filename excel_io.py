@@ -100,6 +100,14 @@ _PARAMETRI = {
         0.0,
         "sgancio, dopo l'immersione (si somma al rilascio)",
     ),
+    "traslazione_con_gancio_basso": (
+        "1=si", 
+        False,
+        1,
+        "1 se il carroponte trasla anche col gancio scarico calato, senza "
+        "urtare le vasche (normale). 0 se il gancio deve risalire prima di "
+        "muoversi: allora ogni presa e ogni rilascio pagano una corsa a vuoto",
+    ),
     "risoluzione_tick_per_s": (
         "tick/s",
         False,
@@ -318,6 +326,7 @@ def leggi_problema(percorso_file: str) -> Configurazione:
             kin_lift_loaded=_kin_sollevamento("carico"),
             engage_time=par["tempo_aggancio_s"],
             disengage_time=par["tempo_sgancio_s"],
+            empty_hook_travels_low=bool(par["traslazione_con_gancio_basso"]),
 
             clearance_step_mm=par["passo_controllo_distanza_mm"],
         )
@@ -680,6 +689,7 @@ def _righe_esempio():
         "a_max_sollevamento_carico_mm_s2": 500,
         "tempo_aggancio_s": 2,
         "tempo_sgancio_s": 1,
+        "traslazione_con_gancio_basso": 1,
         "risoluzione_tick_per_s": 100,
         "passo_controllo_distanza_mm": 200,
         "max_carroponti": 4,
@@ -718,6 +728,7 @@ def _righe_da_configurazione(cfg: Configurazione):
         "a_max_sollevamento_carico_mm_s2": cinematica(d.kin_lift_loaded, "a_max"),
         "tempo_aggancio_s": d.engage_time,
         "tempo_sgancio_s": d.disengage_time,
+        "traslazione_con_gancio_basso": 1 if d.empty_hook_travels_low else 0,
         "risoluzione_tick_per_s": d.time_scale,
         "passo_controllo_distanza_mm": d.clearance_step_mm,
         "max_carroponti": cfg.max_carroponti,
@@ -1433,13 +1444,27 @@ def scrivi_risultati(
         viste.add(tid)
         presa = data.pick_phases(s)
         rilascio = data.release_phases(s)
+        # Le colonne si prendono per NOME e non per posizione: con la
+        # traslazione a gancio basso -- il caso normale -- le corse a vuoto non
+        # ci sono affatto, e contarle per indice farebbe slittare tutto il
+        # foglio di una colonna senza dirlo.
+        durate = {f.name: round(f.duration, 3) for f in presa + rilascio}
+
+        def quanto(nome):
+            return durate.get(nome, 0.0)
+
         righe.append(
             [
                 tid,
                 data.lift_height_at(s),
-                *[round(f.duration, 3) for f in presa],
+                quanto("discesa del gancio"),
+                quanto("aggancio"),
+                quanto("sollevamento del telaio"),
+                quanto("sgocciolamento"),
                 round(sum(f.duration for f in presa), 3),
-                *[round(f.duration, 3) for f in rilascio],
+                quanto("immersione del telaio"),
+                quanto("sgancio"),
+                quanto("risalita del gancio"),
                 round(sum(f.duration for f in rilascio), 3),
             ]
         )
