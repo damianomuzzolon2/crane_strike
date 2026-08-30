@@ -149,6 +149,7 @@ class _Traiettoria:
     t0: float  # da dove parte il ciclo di QUESTO carroponte
     inizi_mossa: dict[int, float]  # mossa -> quando la comincia
     giu: dict[int, int]  # tratto -> stazione in cui il gancio resta calato
+    basso: dict[int, bool]  # tratto -> se il gancio scarico ci viaggia calato
 
 
 # Di quanto il gancio si stacca dal telaio quando lo sgancia e resta li' ad
@@ -186,6 +187,26 @@ def _fasi_di_attesa(fase, corsa: float, in_salita: bool) -> list[LiftPhase]:
         return [stacco, fermo]
     accosto = LiftPhase("attesa in vasca", moto, attesa, -corsa, fase.kin, False)
     return [fermo, accosto]
+
+
+def _tratti_col_gancio_basso(segs: list) -> dict[int, bool]:
+    """Per ogni tratto, se il gancio SCARICO ci viaggia calato.
+
+    Non serve indovinarlo: lo dice la sequenza. Dopo un rilascio il gancio e'
+    in fondo, e ci resta finche' non sale su uno svincolo; da li' viaggia alto
+    finche' non riscende sullo svincolo di arrivo. Ogni `lift_empty` inverte lo
+    stato, e la presa lo riporta in alto col telaio."""
+    basso: dict[int, bool] = {}
+    stato = False
+    for i, s in enumerate(segs):
+        basso[i] = stato
+        if s.kind == "release":
+            stato = True  # sganciato: il gancio resta in fondo
+        elif s.kind == "lift_empty":
+            stato = not stato
+        elif s.kind == "pick":
+            stato = False  # esce dal bagno col telaio
+    return basso
 
 
 def _tratti_col_gancio_giu(segs: list) -> dict[int, int]:
@@ -293,6 +314,7 @@ class Simulazione:
                     {}
                     if data.empty_hook_travels_low
                     else _tratti_col_gancio_giu(ordinati),
+                    _tratti_col_gancio_basso(ordinati),
                 )
             )
 
@@ -404,7 +426,7 @@ class Simulazione:
             s = c.segmenti[i]
             x = _valuta(tau, s.t_start, s.t_end, s.x_start, s.x_end, s.kin)
             z, con_pezzo, fase, vasca, corsa = self._fase_verticale(
-                s, tau, c.giu.get(i)
+                s, tau, c.giu.get(i), c.basso.get(i, False)
             )
             fuori.append(
                 StatoCarro(
@@ -441,7 +463,9 @@ class Simulazione:
         )
         return self._corsia_fra(pezzo, k, k + 1, frazione)
 
-    def _fase_verticale(self, s, tau: float, giu: Optional[int] = None):
+    def _fase_verticale(
+        self, s, tau: float, giu: Optional[int] = None, basso_prima: bool = False
+    ):
         """Quota del gancio, se ha il pezzo, cosa sta facendo e sopra cosa.
 
         La stazione NON si indovina dalla posizione: la dice il segmento
@@ -454,6 +478,32 @@ class Simulazione:
         d = self.data
         if s.kind == "loaded":
             return 0.0, True, "trasporto", None, 0.0
+        if s.kind == "lift_empty":
+            # il gancio scarico sale o scende su una posizione di svincolo
+            corsa = self._corsa_vicina(s.x_start)
+            sale = basso_prima
+            z0, z1 = (-corsa, 0.0) if sale else (0.0, -corsa)
+            z = _valuta(tau, s.t_start, s.t_end, z0, z1, d.kin_lift_empty)
+            return (
+                z,
+                False,
+                "risalita del gancio" if sale else "discesa del gancio",
+                None,
+                corsa,
+            )
+        if s.kind in ("empty", "wait") and not d.empty_hook_travels_low:
+            # fra un rilascio e lo svincolo -- o fra lo svincolo e la vasca --
+            # il gancio viaggia basso; nel tratto in mezzo viaggia alto
+            if basso_prima:
+                corsa = self._corsa_vicina(s.x_start)
+                return (
+                    -corsa,
+                    False,
+                    "rientro a vuoto" if s.kind == "empty" else "attesa",
+                    None,
+                    corsa,
+                )
+            return 0.0, False, "rientro a vuoto" if s.kind == "empty" else "attesa", None, 0.0
         if s.kind in ("empty", "wait") and d.empty_hook_travels_low:
             # Il gancio scarico non risale: trasla basso, e alla vasca dopo ci
             # arriva gia' in fondo. Sopra la vasca da cui parte, che e' quella
@@ -510,6 +560,19 @@ class Simulazione:
             if abs(self.data.tanks[st.tank_id].position - x) < 1e-6:
                 return st.tank_id
         return None
+
+    def _corsa_vicina(self, x: float) -> float:
+        """Corsa verticale della vasca piu' vicina a `x`.
+
+        Serve sugli SVINCOLI, che non sono posizioni di vasca ma stanno per
+        costruzione fra una vasca e quella accanto: la piu' vicina e' la
+        propria."""
+        migliore, distanza = 0.0, None
+        for i in range(self.data.n_stations):
+            dist = abs(self.data.station_position(i) - x)
+            if distanza is None or dist < distanza:
+                migliore, distanza = self.data.lift_height_at(i), dist
+        return migliore
 
     def _corsa_a(self, x: float) -> float:
         """Corsa verticale della vasca che sta in `x`, o zero se li' non ce

@@ -143,18 +143,17 @@ def test_fasi_verticali(d: ProblemData):
         "nel rilascio il telaio resta appeso fino allo sgancio",
     )
 
-    # ...e sull'impianto in cui il gancio calato non passa fra le vasche le
-    # due corse tornano, agli estremi.
+    # Le corse a vuoto non tornano MAI qui dentro, nemmeno sull'impianto che
+    # obbliga il gancio a risalire: la' avvengono fra due mosse, sullo
+    # svincolo, e le paga il rientro a vuoto.
     alto = dati_prova(gancio_basso=False)
-    presa_alta = alto.pick_phases(1)
-    rilascio_alto = alto.release_phases(1)
     check(
-        presa_alta[0].name == "discesa del gancio"
-        and abs(presa_alta[0].z_start) < 1e-9
-        and rilascio_alto[-1].name == "risalita del gancio"
-        and abs(rilascio_alto[-1].z_end) < 1e-9,
-        f"dichiarando l'impianto senza traslazione bassa, le corse a vuoto "
-        f"tornano ({alto.pick_time_at(1) - d.pick_time_at(1):+.1f} s sulla presa)",
+        alto.pick_phases(1) == presa
+        and alto.release_phases(1) == rilascio
+        and alto.empty_leg_seconds(1, 2) > d.empty_leg_seconds(1, 2),
+        f"presa e rilascio non cambiano: le corse a vuoto le paga il rientro "
+        f"({alto.empty_leg_seconds(1, 2):.1f} s contro "
+        f"{d.empty_leg_seconds(1, 2):.1f})",
     )
 
 
@@ -638,11 +637,10 @@ def test_gancio_resta_giu(d: ProblemData):
     # accorciano di quel tanto, e il pezzo resta in bagno di meno.
     alto_d = dati_prova(gancio_basso=False)
     check(
-        d.pick_time_at(1) < alto_d.pick_time_at(1)
-        and d.release_time_at(1) < alto_d.release_time_at(1)
-        and d.bath_extra_seconds(1) < alto_d.bath_extra_seconds(1),
-        f"presa {d.pick_time_at(1):.1f} s contro {alto_d.pick_time_at(1):.1f}, "
-        f"rilascio {d.release_time_at(1):.1f} contro {alto_d.release_time_at(1):.1f}",
+        d.empty_leg_seconds(1, 2) < alto_d.empty_leg_seconds(1, 2)
+        and d.bath_extra_seconds(1) == alto_d.bath_extra_seconds(1),
+        f"il rientro costa {alto_d.empty_leg_seconds(1, 2):.1f} s invece di "
+        f"{d.empty_leg_seconds(1, 2):.1f}, e il bagno non cambia",
     )
 
     # Sull'impianto in cui il gancio DEVE risalire resta il caso in cui non

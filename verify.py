@@ -53,7 +53,7 @@ from model import HoistPlan, ProblemData, Segment, Solution, zone_layout_conflic
 # Tipi di segmento in cui il carroponte e' fermo orizzontalmente. Tenuto come
 # insieme (e non come confronto == "wait") perche' in seguito si aggiungeranno
 # le fasi verticali di presa/rilascio, anch'esse a posizione costante.
-_STATIONARY_KINDS = {"wait", "pick", "release"}
+_STATIONARY_KINDS = {"wait", "pick", "release", "lift_empty"}
 # Tipi di segmento che descrivono una traslazione orizzontale vera.
 _MOVING_KINDS = {"loaded", "empty"}
 # Stati che dichiarano esplicitamente l'assenza di una soluzione.
@@ -581,7 +581,10 @@ def _check_per_hoist(data, solution, plans, T, time_tol, add) -> list[_Trajector
                         slack=durata - atteso,
                     )
             elif s.kind == "empty":
-                atteso = data.empty_leg_seconds(s.x_start, s.x_end)
+                # la singola tratta orizzontale, non il giro: fra due vasche il
+                # rientro puo' essere spezzato dalla salita e dalla discesa
+                # sugli svincoli
+                atteso = data.horizontal_empty_seconds(s.x_start, s.x_end)
                 durata = s.t_end - s.t_start
                 if abs(durata - atteso) > time_tol:
                     add(
@@ -788,9 +791,7 @@ def _check_transfers(data, plans, T, time_tol, add):
             k2 = order[(i + 1) % len(order)]
             if k1 not in plan.finish or k2 not in plan.local_pick:
                 continue
-            t_emp = data.empty_leg_seconds(
-                data.station_position(k1 + 1), data.station_position(k2)
-            )
+            t_emp = data.empty_leg_seconds(k1 + 1, k2)
             arrivo = plan.finish[k1] + t_emp
             target = plan.local_pick[k2] + (T if k2 == z.lo else 0.0)
             if arrivo > target + time_tol:

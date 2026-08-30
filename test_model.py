@@ -228,35 +228,26 @@ def test_fasi_verticali_e_capienza():
         check(occ_ok, f"capienza rispettata: {r.tank_occupancy}")
 
 
-def test_bagno_comprende_le_corse_a_vuoto():
-    """Il pezzo e' immerso anche mentre il gancio che lo ha deposto risale e
-    mentre quello che verra' a riprenderlo ricala. Contare la permanenza fra i
-    soli movimenti del gancio faceva sforare il massimo di processo senza che
-    nessuno lo dicesse -- su una linea reale, sei vasche su dieci."""
-    print("\n[5-bis] la permanenza in vasca comprende le corse a vuoto del gancio")
-    lento = Kinematics(v_max=100, a_max=100)  # sollevamento lento apposta
+def test_bagno_comprende_i_tempi_morti():
+    """Il pezzo e' immerso anche durante lo sgancio e l'aggancio, che il
+    modello non conta fra i due istanti che maneggia. Contarli o no fa la
+    differenza fra rispettare il massimo di processo e sforarlo in silenzio."""
+    print("\n[5-bis] la permanenza in vasca comprende sgancio e aggancio")
     comune = dict(
         lift_height=1500,
-        kin_lift_empty=lento,
-        kin_lift_loaded=lento,
-        engage_time=1.0,
-        disengage_time=1.0,
+        kin_lift_empty=Kinematics(v_max=250, a_max=150),
+        kin_lift_loaded=Kinematics(v_max=200, a_max=150),
+        engage_time=8.0,
+        disengage_time=7.0,
         takt_min=25.0,
         takt_max=200.0,
-        # L'impianto in cui il gancio calato NON passa fra le vasche: e' li'
-        # che le corse a vuoto pesano sul bagno, perche' il gancio le fa a
-        # ogni vasca e il pezzo e' immerso tutto il tempo.
-        empty_hook_travels_low=False,
     )
-    # finestra di processo piu' stretta del bagno inevitabile: la vecchia
-    # versione ci stava dentro con la permanenza "fra i movimenti" e sforava
-    # sul bagno vero
     data = linea(4, 1500, [HoistZone(0, 1), HoistZone(2, 3)], dwell=(20, 45), **comune)
     inevitabile = data.bath_extra_seconds(1)
     check(
-        inevitabile > 20.0,
-        f"su questa linea il bagno inevitabile e' {inevitabile:.1f} s, piu' del "
-        f"minimo di processo (20 s)",
+        abs(inevitabile - 15.0) < 1e-9,
+        f"il bagno eccede l'intervallo fra i movimenti di sgancio+aggancio "
+        f"({inevitabile:.1f} s)",
     )
     sol, r = risolvi_e_verifica(data, "bagno stretto", time_limit=60.0)
     check(r is not None and r.ok, _esito(sol, r, "soluzione valida"))
@@ -272,16 +263,122 @@ def test_bagno_comprende_le_corse_a_vuoto():
             f"ogni bagno vero sta dentro 20..45 s ({[round(b, 1) for b in bagni]})",
         )
 
-    # e se la finestra non ci sta proprio, lo si dice invece di restituire un
-    # INFEASIBLE muto che manderebbe a cercare la causa dove non c'e'
+    # e se la finestra e' piu' stretta dei soli tempi morti, la linea non e'
+    # realizzabile e lo si dice subito col numero
     try:
-        linea(4, 1500, [HoistZone(0, 1), HoistZone(2, 3)], dwell=(5, 15), **comune)
+        linea(4, 1500, [HoistZone(0, 1), HoistZone(2, 3)], dwell=(5, 12), **comune)
         check(False, "una permanenza massima irraggiungibile viene respinta")
     except ValueError as e:
         check(
-            "in bagno almeno" in str(e) and "gancio" in str(e),
-            f'e il motivo e\' scritto: "{str(e)[:80]}..."',
+            "in bagno almeno" in str(e),
+            f"e il motivo e' scritto: \"{str(e)[:80]}...\"",
         )
+
+
+def test_svincoli_end_to_end():
+    """Sull'impianto in cui il gancio calato non passa fra le vasche, il
+    carroponte va a svincolare prima di tirare su il gancio scarico."""
+    print("\n[5-ter] posizioni di svincolo, risolte davvero")
+    import dataclasses
+
+    base = linea(
+        4,
+        5000,
+        [HoistZone(0, 1), HoistZone(2, 3)],
+        dwell=(30, 300),
+        capacity=3,
+        lift_height=1500,
+        kin_lift_empty=Kinematics(v_max=250, a_max=150),
+        kin_lift_loaded=Kinematics(v_max=200, a_max=150),
+        engage_time=2.0,
+        disengage_time=1.0,
+        takt_min=25.0,
+        takt_max=400.0,
+        empty_hook_travels_low=False,
+    )
+    tanks = dict(base.tanks)
+    for i, nome in enumerate(sorted(tanks, key=lambda n: tanks[n].position)):
+        t = tanks[nome]
+        tanks[nome] = dataclasses.replace(
+            t,
+            svincolo_pos=t.position + 1200 if i < len(tanks) - 1 else None,
+            svincolo_neg=t.position - 1200 if i > 0 else None,
+        )
+    con = dataclasses.replace(base, tanks=tanks)
+
+    senza_sol, senza_r = risolvi_e_verifica(base, "senza svincoli", time_limit=60.0)
+    con_sol, con_r = risolvi_e_verifica(con, "con svincoli", time_limit=60.0)
+    check(con_r is not None and con_r.ok, _esito(con_sol, con_r, "soluzione valida"))
+    check(
+        senza_sol.T is not None and con_sol.T is not None and con_sol.T >= senza_sol.T,
+        f"il giro dello svincolo non puo' accorciare il ciclo "
+        f"(T={con_sol.T:.2f}s contro {senza_sol.T:.2f}s)",
+    )
+    if con_sol.status in ("OPTIMAL", "FEASIBLE"):
+        quote = {
+            round(x, 0)
+            for segs in con_sol.segments_per_hoist
+            for s in segs
+            for x in (s.x_start, s.x_end)
+        }
+        vasche = {round(con.station_position(i), 0) for i in range(con.n_stations)}
+        check(
+            quote - vasche,
+            f"e il carroponte si spinge fino agli svincoli, oltre le vasche "
+            f"({sorted(quote - vasche)})",
+        )
+
+
+def test_confine_con_corse_a_vuoto():
+    """Il carroponte che sale o scende col gancio scarico e' FERMO: se il
+    modello lo crede in movimento, lo fa uscire dalla fascia di esclusione
+    troppo presto e lascia entrare il vicino mentre e' ancora li'.
+
+    E' lo stesso errore gia' corretto per le fasi verticali di presa e
+    rilascio, ripresentatosi quando le corse a vuoto sono state spostate nel
+    rientro. Uno sweep di 192 configurazioni lo ha trovato in 36: qui c'e' la
+    peggiore, cioe' quella che dava separazione ZERO."""
+    print("\n[5-quater] fascia di esclusione e corse verticali a vuoto")
+    import dataclasses
+
+    for etichetta, svincoli in (("senza svincoli", False), ("con svincoli", True)):
+        data = linea(
+            4,
+            2000,
+            [HoistZone(0, 2), HoistZone(3, 3)],
+            dwell=(20, 400),
+            capacity=4,
+            lift_height=1500,
+            kin_lift_empty=Kinematics(v_max=250, a_max=150),
+            kin_lift_loaded=Kinematics(v_max=200, a_max=150),
+            engage_time=2.0,
+            disengage_time=1.0,
+            takt_min=15.0,
+            takt_max=400.0,
+            empty_hook_travels_low=False,
+        )
+        if svincoli:
+            tanks = dict(data.tanks)
+            ordinate = sorted(tanks, key=lambda n: tanks[n].position)
+            for i, nome in enumerate(ordinate):
+                t = tanks[nome]
+                tanks[nome] = dataclasses.replace(
+                    t,
+                    svincolo_pos=t.position + 1800 if i < len(ordinate) - 1 else None,
+                    svincolo_neg=t.position - 1800 if i > 0 else None,
+                )
+            data = dataclasses.replace(data, tanks=tanks)
+        sol, r = risolvi_e_verifica(data, f"confine, {etichetta}", time_limit=30.0)
+        check(
+            r is not None and r.ok,
+            _esito(sol, r, f"{etichetta}: soluzione valida"),
+        )
+        if r is not None:
+            check(
+                r.min_separation >= r.required_separation - 1.0,
+                f"{etichetta}: separazione {r.min_separation:.0f} mm >= "
+                f"{r.required_separation:.0f} mm richiesti",
+            )
 
 
 def test_passo_controllo():
@@ -472,7 +569,9 @@ def main():
     test_un_carroponte()
     test_tre_carroponti()
     test_fasi_verticali_e_capienza()
-    test_bagno_comprende_le_corse_a_vuoto()
+    test_bagno_comprende_i_tempi_morti()
+    test_svincoli_end_to_end()
+    test_confine_con_corse_a_vuoto()
     test_passo_controllo()
     test_scelta_automatica()
     test_vasca_ripetuta()

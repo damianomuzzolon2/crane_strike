@@ -117,6 +117,23 @@ class Tank:
     # versione precedente non puo' finire per assegnarli di nascosto.
     lift_height: float = field(kw_only=True)
     drain_time: float = field(kw_only=True)
+    # Posizioni di SVINCOLO [mm]: i due punti, uno per lato, in cui il gancio
+    # SCARICO puo' salire e scendere. Servono solo agli impianti in cui il
+    # gancio calato non passa fra le vasche
+    # (`ProblemData.empty_hook_travels_low = False`): li' il carroponte, dopo
+    # aver deposto il telaio, non puo' tirare su il gancio dov'e' -- deve
+    # prima portarsi su uno svincolo.
+    #
+    # Sono quote assolute sulla rotaia, non scostamenti, come tutte le altre
+    # posizioni del progetto. Ciascuna deve cadere fra questa vasca e quella
+    # accanto -- la positiva dopo, la negativa prima -- e il programma lo
+    # controlla: cosi' il tratto che il gancio percorre basso non scavalca mai
+    # un'altra vasca, e non serve nessun controllo di percorso.
+    #
+    # Nessuna delle due dichiarata vuol dire che li' il gancio sale e scende
+    # dov'e', e ci trasla sotto liberamente: quella vasca non e' un ostacolo.
+    svincolo_pos: Optional[float] = field(default=None, kw_only=True)
+    svincolo_neg: Optional[float] = field(default=None, kw_only=True)
 
 
 @dataclass(frozen=True)
@@ -265,6 +282,40 @@ class ProblemData:
                 "kin_lift_loaded: senza non si sa quanto ci mette il telaio a "
                 "uscire dal bagno e a rientrarci."
             )
+        # Gli svincoli devono stare fra la loro vasca e quella accanto: e' quel
+        # che garantisce che il gancio, traslando basso per raggiungerli, non
+        # scavalchi mai un'altra vasca. Controllarlo qui evita di dover
+        # verificare il percorso a ogni spostamento.
+        quote = sorted(t.position for t in self.tanks.values())
+        for t in self.tanks.values():
+            i = quote.index(t.position)
+            dopo = quote[i + 1] if i + 1 < len(quote) else None
+            prima = quote[i - 1] if i > 0 else None
+            if t.svincolo_pos is not None and not (
+                t.position < t.svincolo_pos
+                and (dopo is None or t.svincolo_pos < dopo)
+            ):
+                raise ValueError(
+                    f"lo svincolo positivo della vasca '{t.id}' e' a "
+                    f"{t.svincolo_pos:.0f} mm: deve stare fra la vasca "
+                    f"({t.position:.0f} mm) e la posizione successiva"
+                    + (f" ({dopo:.0f} mm)" if dopo is not None else "")
+                    + ", altrimenti il gancio basso dovrebbe scavalcare "
+                    "un'altra vasca per arrivarci."
+                )
+            if t.svincolo_neg is not None and not (
+                t.svincolo_neg < t.position
+                and (prima is None or prima < t.svincolo_neg)
+            ):
+                raise ValueError(
+                    f"lo svincolo negativo della vasca '{t.id}' e' a "
+                    f"{t.svincolo_neg:.0f} mm: deve stare fra la posizione "
+                    f"precedente"
+                    + (f" ({prima:.0f} mm)" if prima is not None else "")
+                    + f" e la vasca ({t.position:.0f} mm), altrimenti il "
+                    "gancio basso dovrebbe scavalcare un'altra vasca per "
+                    "arrivarci."
+                )
         # Il sollevamento a vuoto serve SOLO all'impianto in cui il gancio
         # calato non passa fra le vasche: se puo' traslare basso -- il caso
         # normale -- quelle corse non le fa nessuno, e pretendere il dato
@@ -424,24 +475,13 @@ class ProblemData:
         gancio istante per istante. Le fasi sono la definizione, e la durata e'
         la loro somma: cosi' i due usi non possono divergere.
 
-        Col gancio che trasla basso -- il caso normale -- la discesa non c'e'
-        proprio: il carroponte e' arrivato con il gancio gia' in fondo."""
+        La discesa del gancio scarico non c'e' MAI qui dentro: o l'impianto
+        lascia traslare il gancio basso, e allora il carroponte arriva con il
+        gancio gia' in fondo, oppure il gancio scende su una posizione di
+        svincolo -- e quella e' parte del rientro a vuoto, non della presa
+        (vedi `empty_leg_seconds`)."""
         h = self.lift_height_at(station_idx)
-        discesa = (
-            []
-            if self.empty_hook_travels_low
-            else [
-                LiftPhase(
-                    "discesa del gancio",
-                    self._lift_seconds(h, self.kin_lift_empty),
-                    0.0,
-                    -h,
-                    self.kin_lift_empty,
-                    False,
-                )
-            ]
-        )
-        return discesa + [
+        return [
             LiftPhase("aggancio", self.engage_time, -h, -h, None, False),
             LiftPhase(
                 "sollevamento del telaio",
@@ -459,23 +499,10 @@ class ProblemData:
     def release_phases(self, station_idx: int) -> list["LiftPhase"]:
         """Il RILASCIO scomposto nei suoi movimenti verticali, in ordine.
 
-        Col gancio che trasla basso -- il caso normale -- la risalita non c'e':
-        sganciato il telaio, il carroponte riparte con il gancio in fondo."""
+        La risalita del gancio scarico non c'e' MAI qui dentro: o il gancio
+        trasla basso e non risale affatto, oppure risale da una posizione di
+        svincolo -- e quella e' parte del rientro a vuoto."""
         h = self.lift_height_at(station_idx)
-        risalita = (
-            []
-            if self.empty_hook_travels_low
-            else [
-                LiftPhase(
-                    "risalita del gancio",
-                    self._lift_seconds(h, self.kin_lift_empty),
-                    -h,
-                    0.0,
-                    self.kin_lift_empty,
-                    False,
-                )
-            ]
-        )
         return [
             LiftPhase(
                 "immersione del telaio",
@@ -486,18 +513,17 @@ class ProblemData:
                 True,
             ),
             LiftPhase("sgancio", self.disengage_time, -h, -h, None, True),
-        ] + risalita
+        ]
 
     def pick_time_at(self, station_idx: int) -> float:
         """Tempo di PRESA [s] alla stazione data: aggancio, sollevamento col
-        telaio, sgocciolamento -- piu' la discesa del gancio scarico, se
-        l'impianto non lascia traslare il gancio calato."""
+        telaio, sgocciolamento. Il gancio scarico ci arriva gia' in fondo."""
         return sum(f.duration for f in self.pick_phases(station_idx))
 
     def release_time_at(self, station_idx: int) -> float:
         """Tempo di RILASCIO [s] alla stazione data: immersione col telaio e
-        sgancio -- piu' la risalita del gancio scarico, se l'impianto non
-        lascia traslare il gancio calato."""
+        sgancio. Il gancio resta in fondo: se poi debba risalire, e da dove, e'
+        cosa del rientro a vuoto."""
         return sum(f.duration for f in self.release_phases(station_idx))
 
     def bath_extra_seconds(self, station_idx: int) -> float:
@@ -520,10 +546,10 @@ class ProblemData:
         e sono i limiti del PROCESSO -- `dwell_min` e `dwell_max` -- ad
         applicarsi al bagno, non all'intervallo fra i movimenti.
 
-        Col gancio che trasla basso le due corse a vuoto non ci sono, e restano
-        i soli tempi morti di sgancio e aggancio."""
-        a_vuoto = self.empty_lift_seconds(station_idx)
-        return self.disengage_time + a_vuoto + a_vuoto + self.engage_time
+        Sono i soli tempi morti: tutto il resto di quello che il gancio fa fra
+        un rilascio e la presa successiva -- traslare, salire, riscendere --
+        cade nell'intervallo, e li' e' gia' contato."""
+        return self.disengage_time + self.engage_time
 
     def empty_lift_seconds(self, station_idx: int) -> float:
         """Durata [s] di UNA corsa verticale a gancio scarico, alla stazione
@@ -563,13 +589,64 @@ class ProblemData:
         verticali. Serve a chi deve disegnare o campionare il moto."""
         return _travel_time_seconds(self.move_distance(k), self.kin_loaded)
 
-    def empty_leg_seconds(self, pos_a: float, pos_b: float) -> float:
-        """Durata [s] di uno spostamento a vuoto fra due posizioni.
+    def horizontal_empty_seconds(self, pos_a: float, pos_b: float) -> float:
+        """Durata [s] di una traslazione orizzontale a gancio scarico, e basta.
 
-        NON comprende alcun tempo verticale: il gancio scarico e' gia' in alto
-        (lo ha portato su `release_time`) e ridiscendera' dentro `pick_time`
-        della mossa successiva. Sommarlo anche qui sarebbe doppio conteggio."""
+        E' la singola tratta, non il giro: il rientro fra due vasche puo'
+        essere fatto di piu' tratte, con in mezzo la salita e la discesa sugli
+        svincoli (vedi `empty_leg_seconds`)."""
         return _travel_time_seconds(abs(pos_b - pos_a), self.kin_empty)
+
+    def svincolo_verso(self, station_idx: int, verso_pos: float) -> float:
+        """Da dove il gancio scarico sale (o dove scende) lasciando la stazione
+        data per andare verso `verso_pos`.
+
+        Si sceglie lo svincolo dalla parte in cui si deve andare: cosi' il
+        tratto percorso basso e' il piu' corto e non si torna indietro. Se da
+        quella parte non ce n'e' si prende l'altro; se non ce n'e' nessuno, li'
+        il gancio sale e scende dov'e', perche' quella vasca non e' un
+        ostacolo."""
+        if self.empty_hook_travels_low:
+            return self.station_position(station_idx)
+        t = self.tanks[self.route[station_idx].tank_id]
+        avanti = verso_pos >= t.position
+        primo, secondo = (
+            (t.svincolo_pos, t.svincolo_neg) if avanti else (t.svincolo_neg, t.svincolo_pos)
+        )
+        for s in (primo, secondo):
+            if s is not None:
+                return s
+        return t.position
+
+    def empty_leg_seconds(self, station_a: int, station_b: int) -> float:
+        """Durata [s] del rientro a vuoto dalla stazione `a` alla `b`, dal
+        momento in cui il telaio e' sganciato a quando il gancio e' pronto ad
+        agganciare quello dopo.
+
+        Col gancio che trasla basso -- lo standard -- e' la sola traslazione
+        orizzontale: nessun tempo verticale, perche' il gancio non sale e non
+        scende mai da scarico.
+
+        Sull'impianto in cui il gancio calato non passa fra le vasche il giro
+        e' piu' lungo, e sta tutto QUI: traslata bassa fino allo svincolo,
+        salita, traslata in alto, discesa sullo svincolo di arrivo, traslata
+        bassa fino alla vasca. Sta qui e non dentro presa e rilascio perche' e'
+        un movimento che avviene FRA due mosse, e chi lo paga e' lo
+        spostamento -- non il pezzo, che nel frattempo e' in bagno."""
+        pos_a = self.station_position(station_a)
+        pos_b = self.station_position(station_b)
+        if self.empty_hook_travels_low or station_a == station_b:
+            # stessa stazione: il gancio resta dov'e', non c'e' niente da fare
+            return _travel_time_seconds(abs(pos_b - pos_a), self.kin_empty)
+        sv_a = self.svincolo_verso(station_a, pos_b)
+        sv_b = self.svincolo_verso(station_b, pos_a)
+        return (
+            _travel_time_seconds(abs(sv_a - pos_a), self.kin_empty)
+            + self._lift_seconds(self.lift_height_at(station_a), self.kin_lift_empty)
+            + _travel_time_seconds(abs(sv_b - sv_a), self.kin_empty)
+            + self._lift_seconds(self.lift_height_at(station_b), self.kin_lift_empty)
+            + _travel_time_seconds(abs(pos_b - sv_b), self.kin_empty)
+        )
 
 
 # --------------------------------------------------------------------------
@@ -581,7 +658,7 @@ class ProblemData:
 class Segment:
     """Un tratto della traiettoria di un carroponte entro un ciclo."""
 
-    kind: str  # 'pick' | 'loaded' | 'release' | 'empty' | 'wait'
+    kind: str  # 'pick'|'loaded'|'release'|'empty'|'wait'|'lift_empty'
     t_start: float  # [s], relativo all'inizio del ciclo (puo' iniziare prima di 0)
     t_end: float  # [s]
     x_start: float  # [m]
@@ -766,8 +843,8 @@ def solve(
     #    fisse, quindi i tempi di percorrenza sono costanti, non variabili) --
     travel_loaded = [T_(data.loaded_leg_seconds(k)) for k in range(data.n_moves)]
 
-    def travel_empty_ticks(pos_a: float, pos_b: float) -> int:
-        return T_(data.empty_leg_seconds(pos_a, pos_b))
+    def travel_empty_ticks(stazione_a: int, stazione_b: int) -> int:
+        return T_(data.empty_leg_seconds(stazione_a, stazione_b))
 
     # Distanza minima che deve sempre separare due carroponti, misurata fra i
     # loro punti di riferimento: l'ingombro pieno piu' il margine di sicurezza.
@@ -894,9 +971,7 @@ def solve(
             dep_hi = model.NewIntVar(0, DEP_MAX, f"dep_hi_{h}")
             model.Add(dep_hi >= finish[k0])
             arr_lo = model.NewIntVar(0, DEP_MAX, f"arr_lo_{h}")
-            t_ret = travel_empty_ticks(
-                data.station_position(hi_h + 1), data.station_position(lo_h)
-            )
+            t_ret = travel_empty_ticks(hi_h + 1, lo_h)
             model.Add(arr_lo == dep_hi + t_ret)
             model.Add(arr_lo <= local_pick[lo_h] + Tv)
             zone_data.append(
@@ -943,9 +1018,7 @@ def solve(
         # bisogna riuscire ad arrivare in tempo alla mossa successiva
         # (con +T solo se si sta richiudendo il periodo su lo_h).
         for (k1, k2), lit in arc_lits.items():
-            t_emp = travel_empty_ticks(
-                data.station_position(k1 + 1), data.station_position(k2)
-            )
+            t_emp = travel_empty_ticks(k1 + 1, k2)
             bound = local_pick[k2] + (Tv if k2 == lo_h else 0)
             model.Add(finish[k1] + t_emp <= bound).OnlyEnforceIf(lit)
 
@@ -955,9 +1028,7 @@ def solve(
         for k2 in moves:
             if k2 == hi_h:
                 continue
-            t_emp = travel_empty_ticks(
-                data.station_position(hi_h + 1), data.station_position(k2)
-            )
+            t_emp = travel_empty_ticks(hi_h + 1, k2)
             bound = local_pick[k2] + (Tv if k2 == lo_h else 0)
             model.Add(dep_hi + t_emp <= bound).OnlyEnforceIf(arc_lits[(hi_h, k2)])
 
@@ -965,9 +1036,7 @@ def solve(
         for k1 in moves:
             if k1 == lo_h:
                 continue
-            t_emp = travel_empty_ticks(
-                data.station_position(k1 + 1), data.station_position(lo_h)
-            )
+            t_emp = travel_empty_ticks(k1 + 1, lo_h)
             model.Add(arr_lo >= finish[k1] + t_emp).OnlyEnforceIf(arc_lits[(k1, lo_h)])
         model.Add(arr_lo <= local_pick[lo_h] + Tv)
 
@@ -975,9 +1044,7 @@ def solve(
         # visitare altre mosse nel mezzo), dep_hi e arr_lo descrivono lo
         # STESSO spostamento a vuoto: vanno legati fra loro esattamente.
         if (hi_h, lo_h) in arc_lits:
-            t_emp_direct = travel_empty_ticks(
-                data.station_position(hi_h + 1), data.station_position(lo_h)
-            )
+            t_emp_direct = travel_empty_ticks(hi_h + 1, lo_h)
             model.Add(arr_lo == dep_hi + t_emp_direct).OnlyEnforceIf(
                 arc_lits[(hi_h, lo_h)]
             )
@@ -988,9 +1055,7 @@ def solve(
         # proteggerebbe una traiettoria diversa da quella poi disegnata.
         arcs = []
         for (k1, k2), lit in arc_lits.items():
-            t_emp = travel_empty_ticks(
-                data.station_position(k1 + 1), data.station_position(k2)
-            )
+            t_emp = travel_empty_ticks(k1 + 1, k2)
             if k1 == hi_h:
                 depart = dep_hi
             elif k2 == lo_h:
@@ -1125,17 +1190,36 @@ def solve(
         def dist(station_idx: int) -> float:
             return abs(data.station_position(station_idx) - x_b)
 
-        def blocco(u, v, span_start, leave_u, reach_v, span_end, lit):
+        def blocco(u, v, span_start, leave_u, reach_v, span_end, lit, fermo=0):
+            """`fermo`: tick che il carroponte passa IMMOBILE dentro il blocco,
+            oltre alle soste gia' escluse da leave_u/reach_v.
+
+            Serve alle corse verticali del gancio scarico, che avvengono a
+            meta' di un rientro a vuoto: li' il carroponte non trasla, e
+            calcolare quando esce dalla fascia con la sola velocita' di
+            traslazione lo fa uscire troppo presto -- cioe' lascia entrare il
+            vicino mentre e' ancora li'. E' lo stesso errore gia' corretto per
+            le fasi verticali di presa e rilascio, che qui si ripresentava
+            perche' le corse a vuoto sono state aggiunte dopo.
+
+            Si somma per intero a tutte e due gli estremi senza chiedersi in
+            quale punto del blocco cada: e' una costante piccola, e sbagliare
+            dal lato largo qui costa qualche soluzione in piu' scartata,
+            mentre sbagliare dal lato stretto costa una collisione."""
             du, dv = dist(u), dist(v)
             if du < radius and dv < radius:
                 # tutto il blocco e' dentro la fascia
                 out.append((span_start, span_end, lit))
             elif du < radius:
                 # si esce dalla fascia durante la traslazione
-                out.append((span_start, leave_u + escape_ticks(radius - du), lit))
+                out.append(
+                    (span_start, leave_u + fermo + escape_ticks(radius - du), lit)
+                )
             elif dv < radius:
                 # si entra nella fascia durante la traslazione
-                out.append((reach_v - escape_ticks(radius - dv), span_end, lit))
+                out.append(
+                    (reach_v - fermo - escape_ticks(radius - dv), span_end, lit)
+                )
             # se entrambe le stazioni sono fuori, il tratto non entra mai
             # nella fascia (la distanza da b e' monotona lungo il blocco)
 
@@ -1150,14 +1234,20 @@ def solve(
                 lit=None,
             )
         for arc in zd["arcs"]:
+            u, v = arc["k1"] + 1, arc["k2"]
             blocco(
-                u=arc["k1"] + 1,
-                v=arc["k2"],
+                u=u,
+                v=v,
                 span_start=arc["span_start"],
                 leave_u=arc["depart"],
                 reach_v=arc["arrive"],
                 span_end=arc["span_end"],
                 lit=arc["lit"],
+                # il gancio scarico che sale e che riscende: due soste in mezzo
+                # al rientro, durante le quali il carroponte non si muove
+                fermo=T_(
+                    data.empty_lift_seconds(u) + data.empty_lift_seconds(v)
+                ),
             )
         return out
 
@@ -1419,9 +1509,7 @@ def _assembla(
         # "parte appena consegnato": la stessa convenzione che usa il modello
         dep_hi = finish[max(moves)]
         prev = order[-1]
-        arr_lo = finish[prev] + data.empty_leg_seconds(
-            data.station_position(prev + 1), data.station_position(riferimento)
-        )
+        arr_lo = finish[prev] + data.empty_leg_seconds(prev + 1, riferimento)
         segments_per_hoist.append(
             _build_zone_trajectory(
                 data, z, order, lp, dep_hi, arr_lo, T, incoerenze
@@ -1505,9 +1593,7 @@ def proposta_semplice(
     for k in range(1, d.n_moves):
         local_pick[k] = local_pick[k - 1] + d.loaded_leg_seconds(k - 1)
     fine_giro = local_pick[d.n_moves - 1] + d.loaded_leg_seconds(d.n_moves - 1)
-    rientro = d.empty_leg_seconds(
-        d.station_position(d.n_moves), d.station_position(0)
-    )
+    rientro = d.empty_leg_seconds(d.n_moves, 0)
     ciclo_minimo = fine_giro + rientro
 
     if T is None:
@@ -1525,6 +1611,55 @@ def proposta_semplice(
 # da poter essere testata anche senza risolvere realmente un modello (es.
 # con valori scelti a mano).
 # --------------------------------------------------------------------------
+
+
+def _segmenti_rientro(
+    data: ProblemData, stazione_a: int, stazione_b: int, t0: float, t1: float
+) -> list[Segment]:
+    """Il rientro a vuoto dalla stazione `a` alla `b`, come tratti disegnabili.
+
+    Col gancio che trasla basso e' un tratto solo, da vasca a vasca. Sull'
+    impianto in cui il gancio calato non passa fra le vasche sono cinque: si
+    trasla bassi fino allo svincolo, si sale, si trasla in alto fino allo
+    svincolo di arrivo, si scende, e si trasla bassi fino alla vasca.
+
+    Vanno emessi tutti e cinque, non riassunti in uno: il carroponte durante il
+    giro si spinge FINO ALLO SVINCOLO, che sta oltre la vasca, ed e' li' che
+    puo' incontrare il vicino. Un tratto unico da vasca a vasca nasconderebbe
+    proprio le posizioni in cui la collisione e' piu' probabile."""
+    pos_a, pos_b = data.station_position(stazione_a), data.station_position(stazione_b)
+    if data.empty_hook_travels_low or stazione_a == stazione_b:
+        return [Segment("empty", t0, t1, pos_a, pos_b, data.kin_empty)]
+
+    sv_a = data.svincolo_verso(stazione_a, pos_b)
+    sv_b = data.svincolo_verso(stazione_b, pos_a)
+    salita = data._lift_seconds(data.lift_height_at(stazione_a), data.kin_lift_empty)
+    discesa = data._lift_seconds(data.lift_height_at(stazione_b), data.kin_lift_empty)
+    tratte = [
+        (pos_a, sv_a, _travel_time_seconds(abs(sv_a - pos_a), data.kin_empty)),
+        (sv_a, sv_a, salita),
+        (sv_a, sv_b, _travel_time_seconds(abs(sv_b - sv_a), data.kin_empty)),
+        (sv_b, sv_b, discesa),
+        (sv_b, pos_b, _travel_time_seconds(abs(pos_b - sv_b), data.kin_empty)),
+    ]
+    segs, t = [], t0
+    for xa, xb, durata in tratte:
+        if durata <= 0:
+            continue
+        fine = t + durata
+        # Salita e discesa sono verticali: orizzontalmente il carroponte sta
+        # fermo, e va detto con un tratto fermo -- un 'empty' di lunghezza nulla
+        # verrebbe campionato come un movimento che non c'e'.
+        # 'lift_empty': il gancio scarico sale o scende sullo svincolo.
+        # Orizzontalmente e' fermo, come un'attesa, ma va distinto -- e' un
+        # movimento, e la simulazione deve poterlo mostrare per quello che e'.
+        segs.append(
+            Segment("lift_empty", t, fine, xa, xb, None)
+            if xa == xb
+            else Segment("empty", t, fine, xa, xb, data.kin_empty)
+        )
+        t = fine
+    return segs
 
 
 def _build_zone_trajectory(
@@ -1583,7 +1718,7 @@ def _build_zone_trajectory(
         is_last = i == n - 1
         nxt_k = order[0] if is_last else order[i + 1]
         x1_next = data.station_position(nxt_k)
-        travel_e = data.empty_leg_seconds(x1, x1_next)
+        travel_e = data.empty_leg_seconds(k + 1, nxt_k)
 
         depart_known = k == zone.hi
         arrive_known = nxt_k == zone.lo
@@ -1624,8 +1759,8 @@ def _build_zone_trajectory(
         if depart_t > t1 + EPS:
             segs.append(Segment("wait", t1, depart_t, x1, x1, None))
         if abs(x1_next - x1) > 1e-9:
-            segs.append(
-                Segment("empty", depart_t, arrive_t, x1, x1_next, data.kin_empty)
+            segs.extend(
+                _segmenti_rientro(data, k + 1, nxt_k, depart_t, arrive_t)
             )
         elif arrive_t > depart_t + EPS:
             # stessa stazione: non c'e' nessuno spostamento a vuoto, il

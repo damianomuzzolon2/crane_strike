@@ -512,15 +512,16 @@ def test_capienza_vasca():
         f"col gancio che trasla basso il bagno eccede di soli sgancio+aggancio "
         f"({data_v.bath_extra_seconds(2):.2f} s)",
     )
-    # ...e sull'impianto che obbliga il gancio a risalire ci si aggiungono le
-    # due corse a vuoto, che il pezzo passa anch'esse immerso.
+    # ...e resta cosi' anche sull'impianto che obbliga il gancio a risalire:
+    # li' le corse a vuoto ci sono, ma cadono nel RIENTRO fra due mosse, e il
+    # rientro sta gia' tutto dentro l'intervallo fra i movimenti.
     alto = dataclasses.replace(data_v, empty_hook_travels_low=False)
-    a_vuoto = alto.empty_lift_seconds(2)
     check(
-        a_vuoto > 0
-        and abs(alto.bath_extra_seconds(2) - (3.0 + 2 * a_vuoto)) < 1e-9,
-        f"e senza traslazione bassa ci si aggiungono le due corse a vuoto "
-        f"({alto.bath_extra_seconds(2):.2f} s)",
+        abs(alto.bath_extra_seconds(2) - 3.0) < 1e-9
+        and alto.empty_leg_seconds(1, 2) > data_v.empty_leg_seconds(1, 2),
+        f"e le corse a vuoto pesano sul rientro, non sul bagno "
+        f"({alto.empty_leg_seconds(1, 2):.2f} s contro "
+        f"{data_v.empty_leg_seconds(1, 2):.2f})",
     )
 
 
@@ -657,14 +658,20 @@ def test_fasi_verticali():
         f"rilascio = discesa a carico + sgancio ({data.release_time_at(1):.2f} s) "
         f"-- nessuno sgocciolamento e nessuna risalita",
     )
-    # ...e sull'impianto in cui il gancio calato non passa fra le vasche, le
-    # due corse a vuoto tornano e ogni mossa si allunga di conseguenza.
+    # Presa e rilascio non cambiano nemmeno sull'impianto in cui il gancio
+    # calato non passa fra le vasche: li' le corse a vuoto ci sono, ma le paga
+    # il RIENTRO, che e' quando avvengono davvero.
     alto = dataclasses.replace(data, empty_hook_travels_low=False)
     check(
-        abs(alto.pick_time_at(0) - (t_vuoto + 2.0 + t_carico + 4.0)) < 1e-9
-        and abs(alto.release_time_at(1) - (t_carico + 1.0 + t_vuoto)) < 1e-9,
-        f"senza traslazione bassa tornano le corse a vuoto "
-        f"(+{alto.pick_time_at(0) - data.pick_time_at(0):.2f} s sulla presa)",
+        alto.pick_time_at(0) == data.pick_time_at(0)
+        and alto.release_time_at(1) == data.release_time_at(1)
+        and abs(
+            alto.empty_leg_seconds(1, 2)
+            - (data.empty_leg_seconds(1, 2) + 2 * t_vuoto)
+        )
+        < 1e-9,
+        f"senza traslazione bassa le corse a vuoto le paga il rientro "
+        f"(+{2 * t_vuoto:.2f} s)",
     )
     check(
         abs((data.pick_time_at(0) - data.release_time_at(0)) - (2.0 + 4.0 - 1.0))
@@ -684,9 +691,9 @@ def test_fasi_verticali():
         "la durata della mossa comprende presa e rilascio",
     )
     check(
-        abs(data.empty_leg_seconds(0.0, 5.0) - data.empty_leg_seconds(5.0, 0.0)) < 1e-9
-        and abs(data.empty_leg_seconds(0.0, 0.0)) < 1e-9,
-        "lo spostamento a vuoto non paga tempo verticale",
+        abs(data.empty_leg_seconds(0, 2) - data.empty_leg_seconds(2, 0)) < 1e-9
+        and abs(data.empty_leg_seconds(1, 1)) < 1e-9,
+        "il rientro a vuoto e' simmetrico, e nullo verso se stessi",
     )
 
     # corsa piu' lunga -> tempi piu' lunghi, ma solo per quella vasca
@@ -858,6 +865,105 @@ def test_senza_valori_risolti():
     )
 
 
+def test_svincoli():
+    """Sull'impianto in cui il gancio calato non passa fra le vasche, il
+    carroponte deve portarsi su una posizione di SVINCOLO prima di tirare su
+    il gancio scarico -- e ridiscenderlo su un'altra prima di agganciare."""
+    print("\n[22] posizioni di svincolo")
+    from model import proposta_semplice
+
+    def linea(sv=True):
+        d = make_data(
+            positions=[0, 5000, 10000, 15000],
+            dwells=[(0, 0), (30, 300, 2), (30, 300, 2), (0, 0)],
+            zones=[HoistZone(0, 2)],
+            lift_height=1500,
+            kin_lift_empty=Kinematics(v_max=250, a_max=150),
+            kin_lift_loaded=Kinematics(v_max=200, a_max=150),
+            engage_time=2.0,
+            disengage_time=1.0,
+            takt_max=400.0,
+            empty_hook_travels_low=False,
+        )
+        if not sv:
+            return d
+        tanks = dict(d.tanks)
+        for i, nome in enumerate(("V0", "V1", "V2", "V3")):
+            t = tanks[nome]
+            tanks[nome] = dataclasses.replace(
+                t,
+                svincolo_pos=t.position + 900 if i < 3 else None,
+                svincolo_neg=t.position - 900 if i > 0 else None,
+            )
+        return dataclasses.replace(d, tanks=tanks)
+
+    senza, con = linea(sv=False), linea(sv=True)
+    # Si esce dallo svincolo dalla parte in cui si deve andare: e' il tratto
+    # basso piu' corto, e non fa tornare indietro il carroponte.
+    check(
+        con.svincolo_verso(1, 10000.0) == 5900.0
+        and con.svincolo_verso(1, 0.0) == 4100.0,
+        f"si sceglie lo svincolo dalla parte del viaggio "
+        f"({con.svincolo_verso(1, 10000.0):.0f} andando avanti, "
+        f"{con.svincolo_verso(1, 0.0):.0f} tornando indietro)",
+    )
+    check(
+        con.empty_leg_seconds(1, 2) > senza.empty_leg_seconds(1, 2),
+        f"il giro dello svincolo allunga il rientro "
+        f"({con.empty_leg_seconds(1, 2):.2f} s contro "
+        f"{senza.empty_leg_seconds(1, 2):.2f})",
+    )
+    # ...e non tocca ne' la presa ne' il bagno: quelle sono cose del pezzo
+    check(
+        con.pick_time_at(1) == senza.pick_time_at(1)
+        and con.bath_extra_seconds(1) == senza.bath_extra_seconds(1),
+        "e non tocca ne' la presa ne' il tempo in bagno",
+    )
+
+    # La traiettoria disegnata deve farcelo vedere: il carroponte si spinge
+    # FINO allo svincolo, che sta oltre la vasca. Riassumerlo in un tratto solo
+    # nasconderebbe proprio le posizioni in cui puo' incontrare il vicino.
+    sol, dati = proposta_semplice(con)
+    segs = sorted(sol.segments_per_hoist[0], key=lambda s: s.t_start)
+    check(
+        any(s.kind == "lift_empty" for s in segs),
+        f"la traiettoria contiene le salite e le discese sugli svincoli "
+        f"({sum(1 for s in segs if s.kind == 'lift_empty')} tratti)",
+    )
+    quote = {round(s.x_start, 1) for s in segs} | {round(s.x_end, 1) for s in segs}
+    # gli svincoli toccati sono quelli del rientro, e stanno OLTRE le vasche:
+    # e' proprio quello che un tratto unico da vasca a vasca nasconderebbe
+    svincoli = quote - {con.station_position(i) for i in range(con.n_stations)}
+    check(
+        svincoli == {900.0, 14100.0},
+        f"e il carroponte ci arriva davvero, oltre le vasche ({sorted(svincoli)})",
+    )
+    r = verify_solution(con, sol)
+    check(
+        r.ok,
+        "il ciclogramma che ne esce supera la verifica"
+        + ("" if r.ok else f": {r.errors[0].message[:60]}"),
+    )
+
+    # La posizione dello svincolo e' vincolata: deve stare fra la sua vasca e
+    # quella accanto, altrimenti il gancio basso dovrebbe scavalcarne un'altra.
+    for nome, sp, sn, atteso in (
+        ("troppo avanti", 11000.0, None, "positivo"),
+        ("dalla parte sbagliata", None, 6000.0, "negativo"),
+    ):
+        tanks = dict(con.tanks)
+        t = tanks["V1"]
+        tanks["V1"] = dataclasses.replace(t, svincolo_pos=sp, svincolo_neg=sn)
+        try:
+            dataclasses.replace(con, tanks=tanks)
+            check(False, f"svincolo {nome}: respinto")
+        except ValueError as e:
+            check(
+                atteso in str(e) and "scavalcare" in str(e),
+                f'svincolo {nome}: respinto col motivo ("{str(e)[:60]}...")',
+            )
+
+
 def main():
     print("=" * 72)
     print("TEST DEL VERIFICATORE (verify.py) -- non richiede OR-Tools")
@@ -878,6 +984,7 @@ def main():
     test_capienza_validazione()
     test_vasca_ripetuta()
     test_fasi_verticali()
+    test_svincoli()
     test_zero_verticale_non_regressione()
     test_stazione_condivisa()
     test_input_malformato()

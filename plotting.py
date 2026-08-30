@@ -35,6 +35,9 @@ _STYLE = {
     # Senza pezzo: rientro a vuoto e attesa sopra la vasca, tratteggiati.
     "empty": dict(linewidth=_LARGHEZZA, linestyle="--", zorder=2),
     "wait": dict(linewidth=_LARGHEZZA, linestyle="--", zorder=2),
+    # salita/discesa del gancio scarico su una posizione di svincolo: il
+    # carroponte e' fermo, e si legge come le attese
+    "lift_empty": dict(linewidth=_LARGHEZZA, linestyle="--", zorder=2),
 }
 _HOIST_COLORS = ["#c0392b", "#2980b9", "#27ae60", "#8e44ad", "#d35400", "#16a085"]
 

@@ -50,17 +50,17 @@ aprire una finestra, e la cinematica senza avere OR-Tools installato.
 | file | righe | contenuto |
 | --- | ---: | --- |
 | `kinematics.py` | 130 | La fisica del movimento, in millimetri e secondi. `travel_time()` da' il tempo per percorrere una distanza con profilo trapezoidale o triangolare; `position_profile()` la posizione istante per istante; `profile_breakpoints()` gli spigoli della curva, che servono al verificatore per limitare in modo rigoroso l'errore di campionamento. Non sa nulla del resto del progetto. |
-| `model.py` | 1917 | Il cuore. Contiene le **strutture dati** (`Tank`, `StationSpec`, `HoistZone`, `ProblemData`, `Segment`, `Solution`), la costruzione e risoluzione del **modello CP-SAT** (`solve`), la scelta automatica di zone e numero di carroponti (`solve_auto_zones`, `solve_auto_hoists`), e la costruzione di un ciclogramma **senza risolvere** a partire dai suoi gradi di liberta' (`build_solution`, `estrai_gradi_di_liberta`) — quest'ultima e' cio' che rende possibile l'editor. |
-| `verify.py` | 1042 | Il **verificatore indipendente**: `verify_solution()` ricontrolla una soluzione in Python puro, senza CP-SAT, campionando le posizioni reali dei carroponti. Restituisce un `VerificationReport` con l'elenco delle `Violation` divise per gravita'. E' la rete di sicurezza contro gli errori nella formulazione del modello. |
+| `model.py` | 2052 | Il cuore. Contiene le **strutture dati** (`Tank`, `StationSpec`, `HoistZone`, `ProblemData`, `Segment`, `Solution`), la costruzione e risoluzione del **modello CP-SAT** (`solve`), la scelta automatica di zone e numero di carroponti (`solve_auto_zones`, `solve_auto_hoists`), e la costruzione di un ciclogramma **senza risolvere** a partire dai suoi gradi di liberta' (`build_solution`, `estrai_gradi_di_liberta`) — quest'ultima e' cio' che rende possibile l'editor. |
+| `verify.py` | 1043 | Il **verificatore indipendente**: `verify_solution()` ricontrolla una soluzione in Python puro, senza CP-SAT, campionando le posizioni reali dei carroponti. Restituisce un `VerificationReport` con l'elenco delle `Violation` divise per gravita'. E' la rete di sicurezza contro gli errori nella formulazione del modello. |
 | `manuale.py` | 260 | Il ciclogramma nei termini in cui si modifica: il "pettine" dei pezzi (`pettine`, `catena_pezzo`), la composizione libera del ciclogramma (`componi`) e il controllo che i carroponti non si scavalchino sulla rotaia (`perche_non_va`). |
 
 ### Ingresso, uscita, disegno
 
 | file | righe | contenuto |
 | --- | ---: | --- |
-| `excel_io.py` | 1686 | Tutto l'Excel: `scrivi_modello()` genera il file da compilare, `leggi_problema()` lo rilegge raccogliendo **tutti** gli errori di compilazione con foglio e cella, `scrivi_risultati()` produce il file dei risultati -- che e' anche un file di ingresso, col ciclogramma dentro, per poterlo riaprire, diviso in due meta' (`Input` e `Output`) dietro due cartelli colorati. |
+| `excel_io.py` | 1742 | Tutto l'Excel: `scrivi_modello()` genera il file da compilare, `leggi_problema()` lo rilegge raccogliendo **tutti** gli errori di compilazione con foglio e cella, `scrivi_risultati()` produce il file dei risultati -- che e' anche un file di ingresso, col ciclogramma dentro, per poterlo riaprire, diviso in due meta' (`Input` e `Output`) dietro due cartelli colorati. |
 | `plotting.py` | 175 | `plot_cyclogram()`: disegna il ciclogramma (posizione lungo la rotaia contro tempo) con il profilo cinematico vero, non con segmenti diritti. |
-| `simulazione.py` | 1325 | La **simulazione**: la linea vista di fronte, in movimento. `Simulazione` e' la parte che conta e non importa tkinter — dato un istante dice dove sta ogni carroponte (posizione, quota del gancio, cosa sta facendo) e ogni pezzo; `FinestraSimulazione` e' solo la finestra che la anima. Non calcola niente di nuovo: legge `segments_per_hoist` e `actual_time` della soluzione, cioe' gli stessi oggetti che disegnano il ciclogramma. |
+| `simulazione.py` | 1388 | La **simulazione**: la linea vista di fronte, in movimento. `Simulazione` e' la parte che conta e non importa tkinter — dato un istante dice dove sta ogni carroponte (posizione, quota del gancio, cosa sta facendo) e ogni pezzo; `FinestraSimulazione` e' solo la finestra che la anima. Non calcola niente di nuovo: legge `segments_per_hoist` e `actual_time` della soluzione, cioe' gli stessi oggetti che disegnano il ciclogramma. |
 
 ### Programmi da lanciare
 
@@ -81,8 +81,8 @@ Non serve pytest.
 
 | file | righe | cosa verifica |
 | --- | ---: | --- |
-| `test_verify.py` | 892 | **Il verificatore.** Risponde a "chi verifica il verificatore?": venti casi, di cui uno solo corretto e tutti gli altri rotti di proposito (collisioni, permanenze fuori tolleranza, periodicita' incoerente, geometrie patologiche, capienze). Un controllore che non segnala mai nulla e' inutile, quindi ogni controllo ha un caso che DEVE farlo scattare. Non richiede OR-Tools: le soluzioni sono costruite a mano. |
-| `test_model.py` | 487 | **Il modello CP-SAT.** Risolve davvero e passa ogni soluzione al verificatore: vasche ravvicinate, tre carroponti, capienza, tempi verticali, e la fedelta' della ricostruzione di una soluzione dai suoi gradi di liberta'. Richiede OR-Tools. |
+| `test_verify.py` | 999 | **Il verificatore.** Risponde a "chi verifica il verificatore?": venti casi, di cui uno solo corretto e tutti gli altri rotti di proposito (collisioni, permanenze fuori tolleranza, periodicita' incoerente, geometrie patologiche, capienze). Un controllore che non segnala mai nulla e' inutile, quindi ogni controllo ha un caso che DEVE farlo scattare. Non richiede OR-Tools: le soluzioni sono costruite a mano. |
+| `test_model.py` | 586 | **Il modello CP-SAT.** Risolve davvero e passa ogni soluzione al verificatore: vasche ravvicinate, tre carroponti, capienza, tempi verticali, e la fedelta' della ricostruzione di una soluzione dai suoi gradi di liberta'. Richiede OR-Tools. |
 | `test_excel_io.py` | 954 | **La lettura e la scrittura Excel.** Quasi tutti i casi sono file compilati male: valori mancanti o non numerici, vasche inesistenti o duplicate, righe riordinate, parametri sbagliati, o un file scritto per la vecchia versione in metri. Piu' l'andata e ritorno del ciclogramma salvato nel file, e la struttura del file dei risultati: l'ordine dei fogli, i due cartelli colorati, e che l'elenco dentro un cartello dica davvero i fogli che seguono. Non richiede OR-Tools. |
 | `test_simulazione.py` | 755 | **La simulazione.** Il controllo che conta e' incrociato: ogni pezzo appeso deve stare *esattamente* dove sta il gancio di un carroponte che lo tiene, e ogni carroponte che tiene qualcosa deve avere un pezzo li'. Se simulazione e ciclogramma raccontassero due storie diverse, una delle due sarebbe sbagliata. Lo stesso controllo viene rifatto sulle quote **disegnate**, che non sono quelle vere: il telaio deve restare appeso al bilancino anche dopo il rimappaggio delle profondita'. Le vasche di prova hanno corse verticali **diverse fra loro** apposta: con corse tutte uguali, prendere la corsa della vasca sbagliata darebbe comunque il risultato giusto. In fondo, i casi in cui la geometria del disegno degenera: corse e ingombri tutti a zero, tutte le tappe nella stessa vasca. Non richiede OR-Tools. |
 | `test_interfaccia.py` | 1085 | **Le funzioni dell'interfaccia grafica.** La finestra viene costruita davvero e pilotata da codice — si "premono" i pulsanti chiamando i metodi e si fa girare il ciclo degli eventi con `update()` invece di `mainloop()`. Verifica che i pulsanti si abilitino al momento giusto, che il calcolo in background consegni il risultato, che una soluzione calcolata riletta come tempi in vasca e ricomposta dia esattamente lo stesso ciclogramma, che le modifiche vengano riverificate, che l'immagine salvata sia il ciclogramma anche componendo dal pettine, che la scheda di modifica si apra solo dopo 'Calcola man' o 'Modifica' e mai mentre il solutore lavora, che un ciclogramma salvato si riapra identico anche se lasciato a meta', che la composizione da zero produca il pettine giusto, che un trasporto assegnato si possa togliere con lo stesso gesto con cui lo si e' assegnato, e che la simulazione si apra solo quando un ciclogramma c'e' davvero e segua le modifiche mentre e' aperta. Richiede OR-Tools e un ambiente grafico. |
@@ -952,16 +952,55 @@ ci arriva gia' in fondo. Non c'e' nessuna corsa a vuoto da pagare, ne' nel
 tempo di presa ne' in quello di rilascio.
 
 Mettendo `0` si dichiara un impianto in cui il gancio calato non passa fra le
-vasche: allora deve risalire dopo lo sgancio e ricalare prima dell'aggancio, e
-quelle due corse **si sommano alla presa, al rilascio e al bagno**. Su una
-linea con corsa 1500 mm e sollevamento a 250 mm/s fanno oltre quindici secondi
-per vasca — non un dettaglio. E' l'unico caso in cui servono
+vasche: allora deve risalire dopo lo sgancio e ricalare prima dell'aggancio.
+Quelle due corse **non entrano ne' nella presa ne' nel rilascio ne' nel bagno**:
+avvengono *fra* due mosse, e le paga lo **spostamento a vuoto**, che e' quando
+avvengono davvero. E' l'unico caso in cui servono
 `v_max_sollevamento_vuoto_mm_s` e `a_max_sollevamento_vuoto_mm_s2`: col valore
 predefinito quelle corse non le fa nessuno, e i due parametri si possono
 lasciare in bianco.
 
+#### Le posizioni di svincolo
+
+Su quegli impianti il gancio spesso non puo' nemmeno salire *dov'e'*: sopra la
+vasca c'e' di mezzo qualcosa, e prima deve portarsi di lato. Sono le due
+colonne facoltative del foglio `Vasche`:
+
+| colonna | cosa contiene |
+| --- | --- |
+| `svincolo_positivo_mm` | la quota, dopo la vasca, in cui il gancio scarico puo' salire e scendere |
+| `svincolo_negativo_mm` | la stessa cosa dal lato delle posizioni decrescenti |
+
+Sono **quote assolute** sulla rotaia, come `posizione_mm`, e ciascuna deve
+cadere **fra la sua vasca e quella accanto** — la positiva dopo, la negativa
+prima. Il programma lo controlla e respinge il file spiegando perche': e' quel
+vincolo a garantire che il tratto percorso col gancio basso non scavalchi mai
+un'altra vasca, e quindi che non serva nessun controllo di percorso.
+
+Lo spostamento a vuoto da una vasca all'altra diventa cosi' di cinque tratti:
+
 ```text
-   normale (gancio che trasla basso):
+  traslata bassa fino allo svincolo -> salita -> traslata alta ->
+  discesa sullo svincolo di arrivo -> traslata bassa fino alla vasca
+```
+
+Si esce dallo svincolo **dalla parte in cui si deve andare** e si entra in
+quello di arrivo dalla parte da cui si viene: e' il tratto basso piu' corto, e
+non fa tornare indietro il carroponte. La scelta e' quindi determinata dalla
+geometria, non e' una decisione lasciata al solutore — e questo e' cio' che
+tiene le durate costanti e note prima di risolvere.
+
+Se una vasca **non dichiara nessuno svincolo**, li' il gancio sale e scende
+dov'e' e ci trasla sotto liberamente: quella vasca non e' un ostacolo. Si
+dichiarano quindi solo dove servono davvero.
+
+I cinque tratti finiscono nel ciclogramma **uno per uno**, non riassunti in un
+tratto solo da vasca a vasca: durante il giro il carroponte si spinge fino allo
+svincolo, che sta *oltre* la vasca, ed e' li' che puo' incontrare il vicino.
+Riassumerli nasconderebbe proprio le posizioni in cui la collisione e' piu'
+probabile.
+
+```text
         immersione   sgancio    il gancio se ne va e torna    aggancio  emersione
    ──────────────┬──────────┬───────── ... ─────────────────┬─────────┬───────────
                  └──────────── il pezzo e' in bagno ────────────────┘
@@ -1305,7 +1344,7 @@ python esempio.py           # risoluzione reale + verifica + grafico
 ```
 
 Ognuno stampa cosa ha provato e finisce con `RISULTATO: n ok, m falliti`.
-Nessuna dipendenza da pytest. Stato attuale: **69, 83, 59, 28 e 95 asserzioni,
+Nessuna dipendenza da pytest. Stato attuale: **77, 83, 59, 35 e 95 asserzioni,
 zero fallimenti**.
 
 **La risoluzione CP-SAT e' eseguita e verificata end-to-end.** Sull'esempio
@@ -1315,11 +1354,11 @@ soluzione senza errori.
 
 I cinque file rispondono a domande diverse e si completano:
 
-- `test_verify.py` — 21 casi. *Il verificatore trova davvero quello che deve
+- `test_verify.py` — 22 casi. *Il verificatore trova davvero quello che deve
   trovare?* Uno solo dei casi e' corretto, gli altri sono rotti di proposito
   (collisioni, permanenze, periodicita', fasi verticali, capienza, geometrie
   patologiche). Le soluzioni sono costruite a mano, quindi non serve OR-Tools.
-- `test_model.py` — 10 casi. *Il modello produce soluzioni fisicamente valide?*
+- `test_model.py` — 12 casi. *Il modello produce soluzioni fisicamente valide?*
   Risolve davvero e passa ogni risultato al verificatore.
 - `test_excel_io.py` — 24 casi. *Un file compilato male viene respinto con un
   messaggio utile, e i risultati escono corretti?* In ingresso: valori mancanti
@@ -1340,6 +1379,31 @@ I cinque file rispondono a domande diverse e si completano:
   manda tutto per aria invece di essere rifiutata: cose che un test sulle sole
   funzioni di calcolo non vedrebbe.
 
+Il ramo `traslazione_con_gancio_basso = 0` -- con e senza posizioni di
+svincolo -- ha uno sweep suo, di **192 configurazioni** (spaziatura 1500-4000
+mm, svincoli al 30/60/90% della spaziatura, 4 e 6 mosse, tutti i punti di
+taglio, passo di controllo 200 e 450 mm). Serviva a rispondere a una domanda
+sola: esiste una geometria in cui il solutore dice `OPTIMAL` e il verificatore
+trova una collisione?
+
+**Esisteva, in 36 casi su 94 soluzioni**, fino a separazione ZERO -- due
+carroponti nello stesso punto. Non per colpa degli svincoli: succedeva anche
+senza, perche' il carroponte che sale o scende col gancio scarico e' FERMO, e
+il modello lo credeva in movimento. Calcolava quando esce dalla fascia di
+esclusione con la sola velocita' di traslazione, lo faceva uscire troppo presto
+e lasciava entrare il vicino mentre era ancora li'. **Corretto** sommando quei
+tempi a entrambi gli estremi della fascia; rifatto lo sweep: **0 collisioni su
+90 soluzioni**, e quattro configurazioni in piu' dichiarate infattibili, che e'
+il prezzo di una fascia piu' prudente.
+
+Le 36 collisioni del "prima" sono anche il controllo di sensibilita' di questo
+sweep, e valgono piu' di uno artificiale: dimostrano sullo stesso insieme di
+configurazioni che lo sweep le collisioni le sa vedere. (Il giro con il vincolo
+disattivato via monkeypatch, che avevo previsto, non funzionava: in questa
+versione di OR-Tools il metodo si chiama `add_no_overlap` e `AddNoOverlap` e'
+un alias, quindi la patch creava un attributo che nessuno chiamava. Se n'e'
+accorto il fatto che i due giri davano numeri identici.)
+
 In piu', il vincolo di non collisione e' stato validato su uno **sweep di 288
 configurazioni** (numero di mosse, spaziatura da 1000 a 3000 mm, tempi verticali,
 passo di controllo, punto di taglio delle zone): 146 risolte e verificate,
@@ -1349,8 +1413,16 @@ nella formulazione, lo sweep lo avrebbe visto.
 
 ### Cosa ha gia' trovato il verificatore
 
-Non e' un esercizio teorico: da quando esiste ha intercettato quattro problemi
+Non e' un esercizio teorico: da quando esiste ha intercettato cinque problemi
 reali, tutti invisibili guardando solo lo stato `OPTIMAL` del solver.
+
+0-bis. **Collisioni con il gancio scarico che sale e scende** — introdotto
+   dichiarando un impianto senza traslazione a gancio basso, e trovato dallo
+   sweep descritto sopra: 36 configurazioni su 94 con `OPTIMAL` e collisione,
+   fino a 0 mm di separazione. Stesso errore del punto 2 qui sotto, ripetuto
+   perche' le corse verticali a vuoto sono state aggiunte dopo e le finestre
+   di occupazione al confine non sono state riestese. **Corretto**, con un
+   test permanente sul caso che dava separazione zero.
 
 0. **Permanenze in vasca fuori tolleranza, non viste da nessuno** — e' il caso
    che il verificatore *non* ha trovato, ed e' istruttivo per questo. La

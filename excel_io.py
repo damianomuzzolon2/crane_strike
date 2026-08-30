@@ -384,6 +384,24 @@ def _leggi_vasche(ws, errori: _Errori) -> dict[str, Tank]:
             "sgocciolamento",
             errori,
         )
+        # Gli svincoli sono FACOLTATIVI: servono solo agli impianti in cui il
+        # gancio calato non passa fra le vasche, e li' solo dove la vasca e'
+        # davvero un ostacolo. Cella vuota = quella vasca non lo e'.
+        svincoli = []
+        for colonna, lettera, verso in ((6, "F", "positivo"), (7, "G", "negativo")):
+            cella = ws.cell(riga, colonna).value
+            if cella is None or (isinstance(cella, str) and not cella.strip()):
+                svincoli.append(None)
+                continue
+            svincoli.append(
+                _numero(
+                    cella,
+                    FOGLIO_VASCHE,
+                    f"{lettera}{riga}",
+                    f"svincolo {verso}",
+                    errori,
+                )
+            )
         if pos is None or posti is None or corsa is None or sgocciolamento is None:
             continue
         tanks[tid] = Tank(
@@ -392,6 +410,8 @@ def _leggi_vasche(ws, errori: _Errori) -> dict[str, Tank]:
             capacity=posti,
             lift_height=corsa,
             drain_time=sgocciolamento,
+            svincolo_pos=svincoli[0],
+            svincolo_neg=svincoli[1],
         )
     if not tanks:
         errori.aggiungi(FOGLIO_VASCHE, "A2", "nessuna vasca definita")
@@ -708,7 +728,15 @@ def _righe_da_configurazione(cfg: Configurazione):
         return None if kin is None else getattr(kin, campo)
 
     vasche = [
-        (t.id, t.position, t.capacity, t.lift_height, t.drain_time)
+        (
+            t.id,
+            t.position,
+            t.capacity,
+            t.lift_height,
+            t.drain_time,
+            t.svincolo_pos,
+            t.svincolo_neg,
+        )
         for t in d.tanks.values()
     ]
     percorso = [(s.tank_id, s.dwell_min, s.dwell_max) for s in d.route]
@@ -843,6 +871,26 @@ def _aggiungi_fogli_linea(
             None,
         ),
         (
+            "  svincolo_*_mm       SOLO se traslazione_con_gancio_basso=0: le "
+            "due posizioni, una per lato,",
+            None,
+        ),
+        (
+            "                      in cui il gancio SCARICO puo' salire e "
+            "scendere. Sono quote assolute",
+            None,
+        ),
+        (
+            "                      sulla rotaia, e ciascuna deve cadere fra "
+            "questa vasca e quella accanto.",
+            None,
+        ),
+        (
+            "                      Lasciarle vuote vuol dire che li' il gancio "
+            "sale e scende dov'e'.",
+            None,
+        ),
+        (
             "  sgocciolamento_s    quanto il telaio resta sospeso sopra QUESTA "
             "vasca a scolare, dopo l'emersione;",
             None,
@@ -961,8 +1009,16 @@ def _aggiungi_fogli_linea(
     ws = wb.create_sheet(FOGLIO_VASCHE)
     prepara(
         ws,
-        ["id", "posizione_mm", "posti", "corsa_verticale_mm", "sgocciolamento_s"],
-        [22, 14, 8, 20, 20],
+        [
+            "id",
+            "posizione_mm",
+            "posti",
+            "corsa_verticale_mm",
+            "sgocciolamento_s",
+            "svincolo_positivo_mm",
+            "svincolo_negativo_mm",
+        ],
+        [22, 14, 8, 20, 20, 22, 22],
     )
     for riga in vasche:
         ws.append(list(riga))
