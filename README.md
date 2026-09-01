@@ -175,6 +175,16 @@ rotaia: le vasche sono le righe, col nome e la quota sull'asse. Il disegno
 ripete **due cicli** di seguito, cosi' si vede a occhio che il pattern si
 richiude.
 
+Sulle traiettorie ci sono dei **pallini**: segnano gli istanti in cui succede
+qualcosa, cioe' l'**aggancio** e lo **sgancio** del telaio e la **partenza** e
+l'**arrivo** di ogni traslazione. Sono tutti uguali e non hanno una voce in
+legenda, perche' cosa sia ciascuno lo dice gia' la traiettoria: se li' la linea
+diventa obliqua il carroponte parte, se resta piatta il telaio cambia mano.
+
+Fra un pallino e l'altro si legge quanto e' durata ogni cosa. Lo spazio fra
+l'arrivo e lo sgancio, per esempio, e' l'immersione del telaio: tempo in cui il
+carroponte e' li' fermo a lavorare, che prima si confondeva con un'attesa.
+
 Il colore dice una cosa sola: **di quale carroponte** e' la traiettoria. Il
 tratto ne dice un'altra sola:
 

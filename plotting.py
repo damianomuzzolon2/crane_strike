@@ -41,6 +41,10 @@ _STYLE = {
 }
 _HOIST_COLORS = ["#c0392b", "#2980b9", "#27ae60", "#8e44ad", "#d35400", "#16a085"]
 
+# I tratti in cui il carroponte trasla davvero lungo la rotaia. Presa,
+# rilascio, attesa e corse verticali no: li' e' fermo.
+_KINEMATIC_KINDS = {"loaded", "empty"}
+
 # Stati che dichiarano esplicitamente l'assenza di una soluzione: gli unici
 # per cui non c'e' proprio niente da disegnare.
 _STATI_SENZA_SOLUZIONE = {"INFEASIBLE", "MODEL_INVALID", "UNKNOWN", "NOT_SOLVED"}
@@ -64,6 +68,20 @@ def _sample_segment(seg: Segment, n=25):
         ]
     )
     return ts, xs
+
+
+def _durata_fase(fasi, nome: str) -> float:
+    return sum(f.duration for f in fasi if f.name == nome)
+
+
+def _sollevamento(data: ProblemData, stazione: int) -> float:
+    """Quanto dura il sollevamento del telaio nella presa a quella stazione."""
+    return _durata_fase(data.pick_phases(stazione), "sollevamento del telaio")
+
+
+def _immersione(data: ProblemData, stazione: int) -> float:
+    """Quanto dura l'immersione del telaio nel rilascio a quella stazione."""
+    return _durata_fase(data.release_phases(stazione), "immersione del telaio")
 
 
 def math_sign(v: float) -> float:
@@ -121,14 +139,61 @@ def plot_cyclogram(
     )
 
     # -- traiettorie di ciascun carroponte, ripetute su n_cycles periodi ----
+    #
+    # Sulle traiettorie si marcano gli istanti in cui succede qualcosa:
+    # l'AGGANCIO e lo SGANCIO del telaio -- quando il pezzo diventa del
+    # carroponte e quando smette di esserlo -- e la PARTENZA e l'ARRIVO di ogni
+    # traslazione.
+    #
+    # Tutti con lo stesso punto, e senza una voce in legenda. Cosa sia ogni
+    # punto lo dice gia' la traiettoria: se li' la linea diventa obliqua il
+    # carro parte, se resta piatta il telaio cambia mano. Due simboli diversi
+    # avrebbero chiesto all'occhio di leggere una differenza che il disegno
+    # mostra da solo, e una voce in legenda di spiegare una cosa che si capisce
+    # guardandola. Si e' provato: era peggio.
+    #
+    # Marcare invece OGNI cambio di fase avrebbe riempito la linea di punti --
+    # fine discesa, fine aggancio, fine sollevamento, fine sgocciolamento -- e
+    # a quel punto non si sarebbe piu' visto niente.
     for h, segs in enumerate(solution.segments_per_hoist):
         color = _HOIST_COLORS[h % len(_HOIST_COLORS)]
+        eventi_t, eventi_x = [], []
+        for seg in segs:
+            if seg.kind == "pick":
+                # il telaio si stacca dal fondo quando finisce l'aggancio
+                eventi_t.append(
+                    seg.t_end
+                    - data.drain_time_at(seg.move)
+                    - _sollevamento(data, seg.move)
+                )
+                eventi_x.append(seg.x_start)
+            elif seg.kind == "release":
+                # e torna alla vasca quando finisce l'immersione
+                eventi_t.append(seg.t_start + _immersione(data, seg.move + 1))
+                eventi_x.append(seg.x_end)
+            elif seg.kind in _KINEMATIC_KINDS and seg.x_end != seg.x_start:
+                # una traslazione vera: si parte da una parte e si arriva
+                # dall'altra. I tratti di lunghezza nulla non sono partenze.
+                eventi_t.extend([seg.t_start, seg.t_end])
+                eventi_x.extend([seg.x_start, seg.x_end])
         for cycle in range(n_cycles):
             offset = cycle * T
             for seg in segs:
                 ts, xs = _sample_segment(seg)
                 ts = ts + offset
                 ax.plot(ts, xs, color=color, **_STYLE[seg.kind])
+            if eventi_t:
+                ax.plot(
+                    [t + offset for t in eventi_t],
+                    eventi_x,
+                    linestyle="none",
+                    marker="o",
+                    markersize=6.0,
+                    markerfacecolor=color,
+                    markeredgecolor="white",
+                    markeredgewidth=0.9,
+                    zorder=5,
+                )
 
     # -- linee verticali di separazione fra cicli ---------------------------
     for cycle in range(n_cycles + 1):
