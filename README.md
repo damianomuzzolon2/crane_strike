@@ -147,18 +147,26 @@ modo in cui sei arrivato.
 | disegno | quando compare | cosa mostra |
 | --- | --- | --- |
 | **ciclogramma** | dopo `Calcola auto`, dopo `Ottimizza con questi carroponti` e dopo `Fine modifica` | le traiettorie dei **carroponti**, su due cicli: chi si muove quando, chi rischia di incontrare chi |
-| **pettine** | dopo `Calcola man` e dopo `Modifica` | le scalinate dei **pezzi**, dieci, una ogni takt time: e' il foglio su cui si compone, e le pedate **sono** i tempi in vasca |
+| **modifica** | dopo `Calcola man` e dopo `Modifica` | lo stesso ciclogramma, col **percorso dei pezzi** in grigio sotto: e' il foglio su cui si compone, e ci si clicca sopra per assegnare |
 
 Vale anche tornando indietro: se stavi componendo a mano e premi `Calcola
 auto`, il disegno torna al ciclogramma. Il pettine e' il foglio su cui si
 **compone**, e un risultato del solutore non si compone: si legge.
 
-**Si modifica sempre sul pettine**, anche un ciclogramma appena calcolato. Non
-e' una preferenza: nel ciclogramma si disegnano solo le traiettorie dei
-carroponti, quindi un trasporto che non e' ancora di nessuno — o che hai appena
-tolto a qualcuno — li' **non compare affatto**, pur restando cliccabile. Non lo
-vedi e ci inciampi, che e' la combinazione peggiore. Nel pettine il pezzo passa
-comunque, grigio finche' nessuno lo porta.
+**Si modifica sempre sulla pagina di modifica**, anche un ciclogramma appena
+calcolato. Non e' una preferenza: nel ciclogramma da solo si disegnano le sole
+traiettorie dei carroponti, quindi un trasporto che non e' ancora di nessuno —
+o che hai appena tolto a qualcuno — li' **non compare affatto**, pur restando
+cliccabile. Non lo vedi e ci inciampi, che e' la combinazione peggiore.
+
+La pagina di modifica mostra le due cose insieme, e in quest'ordine: il
+**percorso dei pezzi in grigio**, che e' il foglio su cui si clicca e c'e'
+sempre tutto, e sopra il **giro dei carroponti**, disegnato come nell'altra
+vista — colore del carroponte, linea spessa, punti sugli eventi. Assegnando una
+mossa si vede comparire il pezzo di giro che la esegue, che e' esattamente cio'
+che stai decidendo. Prima era il contrario, col flusso dei pezzi colorato e in
+evidenza: si vedeva bene dove andavano i pezzi e male cosa dovevano fare i
+carroponti, che e' la cosa che si sta componendo.
 
 Un interruttore fra i due c'e' stato ed e' stato tolto: le tabelle della scheda
 *Ciclogramma* permettono di modificare tutto — tempi in vasca, assegnazione,

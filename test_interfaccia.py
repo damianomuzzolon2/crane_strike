@@ -434,8 +434,9 @@ def test_vista_e_immagine(percorso_linea):
         app._vai_a_modifica()
         app.update()
         check(
-            app.vista == "pettine" and app.assi.get_title().startswith("Pettine"),
-            f"'Modifica' su un calcolo automatico porta sul pettine ({app.vista})",
+            app.vista == "pettine" and app.assi.get_title().startswith("Modifica"),
+            f"'Modifica' su un calcolo automatico porta sulla pagina di "
+            f"modifica ({app.vista})",
         )
         check(
             str(app.btn_modifica["text"]) == "Fine modifica",
@@ -681,26 +682,28 @@ def test_composizione_da_zero(percorso_linea):
             app.carroponte_attivo = 0 if k < 3 else 1
             app._assegna(k, app._istantanea())
         app.update()
-        from interfaccia import _GRIGIO
+        from interfaccia import _GRIGIO, _SOTTILE, _SPESSO
 
-        from interfaccia import _SPESSO
-
-        check(
-            not [l for l in app.assi.lines if l.get_color() == _GRIGIO],
-            f"assegnato tutto, non resta nessun tratto grigio "
-            f"({len(app.assi.lines)} linee, tutte di un carroponte)",
-        )
-        # E la parte di scalinata di un carroponte e' UNA linea sola: stesso
-        # colore e stesso spessore per trasporti e soste. Distinguerli
-        # farebbe discutere l'occhio su una differenza che non informa.
-        piene = {
-            (l.get_color(), l.get_linewidth())
+        linee = [
+            (l.get_color(), round(l.get_linewidth(), 2))
             for l in app.assi.lines
-            if l.get_linestyle() == "-" and l.get_color() != "#dddddd"
-        }
+            if l.get_linestyle() != "None" and l.get_color() != "#dddddd"
+        ]
+        # Il grigio NON sparisce assegnando: e' il percorso dei pezzi, cioe'
+        # lo sfondo su cui si lavora, e resta li' anche a lavoro finito.
         check(
-            {larghezza for _, larghezza in piene} == {_SPESSO},
-            f"trasporti e soste hanno lo stesso spessore ({piene})",
+            (_GRIGIO, _SOTTILE) in linee,
+            "il percorso dei pezzi resta come sfondo, grigio e sottile",
+        )
+        # Quello che compare assegnando e' il GIRO DEI CARROPONTI, disegnato
+        # come nell'altra vista: spesso e del colore del carroponte. E' il
+        # ciclogramma che si sta componendo, e dev'essere lui il protagonista.
+        colorate = {c for c, w in linee if c != _GRIGIO}
+        check(
+            colorate == {_HOIST_COLORS[0], _HOIST_COLORS[1]}
+            and all(w == _SPESSO for c, w in linee if c != _GRIGIO),
+            f"e sopra ci passa il giro dei due carroponti, spesso e colorato "
+            f"({sorted(colorate)})",
         )
         app.assegnazione, app.T_corrente, app.permanenze, app.n_carroponti = (
             istantanea[2],

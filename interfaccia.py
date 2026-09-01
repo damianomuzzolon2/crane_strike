@@ -1295,62 +1295,52 @@ class Applicazione(tk.Tk):
             [f"{' / '.join(etichette[y])}\n{y:.0f} mm" for y in quote], fontsize=8
         )
 
-        # -- il pettine: un pezzo per scalinata ----------------------------
-        # Il pettine e' lo SCHELETRO e deve restare il disegno dominante: le
-        # linee dei carroponti ci passano sopra, non lo coprono.
-        # A ogni tratto la sua mossa, presa dalla costruzione del pettine:
-        # per presa/traslazione/rilascio e' la mossa stessa, per una SOSTA in
-        # vasca e' quella che verra' a prendere il pezzo. Cosi' anche le soste
-        # si colorano: restando grigie sembravano lavoro da fare, mentre il
-        # grigio qui vuol dire "ancora da assegnare".
+        # -- il pettine: lo SFONDO su cui si lavora ------------------------
+        # Tutto grigio, sempre. E' il foglio: dice dove passano i pezzi e da
+        # dove a dove va ogni trasporto, ed e' quello su cui si clicca per
+        # assegnare. Colorarne i tratti assegnati faceva del FLUSSO DEI PEZZI
+        # il disegno dominante, mentre quello che si sta componendo -- e
+        # quello che poi si consegna -- e' il giro dei carroponti.
         scalinate = manuale.pettine(d, T, self.permanenze)
-        mosse = manuale.mosse_del_pettine(d, self.permanenze)
         for segs in scalinate:
-            for s, k in zip(segs, mosse):
+            for s in segs:
                 ts, xs = _sample_segment(s)
-                c = self.assegnazione.get(k)
-                if c is None:
-                    self.assi.plot(ts, xs, color=_GRIGIO, linewidth=_SOTTILE, zorder=2)
-                else:
-                    # Trasporto e sosta si disegnano identici: la parte di
-                    # scalinata che tocca a un carroponte e' una linea sola,
-                    # dello stesso colore e dello stesso spessore. Distinguerli
-                    # vorrebbe dire far discutere l'occhio su una differenza
-                    # che non porta nessuna informazione.
-                    self.assi.plot(
-                        ts,
-                        xs,
-                        color=_HOIST_COLORS[c % len(_HOIST_COLORS)],
-                        linewidth=_SPESSO,
-                        zorder=4,
-                    )
+                self.assi.plot(ts, xs, color=_GRIGIO, linewidth=_SOTTILE, zorder=2)
 
-        # -- i rientri a vuoto dei carroponti, ripetuti su tutto il pettine -
-        # Colorati come il carroponte a cui appartengono: assegnando una mossa
-        # per volta serve vedere subito di CHI e' il rientro che compare, e
-        # dove lo obbliga a passare. Restano sottili e tratteggiati, cosi' non
-        # competono con i trasporti assegnati. Le attese non si disegnano
-        # affatto: coinciderebbero con le soste del pettine, raddoppiando le
-        # linee senza aggiungere niente.
+        # -- il CICLOGRAMMA: il giro di ogni carroponte, ripetuto -----------
+        # Disegnato come nell'altra vista -- colore del carroponte, linea
+        # continua e spessa, punti sugli istanti in cui succede qualcosa --
+        # perche' e' lo stesso oggetto guardato dallo stesso lato. Assegnando
+        # una mossa si vede comparire il pezzo di giro che la esegue, che e'
+        # esattamente cio' che si sta decidendo.
+        #
+        # Un disegno solo per carroponte, con i NaN a separare i tratti: qui i
+        # cicli ripetuti sono quattordici, e una chiamata per tratto per ciclo
+        # farebbe centinaia di disegni per ogni ritocco.
         n_cicli = manuale.RIPETIZIONI_PREDEFINITE + 4
         for h, segs in enumerate(self.soluzione.segments_per_hoist):
             c = self._carro_della_zona(h)
-            if c is None:
+            if c is None or not segs:
                 continue  # zona senza mosse assegnate: non e' di nessuno
             colore = _HOIST_COLORS[c % len(_HOIST_COLORS)]
-            for s in segs:
-                if s.kind != "empty":
-                    continue
+            linea_t, linea_x = [], []
+            punti_t, punti_x = [], []
+            for s in sorted(segs, key=lambda x: x.t_start):
                 ts, xs = _sample_segment(s)
                 for ciclo in range(n_cicli):
-                    self.assi.plot(
-                        ts + ciclo * T,
-                        xs,
-                        color=colore,
-                        linewidth=_SOTTILE,
-                        linestyle="--",
-                        zorder=3,
-                    )
+                    linea_t.extend(list(ts + ciclo * T) + [np.nan])
+                    linea_x.extend(list(xs) + [np.nan])
+                    if s.kind in ("loaded", "empty") and s.x_end != s.x_start:
+                        punti_t.extend([s.t_start + ciclo * T, s.t_end + ciclo * T])
+                        punti_x.extend([s.x_start, s.x_end])
+            self.assi.plot(
+                linea_t, linea_x, color=colore, linewidth=_SPESSO, zorder=4
+            )
+            self.assi.plot(
+                punti_t, punti_x, linestyle="none", marker="o", markersize=5.0,
+                markerfacecolor=colore, markeredgecolor="white",
+                markeredgewidth=0.8, zorder=5,
+            )
 
         fine = manuale.RIPETIZIONI_PREDEFINITE * T + (
             scalinate[0][-1].t_end if scalinate else T
@@ -1359,21 +1349,17 @@ class Applicazione(tk.Tk):
         self.assi.set_xlabel("tempo [s]")
         self.assi.set_ylabel("posizione lungo la rotaia")
         self.assi.set_title(
-            f"Pettine dei pezzi  —  takt time T = {T:.2f} s  —  "
-            f"{manuale.RIPETIZIONI_PREDEFINITE} pezzi"
+            f"Modifica  —  takt time T = {T:.2f} s  —  "
+            f"clic sul percorso grigio per assegnarlo a un carroponte"
         )
         self.assi.grid(axis="x", color="#f0f0f0")
         self.assi.format_coord = lettura_coordinate
 
         legenda = [
-            Line2D([0], [0], color=_GRIGIO, lw=_SOTTILE, label="da assegnare"),
+            Line2D([0], [0], color=_GRIGIO, lw=_SOTTILE, label="percorso dei pezzi"),
             Line2D(
                 [0], [0], color="#333333", lw=_SPESSO,
-                label="assegnato a un carroponte",
-            ),
-            Line2D(
-                [0], [0], color="#333333", lw=_SOTTILE, linestyle="--",
-                label="il suo rientro a vuoto",
+                label="giro dei carroponti",
             ),
         ]
         self.assi.legend(
