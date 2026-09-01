@@ -25,19 +25,23 @@ from model import ProblemData, Solution, Segment
 _LARGHEZZA = 2.2
 
 _STYLE = {
-    # Con il pezzo appeso. La presa e il rilascio sono movimenti verticali:
-    # il carroponte sta fermo sopra la vasca, quindi si vedono come le spalle
-    # orizzontali agli estremi del trasferimento. Stesso tratto continuo,
-    # perche' sono la stessa cosa: il pezzo e' in mano al carroponte.
+    # Tutti i tratti sono LINEA CONTINUA, che il carroponte sia carico o
+    # scarico. Il tratteggio distingueva le due cose, ed e' stato tolto: da
+    # quando ci sono i punti sugli eventi, la traiettoria si legge come una
+    # linea sola che passa di vasca in vasca, e spezzarla a meta' del giro
+    # faceva sembrare due cose diverse quello che e' il percorso di un carro.
+    #
+    # Si perde la distinzione fra carico e scarico sul disegno: si ricava dal
+    # verso -- il carroponte sale la linea col pezzo e la ridiscende a vuoto --
+    # e dal foglio Movimenti, che la scrive tratto per tratto.
     "loaded": dict(linewidth=_LARGHEZZA, zorder=3),
     "pick": dict(linewidth=_LARGHEZZA, solid_capstyle="butt", zorder=3),
     "release": dict(linewidth=_LARGHEZZA, solid_capstyle="butt", zorder=3),
-    # Senza pezzo: rientro a vuoto e attesa sopra la vasca, tratteggiati.
-    "empty": dict(linewidth=_LARGHEZZA, linestyle="--", zorder=2),
-    "wait": dict(linewidth=_LARGHEZZA, linestyle="--", zorder=2),
+    "empty": dict(linewidth=_LARGHEZZA, zorder=2),
+    "wait": dict(linewidth=_LARGHEZZA, zorder=2),
     # salita/discesa del gancio scarico su una posizione di svincolo: il
-    # carroponte e' fermo, e si legge come le attese
-    "lift_empty": dict(linewidth=_LARGHEZZA, linestyle="--", zorder=2),
+    # carroponte e' fermo, orizzontalmente non si muove
+    "lift_empty": dict(linewidth=_LARGHEZZA, zorder=2),
 }
 _HOIST_COLORS = ["#c0392b", "#2980b9", "#27ae60", "#8e44ad", "#d35400", "#16a085"]
 
@@ -205,25 +209,9 @@ def plot_cyclogram(
     ax.set_xlim(0.0, n_cycles * T * 1.01)
 
     # -- legenda --------------------------------------------------------
-    # Due sole voci sul tipo di tratto, piu' una per carroponte. Il grigio
-    # neutro dice che vale per tutti i carroponti: il colore lo si legge sotto.
-    legend_elems = [
-        Line2D(
-            [0],
-            [0],
-            color="#333333",
-            lw=_LARGHEZZA,
-            label="con il pezzo (presa, trasferimento, rilascio)",
-        ),
-        Line2D(
-            [0],
-            [0],
-            color="#333333",
-            lw=_LARGHEZZA,
-            linestyle="--",
-            label="senza pezzo (rientro a vuoto, attesa)",
-        ),
-    ]
+    # Solo i carroponti. Le due voci sul tipo di tratto -- "con il pezzo",
+    # "senza pezzo" -- descrivevano il tratteggio, che non c'e' piu'.
+    legend_elems = []
     for h in range(data.n_hoists):
         legend_elems.append(
             Patch(

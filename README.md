@@ -59,7 +59,7 @@ aprire una finestra, e la cinematica senza avere OR-Tools installato.
 | file | righe | contenuto |
 | --- | ---: | --- |
 | `excel_io.py` | 1742 | Tutto l'Excel: `scrivi_modello()` genera il file da compilare, `leggi_problema()` lo rilegge raccogliendo **tutti** gli errori di compilazione con foglio e cella, `scrivi_risultati()` produce il file dei risultati -- che e' anche un file di ingresso, col ciclogramma dentro, per poterlo riaprire, diviso in due meta' (`Input` e `Output`) dietro due cartelli colorati. |
-| `plotting.py` | 175 | `plot_cyclogram()`: disegna il ciclogramma (posizione lungo la rotaia contro tempo) con il profilo cinematico vero, non con segmenti diritti. |
+| `plotting.py` | 231 | `plot_cyclogram()`: disegna il ciclogramma (posizione lungo la rotaia contro tempo) con il profilo cinematico vero, non con segmenti diritti, e i punti sugli istanti in cui succede qualcosa (aggancio, sgancio, partenza, arrivo). |
 | `simulazione.py` | 1388 | La **simulazione**: la linea vista di fronte, in movimento. `Simulazione` e' la parte che conta e non importa tkinter — dato un istante dice dove sta ogni carroponte (posizione, quota del gancio, cosa sta facendo) e ogni pezzo; `FinestraSimulazione` e' solo la finestra che la anima. Non calcola niente di nuovo: legge `segments_per_hoist` e `actual_time` della soluzione, cioe' gli stessi oggetti che disegnano il ciclogramma. |
 
 ### Programmi da lanciare
@@ -185,15 +185,17 @@ Fra un pallino e l'altro si legge quanto e' durata ogni cosa. Lo spazio fra
 l'arrivo e lo sgancio, per esempio, e' l'immersione del telaio: tempo in cui il
 carroponte e' li' fermo a lavorare, che prima si confondeva con un'attesa.
 
-Il colore dice una cosa sola: **di quale carroponte** e' la traiettoria. Il
-tratto ne dice un'altra sola:
+Il colore dice una cosa sola: **di quale carroponte** e' la traiettoria, ed e'
+l'unica distinzione che il disegno fa. Le linee sono tutte **continue**, che il
+carroponte sia carico o scarico: i tratti obliqui sono spostamenti, quelli
+piatti sono il carro fermo sopra una vasca -- a prendere, a depositare o ad
+aspettare.
 
-- **continuo** — il carroponte ha il pezzo in mano. I tratti che salgono o
-  scendono sono i trasferimenti fra vasche, quelli piatti agli estremi sono la
-  presa e il rilascio (il carro e' fermo sopra la vasca mentre il telaio esce
-  dal bagno o ci entra).
-- **tratteggiato** — il carroponte e' senza pezzo: rientro a vuoto se la linea
-  si muove, attesa sopra la vasca se e' piatta.
+C'e' stato un tratteggio per il carroponte scarico, ed e' stato tolto: spezzava
+a meta' del giro quello che e' il percorso di un carroponte solo, e da quando
+ci sono i punti sugli eventi la linea si segue meglio intera. Se il carroponte
+sia carico si legge dal verso -- sale la linea col pezzo e la ridiscende a
+vuoto -- e dal foglio `Movimenti`, che lo scrive tratto per tratto.
 
 Niente altro. Un colore per ogni tipo di tratto rendeva il grafico un
 arcobaleno in cui non si riusciva piu' a seguire un carroponte dall'inizio alla
