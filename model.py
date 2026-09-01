@@ -1449,7 +1449,7 @@ def build_solution(
             if mosse_attive is None
             else sorted(mosse_attive)
         )
-        local_pick = {k: actual_time[k] % T for k in chiavi}
+        local_pick = {k: _fase_nel_periodo(actual_time[k], T, data) for k in chiavi}
         return _assembla(data, T, local_pick, actual_time, status, incoerenze)
 
     if local_pick is None:
@@ -1482,6 +1482,25 @@ def build_solution(
         actual_time[k] += (n_giri + extra_periods.get(k, 0)) * T
 
     return _assembla(data, T, local_pick, actual_time, status, incoerenze)
+
+
+def _fase_nel_periodo(istante: float, T: float, data: ProblemData) -> float:
+    """La fase di un istante dentro il periodo, cioe' `istante % T` -- ma senza
+    la trappola del multiplo esatto.
+
+    Il resto di un multiplo esatto di T vale zero, e un capello meno di quel
+    multiplo vale quasi T: fra i due c'e' un salto di un periodo intero. La
+    catena dei tempi si ricostruisce sommando una permanenza dopo l'altra in
+    virgola mobile, quindi un istante che dovrebbe cadere esattamente su 2T ci
+    cade appena sotto -- e il carroponte si ritrova a cominciare il giro un
+    periodo dopo, senza piu' fare in tempo ad arrivare da nessuna parte.
+
+    Succedeva riaprendo un file: il ciclogramma appena calcolato era pulito,
+    quello riletto pieno di attese lunghe un takt. La tolleranza e' quella del
+    progetto (`eps_seconds`), la stessa con cui si decide quanti periodi interi
+    un pezzo resta in vasca."""
+    resto = istante % T
+    return 0.0 if T - resto <= data.eps_seconds else resto
 
 
 def _assembla(

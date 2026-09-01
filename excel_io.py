@@ -1072,7 +1072,7 @@ def _scrivi_foglio_ciclogramma(wb, data, ciclogramma, intestazione, sfondo, nota
     ws = wb.create_sheet(FOGLIO_CICLOGRAMMA)
     for riga, (nome, valore, spiega) in enumerate(
         (
-            ("takt_time_s", round(float(ciclogramma["T"]), 4),
+            ("takt_time_s", round(float(ciclogramma["T"]), 9),
              "il periodo del ciclo, in secondi"),
             ("carroponti", int(ciclogramma.get("n_carroponti") or 1),
              "quanti ne hai a disposizione (anche se non tutti usati)"),
@@ -1086,6 +1086,12 @@ def _scrivi_foglio_ciclogramma(wb, data, ciclogramma, intestazione, sfondo, nota
         ws.cell(riga, 3).value = spiega
         ws.cell(riga, 3).font = nota
 
+    # Le cifre non si tagliano. Sembrano un dettaglio estetico -- chi legge un
+    # tempo in vasca non guarda il microsecondo -- ma questi valori vengono
+    # RILETTI e la catena dei tempi li somma uno sull'altro: da li' si decide,
+    # con un arrotondamento all'insu', quanti periodi interi il pezzo resta in
+    # vasca. Un millesimo di troppo su una tappa al limite fa scattare un
+    # periodo, e il ciclogramma riaperto non e' piu' quello salvato.
     titoli = ["mossa", "da vasca", "a vasca", "carroponte", "tempo_in_vasca_s"]
     for col, (titolo, larghezza) in enumerate(
         zip(titoli, [8, 22, 22, 12, 18]), start=1
@@ -1108,7 +1114,7 @@ def _scrivi_foglio_ciclogramma(wb, data, ciclogramma, intestazione, sfondo, nota
                 data.route[k].tank_id,
                 data.route[k + 1].tank_id,
                 None if carro is None else carro + 1,
-                None if sosta is None else round(float(sosta), 3),
+                None if sosta is None else round(float(sosta), 9),
             ]
         )
 

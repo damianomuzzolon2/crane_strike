@@ -964,6 +964,48 @@ def test_svincoli():
             )
 
 
+def test_fase_su_multiplo_esatto():
+    """Un istante di prelievo che cade su un multiplo ESATTO del takt time.
+
+    Il resto vale zero, e un capello meno vale quasi T: fra i due c'e' un salto
+    di un periodo intero. La catena dei tempi si ricostruisce sommando le
+    permanenze in virgola mobile, quindi un istante che dovrebbe cadere su 2T
+    ci cade appena sotto -- e il carroponte comincia il giro un periodo dopo,
+    senza piu' arrivare in tempo da nessuna parte.
+
+    Si vedeva riaprendo un file salvato: il ciclogramma appena calcolato era
+    pulito, quello riletto pieno di attese lunghe un takt intero."""
+    print("\n[23] prelievo su un multiplo esatto del takt time")
+    data = make_data(
+        positions=[0, 5000, 10000, 15000],
+        dwells=[(0, 0), (10, 400), (10, 400), (0, 0)],
+        zones=[HoistZone(0, 2)],
+    )
+    T = 100.0
+    # si sceglie la permanenza in modo che il prelievo della mossa 2 cada
+    # esattamente su 2T, e la si fa arrivare per somme come fa la rilettura
+    at1 = data.loaded_leg_seconds(0) + 40.0
+    perm2 = 2 * T - (at1 + data.loaded_leg_seconds(1))
+    catena = [0.0, at1, at1 + data.loaded_leg_seconds(1) + perm2]
+    check(
+        abs(catena[2] - 2 * T) < 1e-9,
+        f"il prelievo della mossa 2 cade su 2T ({catena[2]:.6f} s)",
+    )
+    sol = costruisci(data, T, actual_time=catena, status="MANUALE", tollerante=True)
+    fasi = {k: v for p in sol.plans for k, v in p.local_pick.items()}
+    check(
+        fasi.get(2, -1) < T / 2,
+        f"la fase resta a inizio periodo, non salta a fine ({fasi.get(2)!r})",
+    )
+    # senza la correzione la fase cadeva a un capello da T, e il carroponte
+    # cominciava il giro un periodo dopo: e' quello il salto da evitare
+    check(
+        abs(catena[2] % T - T) > T / 2 or fasi.get(2, -1) == 0.0,
+        f"e non a un capello da T, che varrebbe un periodo intero di ritardo "
+        f"(il modulo grezzo dava {catena[2] % T:.6f})",
+    )
+
+
 def main():
     print("=" * 72)
     print("TEST DEL VERIFICATORE (verify.py) -- non richiede OR-Tools")
@@ -985,6 +1027,7 @@ def main():
     test_vasca_ripetuta()
     test_fasi_verticali()
     test_svincoli()
+    test_fase_su_multiplo_esatto()
     test_zero_verticale_non_regressione()
     test_stazione_condivisa()
     test_input_malformato()

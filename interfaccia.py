@@ -1444,6 +1444,37 @@ class Applicazione(tk.Tk):
 
     def _aggiorna_banner_e_riepilogo(self):
         T, rep = self.T_corrente, self.report
+        # Le incoerenze vengono PRIMA di tutto il resto. Sono i punti in cui il
+        # ciclogramma non si tiene in piedi -- un carroponte che dovrebbe
+        # essere in due posti insieme, o che non fa in tempo -- e il disegno le
+        # assorbe come sa: allunga un'attesa e tira dritto. Il risultato e' una
+        # riga orizzontale lunghissima che sembra una stranezza del grafico,
+        # mentre e' il sintomo. Si calcolavano gia' e non si mostravano: chi
+        # riapriva un file rotto vedeva la riga e non sapeva cosa fosse.
+        if self.incoerenze:
+            self.banner.configure(
+                text=f"{len(self.incoerenze)} INCOERENZE   -   il ciclogramma "
+                f"non si tiene in piedi, vedi il Riepilogo",
+                background="#fce5cd",
+                foreground="#b45f06",
+            )
+            righe = [
+                "IL CICLOGRAMMA NON E' REALIZZABILE COSI' COM'E'.",
+                "",
+                "Il disegno le assorbe allungando le attese: se vedi una riga",
+                "orizzontale lunghissima, e' questa la ragione.",
+                "",
+            ]
+            righe += [f"  - {m}" for m in self.incoerenze]
+            righe += [
+                "",
+                "Se hai appena riaperto un file salvato con una versione",
+                "precedente del programma, ricalcolalo e risalvalo: i tempi di",
+                "presa, rilascio e permanenza sono cambiati, e i valori scritti",
+                "allora non vogliono piu' dire la stessa cosa.",
+            ]
+            self._scrivi_riepilogo("\n".join(righe))
+            return
         if rep is None:
             self.banner.configure(
                 text=f"IN COMPOSIZIONE   -   T = {T:.2f} s   -   "
