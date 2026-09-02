@@ -1032,68 +1032,6 @@ def test_simulazione_dal_pulsante(percorso_linea):
         chiudi(app)
 
 
-def test_lingua(percorso_linea):
-    """Il pulsante della lingua riscrive l'interfaccia senza ricostruirla:
-    quello che si stava guardando deve restare li'."""
-    print("\n[12] cambio di lingua")
-    from interfaccia import Applicazione
-    from lingua import imposta_lingua, lingua
-
-    imposta_lingua("it")
-    app = Applicazione(percorso_linea)
-    try:
-        for _ in range(50):
-            app.update()
-            if app.config_linea is not None:
-                break
-            time.sleep(0.02)
-        app._componi_da_zero()
-        app.update()
-        prima = (app.T_corrente, dict(app.permanenze), app.vista)
-        check(
-            str(app.btn_auto["text"]) == "Calcola auto"
-            and str(app.btn_lingua["text"]) == "EN",
-            "si parte in italiano, e il pulsante propone l'inglese",
-        )
-
-        app._cambia_lingua()
-        app.update()
-        check(
-            lingua() == "en"
-            and str(app.btn_auto["text"]) == "Solve"
-            and str(app.schede.tab(0, "text")) == "Summary",
-            f"passa all'inglese: pulsanti e schede ({app.btn_auto['text']}, "
-            f"{app.schede.tab(0, 'text')})",
-        )
-        # le intestazioni delle tabelle non sono widget e vanno riscritte a
-        # parte: e' proprio la parte che si dimentica
-        check(
-            app.tabella_permanenze.heading("vasca", "text") == "tank"
-            and app.tabella_assegnazione.heading("da", "text") == "from tank",
-            "comprese le intestazioni delle tabelle",
-        )
-        check(
-            str(app.btn_lingua["text"]) == "IT",
-            "e il pulsante propone il ritorno all'italiano",
-        )
-        # Cambiare lingua non e' ricalcolare: il ciclogramma su cui si stava
-        # lavorando deve restare quello, con i suoi tempi e la sua vista.
-        check(
-            (app.T_corrente, app.permanenze, app.vista) == prima,
-            "il ciclogramma su cui si stava lavorando non si tocca",
-        )
-
-        app._cambia_lingua()
-        app.update()
-        check(
-            lingua() == "it" and str(app.btn_auto["text"]) == "Calcola auto",
-            "e si torna indietro",
-        )
-    finally:
-        imposta_lingua("it")
-        chiudi(app)
-
-
 def test_file_illeggibile():
     print("\n[3] file non valido: messaggio, non schianto")
     from interfaccia import Applicazione
@@ -1137,7 +1075,6 @@ def main():
         test_scheda_chiusa_durante_il_calcolo(linea)
         test_ciclogramma_si_riprende(linea)
         test_simulazione_dal_pulsante(linea)
-        test_lingua(linea)
         test_file_illeggibile()
     finally:
         os.unlink(linea)

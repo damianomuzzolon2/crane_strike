@@ -25,7 +25,7 @@ periodici. È una scelta valida: il codice qui sotto la usa.
 
 ## I file del progetto
 
-Diciassette file Python, divisi per ruolo. Le dipendenze vanno in una
+Sedici file Python, divisi per ruolo. Le dipendenze vanno in una
 direzione sola — interfaccia -> motore -> cinematica — e mai al contrario:
 `model.py` non sa che esiste un'interfaccia, e `kinematics.py` non sa che
 esiste un ciclogramma. E' quello che permette di provare il motore senza
@@ -59,7 +59,6 @@ aprire una finestra, e la cinematica senza avere OR-Tools installato.
 | file | righe | contenuto |
 | --- | ---: | --- |
 | `excel_io.py` | 1742 | Tutto l'Excel: `scrivi_modello()` genera il file da compilare, `leggi_problema()` lo rilegge raccogliendo **tutti** gli errori di compilazione con foglio e cella, `scrivi_risultati()` produce il file dei risultati -- che e' anche un file di ingresso, col ciclogramma dentro, per poterlo riaprire, diviso in due meta' (`Input` e `Output`) dietro due cartelli colorati. |
-| `lingua.py` | 194 | Le due lingue dell'interfaccia. La chiave di traduzione **e' il testo italiano**, non un codice simbolico: il codice resta leggibile senza saltare a un dizionario, e una stringa non ancora tradotta resta in italiano invece di diventare una sigla a schermo. Aggiungere una lingua e' aggiungere un dizionario. |
 | `plotting.py` | 231 | `plot_cyclogram()`: disegna il ciclogramma (posizione lungo la rotaia contro tempo) con il profilo cinematico vero, non con segmenti diritti, e i punti sugli istanti in cui succede qualcosa (aggancio, sgancio, partenza, arrivo). |
 | `simulazione.py` | 1388 | La **simulazione**: la linea vista di fronte, in movimento. `Simulazione` e' la parte che conta e non importa tkinter — dato un istante dice dove sta ogni carroponte (posizione, quota del gancio, cosa sta facendo) e ogni pezzo; `FinestraSimulazione` e' solo la finestra che la anima. Non calcola niente di nuovo: legge `segments_per_hoist` e `actual_time` della soluzione, cioe' gli stessi oggetti che disegnano il ciclogramma. |
 
@@ -132,7 +131,6 @@ programma.
 | `Calcola man` | Butta via il ciclogramma corrente e riparte dai tempi minimi di processo, con **nessun trasporto assegnato**, per comporlo a mano (vedi sotto). |
 | `Modifica` / `Fine modifica` | Apre alla modifica il ciclogramma che c'e', portando sul **pettine** — che e' il foglio su cui si assegna. Non cambia niente, ma e' il passaggio obbligato: senza, la scheda *Ciclogramma* resta chiusa. Premuto di nuovo chiude la modifica e riporta a guardare il ciclogramma. |
 | `Simulazione` | Apre una finestra a parte in cui la linea si vede **di fronte e in movimento**: i carroponti che scorrono, calano il gancio, tirano su il telaio, lo portano e lo immergono. Si accende solo quando un ciclogramma c'e' — calcolato o composto a mano, e' lo stesso oggetto. Vedi sotto. |
-| `EN` / `IT` | In fondo alla barra: alterna italiano e inglese e riscrive l'interfaccia sul posto, senza ricostruirla — lo zoom, la vista e il ciclogramma su cui stai lavorando restano dove sono. Il pulsante mostra la lingua in cui si **passa**, non quella corrente. La scelta non viene ricordata: a ogni avvio si riparte in italiano. |
 | `Salva risultati...` | Scrive l'Excel dei risultati e, accanto, l'immagine del ciclogramma. **Lo stesso Excel si riapre con `Apri linea...`** per riprendere il lavoro: contiene anche la linea e il ciclogramma. Si abilita solo quando c'e' qualcosa da salvare. |
 
 A destra nella stessa barra c'e' il **percorso completo** del file caricato —

@@ -44,7 +44,6 @@ from matplotlib.path import Path
 from matplotlib.text import Text
 
 from kinematics import Kinematics, position_profile, travel_time
-from lingua import L
 from model import LiftPhase, ProblemData, Solution
 from plotting import _HOIST_COLORS
 
@@ -736,11 +735,7 @@ class FinestraSimulazione(tk.Toplevel):
 
     def __init__(self, padre, data, solution, carri=None, titolo_linea=""):
         super().__init__(padre)
-        self.title(
-            L("Simulazione della linea - {file}", file=titolo_linea)
-            if titolo_linea
-            else L("Simulazione della linea")
-        )
+        self.title("Simulazione della linea" + (f" - {titolo_linea}" if titolo_linea else ""))
         self.geometry("1180x620")
         self.minsize(820, 480)
 
@@ -762,14 +757,14 @@ class FinestraSimulazione(tk.Toplevel):
         # movimento fa vedere cosa succede; per capire ESATTAMENTE quando due
         # carroponti si sfiorano bisogna potersi fermare sull'istante e
         # spostarsi di poco, avanti e indietro, senza rincorrere il cursore.
-        self._pulsante_passo(comandi, L("Indietro"), -1).pack(side=tk.LEFT)
-        self.btn_avvia = ttk.Button(comandi, text=L("Avvia"), width=9, command=self.avvia_o_ferma)
+        self._pulsante_passo(comandi, "Indietro", -1).pack(side=tk.LEFT)
+        self.btn_avvia = ttk.Button(comandi, text="Avvia", width=9, command=self.avvia_o_ferma)
         self.btn_avvia.pack(side=tk.LEFT, padx=(6, 0))
-        self._pulsante_passo(comandi, L("Avanti"), +1).pack(side=tk.LEFT, padx=(6, 0))
-        ttk.Button(comandi, text=L("Da capo"), width=9, command=self.da_capo).pack(
+        self._pulsante_passo(comandi, "Avanti", +1).pack(side=tk.LEFT, padx=(6, 0))
+        ttk.Button(comandi, text="Da capo", width=9, command=self.da_capo).pack(
             side=tk.LEFT, padx=(6, 0)
         )
-        ttk.Label(comandi, text=L("velocita':")).pack(side=tk.LEFT, padx=(16, 4))
+        ttk.Label(comandi, text="velocita':").pack(side=tk.LEFT, padx=(16, 4))
         self.var_velocita = tk.StringVar(value="5x")
         ttk.Combobox(
             comandi,
@@ -819,12 +814,8 @@ class FinestraSimulazione(tk.Toplevel):
         scoperte = self.sim.mosse_scoperte()
         self.avviso.configure(
             text=(
-                L(
-                    "{n} trasporti non sono assegnati a nessun carroponte "
-                    "(mosse {mosse}): li vedrai come pezzi che si spostano da soli.",
-                    n=len(scoperte),
-                    mosse=scoperte,
-                )
+                f"{len(scoperte)} trasporti non sono assegnati a nessun carroponte "
+                f"(mosse {scoperte}): li vedrai come pezzi che si spostano da soli."
                 if scoperte
                 else ""
             )
@@ -1053,12 +1044,12 @@ class FinestraSimulazione(tk.Toplevel):
         legenda = [
             Line2D([0], [0], linestyle="none", marker=_TELAIO, markersize=11,
                    markerfacecolor=_COLORE_PEZZO, markeredgecolor=_BORDO_PEZZO,
-                   label=L("telaio")),
+                   label="telaio"),
         ]
         for carro in self.carri_disegnati:
             legenda.append(
                 Line2D([0], [0], color=_HOIST_COLORS[carro.numero % len(_HOIST_COLORS)],
-                       linewidth=6, label=L("Carroponte {n}", n=carro.numero + 1))
+                       linewidth=6, label=f"Carroponte {carro.numero + 1}")
             )
         self.assi.legend(
             handles=legenda, loc="upper left", fontsize=7.5,
@@ -1195,7 +1186,7 @@ class FinestraSimulazione(tk.Toplevel):
 
     def avvia_o_ferma(self):
         self._in_moto = not self._in_moto
-        self.btn_avvia.configure(text=L("Pausa") if self._in_moto else L("Avvia"))
+        self.btn_avvia.configure(text="Pausa" if self._in_moto else "Avvia")
         if self._in_moto:
             self._lavoro = self.after(self.PASSO_MS, self._passo)
         elif self._lavoro is not None:
@@ -1358,28 +1349,17 @@ class FinestraSimulazione(tk.Toplevel):
         return min(1.0, -stato.z / corsa) * self.quota_immersione
 
     def _titolo(self, t: float, n_pezzi: int) -> str:
-        return L(
-            "t = {t} s   di {durata} s ({periodi} takt da {T} s)   -   "
-            "{n} pezzi in linea",
-            t=f"{t:6.1f}",
-            durata=f"{self.sim.durata:.1f}",
-            periodi=self.sim.periodi,
-            T=f"{self.sim.T:.2f}",
-            n=n_pezzi,
+        return (
+            f"t = {t:6.1f} s   di {self.sim.durata:.1f} s "
+            f"({self.sim.periodi} takt da {self.sim.T:.2f} s)   -   "
+            f"{n_pezzi} pezzi in linea"
         )
 
     def _descrizione(self, istante: Istantanea) -> str:
-        # Il nome della fase arriva dal modello in italiano: si traduce QUI,
-        # quando lo si mostra. Tradurlo alla fonte vorrebbe dire avere un
-        # modello che cambia a seconda della lingua, e non e' il suo mestiere.
         pezzi = []
         for s in sorted(istante.carri, key=lambda s: s.carro):
-            pezzi.append(
-                L("Carroponte {n}: {fase} in {vasca}", n=s.carro + 1,
-                  fase=L(s.fase), vasca=s.vasca)
-                if s.vasca
-                else L("Carroponte {n}: {fase}", n=s.carro + 1, fase=L(s.fase))
-            )
+            dove = f" in {s.vasca}" if s.vasca else ""
+            pezzi.append(f"Carroponte {s.carro + 1}: {s.fase}{dove}")
         return "     |     ".join(pezzi)
 
     def destroy(self):
