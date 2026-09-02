@@ -40,6 +40,7 @@ nascosti += [
 nascosti += [
     "excel_io",
     "kinematics",
+    "lingua",
     "manuale",
     "model",
     "plotting",

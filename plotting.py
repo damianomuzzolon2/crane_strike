@@ -15,6 +15,7 @@ from matplotlib.lines import Line2D
 from matplotlib.patches import Patch
 
 from kinematics import position_profile
+from lingua import L
 from model import ProblemData, Solution, Segment
 
 # Il colore dice UNA cosa sola: di quale carroponte e' la linea. Un colore per
@@ -99,14 +100,14 @@ def lettura_coordinate(t: float, x: float) -> str:
     sono i nomi delle vasche: matplotlib prova a formattare la quota con lo
     stesso formattatore e, fuori da un nome di vasca, restituisce una stringa
     vuota -- si finisce per leggere "(x, y) = (175.0, )"."""
-    return f"t = {t:.1f} s      posizione = {x:.0f} mm"
+    return L("t = {t} s      posizione = {x} mm", t=f"{t:.1f}", x=f"{x:.0f}")
 
 
 def plot_cyclogram(
     data: ProblemData,
     solution: Solution,
     n_cycles: int = 2,
-    title: str = "Ciclogramma carroponti",
+    title: str | None = None,
     ax=None,
     save_path: str | None = None,
 ):
@@ -118,6 +119,8 @@ def plot_cyclogram(
     if solution.status in _STATI_SENZA_SOLUZIONE or not solution.segments_per_hoist:
         raise ValueError(f"Nessuna soluzione da disegnare (status={solution.status})")
 
+    if title is None:
+        title = L("Ciclogramma carroponti")
     T = solution.T
     own_fig = ax is None
     if own_fig:
@@ -203,9 +206,9 @@ def plot_cyclogram(
     for cycle in range(n_cycles + 1):
         ax.axvline(cycle * T, color="#999999", linewidth=1, linestyle=":", zorder=0)
 
-    ax.set_xlabel("tempo [s]")
-    ax.set_ylabel("posizione lungo la rotaia")
-    ax.set_title(f"{title}  —  takt time T = {T:.2f} s")
+    ax.set_xlabel(L("tempo [s]"))
+    ax.set_ylabel(L("posizione lungo la rotaia"))
+    ax.set_title(L("{titolo}  —  takt time T = {t} s", titolo=title, t=f"{T:.2f}"))
     ax.set_xlim(0.0, n_cycles * T * 1.01)
 
     # -- legenda --------------------------------------------------------
@@ -215,7 +218,7 @@ def plot_cyclogram(
     for h in range(data.n_hoists):
         legend_elems.append(
             Patch(
-                color=_HOIST_COLORS[h % len(_HOIST_COLORS)], label=f"Carroponte {h+1}"
+                color=_HOIST_COLORS[h % len(_HOIST_COLORS)], label=L("Carroponte {n}", n=h + 1)
             )
         )
     ax.legend(handles=legend_elems, loc="upper right", fontsize=8, framealpha=0.9)

@@ -38,6 +38,7 @@ from matplotlib.figure import Figure
 from matplotlib.lines import Line2D
 
 from excel_io import leggi_problema, scrivi_modello, scrivi_risultati
+from lingua import L, SALVATO, alterna as alterna_lingua, lingua
 from model import solve, solve_auto_hoists, solve_auto_zones
 import manuale
 from plotting import (
@@ -58,6 +59,7 @@ _COLORI_GRAVITA = {
     "info": "#efefef",
 }
 _ETICHETTE_GRAVITA = {"error": "ERRORE", "warning": "avviso", "info": "nota"}
+# tradotte al momento di scriverle: il dizionario e' la chiave, non il testo
 
 # Disegno manuale: un solo grigio per tutto cio' che l'utente non ha ancora
 # deciso, e due soli spessori. Il colore compare solo dove si e' assegnato un
@@ -187,6 +189,12 @@ class Applicazione(tk.Tk):
         # la prima mossa non informa nessuno.
         self.verifica_viva = False
 
+        # Ogni widget con un testo si registra qui quando lo si crea, e al
+        # cambio di lingua lo si riscrive. Ricostruire l'intera finestra
+        # sarebbe piu' corto da scrivere ma butterebbe via la tela di
+        # matplotlib, lo zoom e la cronologia di navigazione: cambiare lingua
+        # non deve far perdere il punto in cui si stava lavorando.
+        self._traducibili: list = []
         self._costruisci_interfaccia()
         self._aggiorna_stato_pulsanti()
         if file_iniziale:
@@ -196,15 +204,51 @@ class Applicazione(tk.Tk):
     # Costruzione dell'interfaccia
     # ------------------------------------------------------------------
 
+    def _tr(self, widget, chiave: str, opzione: str = "text"):
+        """Scrive il testo tradotto sul widget e lo registra, cosi' cambiando
+        lingua lo si riscrive senza doverlo ritrovare."""
+        widget.configure(**{opzione: L(chiave)})
+        self._traducibili.append((widget, chiave, opzione))
+        return widget
+
+    def _cambia_lingua(self):
+        alterna_lingua()
+        for widget, chiave, opzione in self._traducibili:
+            try:
+                widget.configure(**{opzione: L(chiave)})
+            except Exception:
+                pass  # widget distrutto: non e' un motivo per fermarsi
+        for indice, chiave in ((0, "Riepilogo"), (1, "Ciclogramma"), (2, "Verifica")):
+            self.schede.tab(indice, text=L(chiave))
+        # Le intestazioni delle tabelle non sono widget: sono proprieta' di una
+        # colonna, e il registro dei traducibili non le raggiunge. Si
+        # riscrivono qui, per nome.
+        for tabella, colonne in (
+            (self.tabella, (("gravita", "gravita'"), ("tipo", "tipo"),
+                            ("descrizione", "descrizione"))),
+            (self.tabella_permanenze, (("vasca", "vasca"), ("tempo", "tempo [s]"),
+                                       ("min", "min"), ("max", "max"))),
+            (self.tabella_assegnazione, (("mossa", "n"), ("da", "da vasca"),
+                                         ("a", "a vasca"), ("carro", "carrop."))),
+        ):
+            for colonna, chiave in colonne:
+                tabella.heading(colonna, text=L(chiave))
+        self.btn_lingua.configure(text="IT" if lingua() == "en" else "EN")
+        self._aggiorna_stato_pulsanti()
+        if self.soluzione is not None:
+            self._mostra_ciclogramma()
+        if self.report is not None:
+            self._popola_verifica()
+
     def _costruisci_interfaccia(self):
         barra = ttk.Frame(self, padding=(10, 8))
         barra.pack(fill=tk.X)
 
-        ttk.Button(barra, text="Apri linea...", command=self._chiedi_file).pack(
-            side=tk.LEFT
-        )
-        ttk.Button(
-            barra, text="Nuovo modello Excel...", command=self._crea_modello
+        self._tr(
+            ttk.Button(barra, command=self._chiedi_file), "Apri linea..."
+        ).pack(side=tk.LEFT)
+        self._tr(
+            ttk.Button(barra, command=self._crea_modello), "Nuovo modello Excel..."
         ).pack(side=tk.LEFT, padx=(6, 0))
 
         ttk.Separator(barra, orient=tk.VERTICAL).pack(
@@ -217,18 +261,18 @@ class Applicazione(tk.Tk):
         # uno, e "Modifica" porta li' -- non sceglie fra una versione
         # automatica e una manuale, che dopo l'unificazione della pagina sono
         # lo stesso oggetto con gli stessi gradi di liberta'.
-        self.btn_auto = ttk.Button(
-            barra, text="Calcola auto", command=self._calcola_automatico
+        self.btn_auto = self._tr(
+            ttk.Button(barra, command=self._calcola_automatico), "Calcola auto"
         )
         self.btn_auto.pack(side=tk.LEFT)
-        self.btn_proposta = ttk.Button(
-            barra, text="Calcola man", command=self._componi_da_zero
+        self.btn_proposta = self._tr(
+            ttk.Button(barra, command=self._componi_da_zero), "Calcola man"
         )
         self.btn_proposta.pack(side=tk.LEFT, padx=(6, 0))
         # larghezza fissa: l'etichetta cambia in "Fine modifica" quando la
         # modifica e' aperta, e senza non starebbe ferma
         self.btn_modifica = ttk.Button(
-            barra, text="Modifica", width=13, command=self._vai_a_modifica
+            barra, text=L("Modifica"), width=13, command=self._vai_a_modifica
         )
         self.btn_modifica.pack(side=tk.LEFT, padx=(6, 0))
 
@@ -240,22 +284,30 @@ class Applicazione(tk.Tk):
         # uno: e' il ciclogramma che c'e', mostrato come lo si vedrebbe dal
         # capannone. Percio' sta dopo il separatore, con il salvataggio: sono
         # tutte e due cose che si fanno a un ciclogramma gia' fatto.
-        self.btn_simula = ttk.Button(
-            barra, text="Simulazione", command=self._apri_simulazione
+        self.btn_simula = self._tr(
+            ttk.Button(barra, command=self._apri_simulazione), "Simulazione"
         )
         self.btn_simula.pack(side=tk.LEFT)
 
-        self.btn_salva = ttk.Button(
-            barra, text="Salva risultati...", command=self._salva
+        self.btn_salva = self._tr(
+            ttk.Button(barra, command=self._salva), "Salva risultati..."
         )
         self.btn_salva.pack(side=tk.LEFT, padx=(6, 0))
+
+        # Il comando della lingua: mostra la lingua in cui si PASSA, non
+        # quella corrente. Un pulsante che dice "IT" mentre l'interfaccia e'
+        # gia' in italiano lascerebbe nel dubbio se sia uno stato o un comando.
+        self.btn_lingua = ttk.Button(
+            barra, text="EN", width=4, command=self._cambia_lingua
+        )
+        self.btn_lingua.pack(side=tk.RIGHT, padx=(12, 0))
 
         # Percorso completo, non solo il nome: su un PC di stabilimento lo
         # stesso file esiste in piu' copie (scrivania, cartella di commessa,
         # rete) e sapere *quale* si sta guardando conta piu' del nome.
         # expand=True gli lascia tutto lo spazio che avanza dai pulsanti.
-        self.etichetta_file = ttk.Label(
-            barra, text="Nessuna linea caricata", anchor=tk.E
+        self.etichetta_file = self._tr(
+            ttk.Label(barra, anchor=tk.E), "Nessuna linea caricata"
         )
         self.etichetta_file.pack(side=tk.RIGHT, fill=tk.X, expand=True, padx=(12, 0))
 
@@ -289,7 +341,7 @@ class Applicazione(tk.Tk):
         #    modifica, non deve finire dentro una scheda -------------------
         self.banner = tk.Label(
             pannello,
-            text="Nessun ciclogramma",
+            text=L("Nessun ciclogramma"),
             font=("", 11, "bold"),
             background="#e8e8e8",
             anchor=tk.W,
@@ -304,7 +356,7 @@ class Applicazione(tk.Tk):
 
         # -- scheda: riepilogo ---------------------------------------------
         scheda_riepilogo = ttk.Frame(schede, padding=6)
-        schede.add(scheda_riepilogo, text="Riepilogo")
+        schede.add(scheda_riepilogo, text=L("Riepilogo"))
         self.testo_riepilogo = tk.Text(
             scheda_riepilogo, wrap=tk.WORD, relief=tk.FLAT, background="#f7f7f7"
         )
@@ -315,12 +367,12 @@ class Applicazione(tk.Tk):
         # Una sola, per il calcolato e per il composto a mano: sono lo stesso
         # oggetto con gli stessi gradi di liberta'.
         scheda_ciclogramma = ttk.Frame(schede, padding=6)
-        schede.add(scheda_ciclogramma, text="Ciclogramma")
+        schede.add(scheda_ciclogramma, text=L("Ciclogramma"))
         self._costruisci_scheda_ciclogramma(scheda_ciclogramma)
 
         # -- scheda: verifica ----------------------------------------------
         scheda_verifica = ttk.Frame(schede, padding=6)
-        schede.add(scheda_verifica, text="Verifica")
+        schede.add(scheda_verifica, text=L("Verifica"))
         self.scheda_verifica = scheda_verifica
         cornice_tabella = ttk.Frame(scheda_verifica)
         cornice_tabella.pack(fill=tk.BOTH, expand=True)
@@ -329,9 +381,9 @@ class Applicazione(tk.Tk):
             columns=("gravita", "tipo", "descrizione"),
             show="headings",
         )
-        self.tabella.heading("gravita", text="gravita'")
-        self.tabella.heading("tipo", text="tipo")
-        self.tabella.heading("descrizione", text="descrizione")
+        self.tabella.heading("gravita", text=L("gravita'"))
+        self.tabella.heading("tipo", text=L("tipo"))
+        self.tabella.heading("descrizione", text=L("descrizione"))
         self.tabella.column("gravita", width=64, anchor=tk.W, stretch=False)
         self.tabella.column("tipo", width=104, anchor=tk.W, stretch=False)
         self.tabella.column("descrizione", width=250, anchor=tk.W)
@@ -346,7 +398,7 @@ class Applicazione(tk.Tk):
         self.tabella.bind("<<TreeviewSelect>>", self._mostra_dettaglio)
         ttk.Label(
             scheda_verifica,
-            text="Fai clic su una riga per leggerla per intero.",
+            text=L("Fai clic su una riga per leggerla per intero."),
             foreground="#777777",
         ).pack(anchor=tk.W, pady=(4, 0))
 
@@ -362,18 +414,18 @@ class Applicazione(tk.Tk):
 
         riga = ttk.Frame(cornice)
         riga.pack(fill=tk.X, pady=(8, 2))
-        ttk.Label(riga, text="Takt time [s]:").pack(side=tk.LEFT)
+        ttk.Label(riga, text=L("Takt time [s]:")).pack(side=tk.LEFT)
         self.var_takt = tk.StringVar()
         campo = ttk.Entry(riga, textvariable=self.var_takt, width=9)
         campo.pack(side=tk.LEFT, padx=(6, 2))
         campo.bind("<Return>", lambda e: self._modifica_takt())
-        ttk.Button(riga, text="Applica", width=8, command=self._modifica_takt).pack(
+        ttk.Button(riga, text=L("Applica"), width=8, command=self._modifica_takt).pack(
             side=tk.LEFT
         )
 
         riga2 = ttk.Frame(cornice)
         riga2.pack(fill=tk.X, pady=(2, 6))
-        ttk.Label(riga2, text="Carroponti:").pack(side=tk.LEFT)
+        ttk.Label(riga2, text=L("Carroponti:")).pack(side=tk.LEFT)
         self.var_carroponti = tk.StringVar(value="2")
         self.spin_carroponti = ttk.Spinbox(
             riga2,
@@ -384,7 +436,7 @@ class Applicazione(tk.Tk):
             command=self._cambia_carroponti,
         )
         self.spin_carroponti.pack(side=tk.LEFT, padx=(6, 16))
-        ttk.Label(riga2, text="attivo:").pack(side=tk.LEFT)
+        ttk.Label(riga2, text=L("attivo:")).pack(side=tk.LEFT)
         self.var_carro_attivo = tk.StringVar(value="1")
         self.combo_attivo = ttk.Combobox(
             riga2,
@@ -401,7 +453,7 @@ class Applicazione(tk.Tk):
             ),
         )
 
-        ttk.Label(cornice, text="Tempi in vasca", font=("", 9, "bold")).pack(
+        ttk.Label(cornice, text=L("Tempi in vasca"), font=("", 9, "bold")).pack(
             anchor=tk.W, pady=(6, 2)
         )
         cornice_perm = ttk.Frame(cornice)
@@ -413,10 +465,10 @@ class Applicazione(tk.Tk):
             height=7,
         )
         for chiave, titolo, larghezza in [
-            ("vasca", "vasca", 130),
-            ("tempo", "tempo [s]", 80),
-            ("min", "min", 55),
-            ("max", "max", 55),
+            ("vasca", L("vasca"), 130),
+            ("tempo", L("tempo [s]"), 80),
+            ("min", L("min"), 55),
+            ("max", L("max"), 55),
         ]:
             self.tabella_permanenze.heading(chiave, text=titolo)
             self.tabella_permanenze.column(
@@ -431,7 +483,7 @@ class Applicazione(tk.Tk):
             foreground="#777777",
         ).pack(anchor=tk.W, pady=(2, 0))
 
-        ttk.Label(cornice, text="Assegnazione", font=("", 9, "bold")).pack(
+        ttk.Label(cornice, text=L("Assegnazione"), font=("", 9, "bold")).pack(
             anchor=tk.W, pady=(8, 2)
         )
         cornice_ass = ttk.Frame(cornice)
@@ -443,10 +495,10 @@ class Applicazione(tk.Tk):
             height=7,
         )
         for chiave, titolo, larghezza in [
-            ("mossa", "n", 28),
-            ("da", "da vasca", 115),
-            ("a", "a vasca", 115),
-            ("carro", "carrop.", 60),
+            ("mossa", L("n"), 28),
+            ("da", L("da vasca"), 115),
+            ("a", L("a vasca"), 115),
+            ("carro", L("carrop."), 60),
         ]:
             self.tabella_assegnazione.heading(chiave, text=titolo)
             self.tabella_assegnazione.column(
@@ -464,12 +516,12 @@ class Applicazione(tk.Tk):
 
         pulsanti = ttk.Frame(cornice)
         pulsanti.pack(fill=tk.X, pady=(8, 0))
-        self.btn_annulla = ttk.Button(
-            pulsanti, text="Annulla modifica", command=self._annulla_modifica
+        self.btn_annulla = self._tr(
+            ttk.Button(pulsanti, command=self._annulla_modifica), "Annulla modifica"
         )
         self.btn_annulla.pack(side=tk.LEFT)
-        self.btn_verifica = ttk.Button(
-            pulsanti, text="Verifica adesso", command=self._verifica_adesso
+        self.btn_verifica = self._tr(
+            ttk.Button(pulsanti, command=self._verifica_adesso), "Verifica adesso"
         )
         self.btn_verifica.pack(side=tk.LEFT, padx=(6, 0))
         self.btn_riottimizza = ttk.Button(
@@ -477,7 +529,7 @@ class Applicazione(tk.Tk):
             # Non "rifai il calcolo": rifa' solo la SUDDIVISIONE, tenendo il
             # numero di carroponti scelto qui sopra. Le modifiche fatte a mano
             # si perdono, e l'etichetta deve dirlo abbastanza.
-            text="Ottimizza con questi carroponti",
+            text=L("Ottimizza con questi carroponti"),
             command=self._modifica_numero_carroponti,
         )
         self.btn_riottimizza.pack(side=tk.LEFT, padx=(6, 0))
@@ -485,19 +537,25 @@ class Applicazione(tk.Tk):
         # -- barra di stato -------------------------------------------------
         piede = ttk.Frame(self, padding=(10, 4))
         piede.pack(fill=tk.X)
-        self.etichetta_stato = ttk.Label(piede, text="Pronto")
+        self.etichetta_stato = self._tr(ttk.Label(piede), "Pronto")
         self.etichetta_stato.pack(side=tk.LEFT)
         self.avanzamento = ttk.Progressbar(piede, mode="indeterminate", length=180)
         self.avanzamento.pack(side=tk.RIGHT)
 
-    def _grafico_vuoto(self, messaggio="Apri una linea per cominciare"):
+    def _grafico_vuoto(self, messaggio=None):
         self.assi.clear()
         self.assi.set_xticks([])
         self.assi.set_yticks([])
         for lato in self.assi.spines.values():
             lato.set_visible(False)
         self.assi.text(
-            0.5, 0.5, messaggio, ha="center", va="center", color="#999999", fontsize=12
+            0.5,
+            0.5,
+            messaggio if messaggio is not None else L("Apri una linea per cominciare"),
+            ha="center",
+            va="center",
+            color="#999999",
+            fontsize=12,
         )
 
     # ------------------------------------------------------------------
@@ -516,7 +574,7 @@ class Applicazione(tk.Tk):
         try:
             self.config_linea = leggi_problema(percorso)
         except Exception as e:
-            self._errore("Il file non puo' essere letto", str(e))
+            self._errore(L("Il file non puo' essere letto"), str(e))
             return
         # Assoluto e normalizzato: la finestra di dialogo di Tk restituisce le
         # barre al contrario ("C:/..."), e dalla riga di comando puo' arrivare
@@ -558,9 +616,9 @@ class Applicazione(tk.Tk):
             + "\nScegli come costruire il ciclogramma."
         )
         self._svuota_tabella()
-        self._grafico_vuoto("Nessun ciclogramma calcolato")
+        self._grafico_vuoto(L("Nessun ciclogramma calcolato"))
         self.tela.draw()
-        self._stato("Linea caricata")
+        self._stato(L("Linea caricata"))
         self._aggiorna_stato_pulsanti()
         if self.config_linea.ciclogramma is not None:
             self._riprendi_ciclogramma()
@@ -591,7 +649,7 @@ class Applicazione(tk.Tk):
             "ciclogramma" if len(self.assegnazione) == d.n_moves else "pettine"
         )
         self._ricomponi(
-            "Ciclogramma ripreso dal file: premi Modifica per intervenire"
+            L("Ciclogramma ripreso dal file: premi Modifica per intervenire")
         )
 
     def _crea_modello(self):
@@ -620,7 +678,7 @@ class Applicazione(tk.Tk):
             return
         cfg = self.config_linea
         self._avvia_lavoro(
-            "Cerco numero di carroponti e zone migliori...",
+            L("Cerco numero di carroponti e zone migliori..."),
             lambda: self._risolvi(cfg),
         )
 
@@ -679,9 +737,9 @@ class Applicazione(tk.Tk):
             png = os.path.splitext(percorso)[0] + ".png"
             self._salva_immagine(png)
         except Exception as e:
-            self._errore("Impossibile salvare", str(e))
+            self._errore(L("Impossibile salvare"), str(e))
             return
-        self._stato(f"Risultati salvati in {os.path.basename(percorso)}")
+        self._stato(L("Risultati salvati in {file}", file=os.path.basename(percorso)))
         messagebox.showinfo(
             TITOLO,
             f"Salvati:\n{percorso}\n{png}\n\n"
@@ -718,11 +776,11 @@ class Applicazione(tk.Tk):
                 titolo_linea=os.path.basename(self.percorso_file or ""),
             )
         except Exception as e:
-            self._errore("Impossibile simulare", str(e))
+            self._errore(L("Impossibile simulare"), str(e))
             return
         self.finestra_simulazione = finestra
         finestra.bind("<Destroy>", self._simulazione_chiusa)
-        self._stato("Simulazione aperta: si aggiorna da sola se modifichi il ciclogramma")
+        self._stato(L("Simulazione aperta: si aggiorna da sola se modifichi il ciclogramma"))
 
     def _simulazione_chiusa(self, evento):
         # <Destroy> arriva anche per ogni widget interno della finestra: solo
@@ -772,7 +830,7 @@ class Applicazione(tk.Tk):
                 self.dati,
                 self.soluzione,
                 n_cycles=2,
-                title=f"Ciclogramma - {os.path.basename(self.percorso_file or '')}",
+                title=L("Ciclogramma - {file}", file=os.path.basename(self.percorso_file or "")),
                 ax=assi,
             )
         except ValueError:
@@ -813,17 +871,17 @@ class Applicazione(tk.Tk):
         self._lavoro_in_corso = False
 
         if tipo == "eccezione":
-            self._stato("Calcolo fallito")
+            self._stato(L("Calcolo fallito"))
             self._aggiorna_stato_pulsanti()
-            self._errore("Il calcolo si e' interrotto", carico)
+            self._errore(L("Il calcolo si e' interrotto"), carico)
             return
 
         esito, sol, dati, report = carico
         if esito == "nessuna":
             self.soluzione = None
             self._aggiorna_stato_pulsanti()
-            self._stato("Nessuna soluzione trovata")
-            self._grafico_vuoto("Nessuna soluzione")
+            self._stato(L("Nessuna soluzione trovata"))
+            self._grafico_vuoto(L("Nessuna soluzione"))
             self.tela.draw()
             self._scrivi_riepilogo(
                 f"Nessuna soluzione trovata (stato: {sol.status}).\n\n"
@@ -849,6 +907,8 @@ class Applicazione(tk.Tk):
             "calcolo automatico (ottimo)"
             if sol.status == "OPTIMAL"
             else "calcolo automatico (soluzione valida, non dimostrata ottima)"
+            # la traduzione avviene quando si scrive il riepilogo: qui si tiene
+            # la chiave, cosi' cambiando lingua la voce cambia con tutto il resto
         )
         self.modificato = False
         # Un risultato del solutore si LEGGE. Per modificarlo si preme
@@ -869,7 +929,7 @@ class Applicazione(tk.Tk):
         self._popola_verifica()
         self._mostra_ciclogramma()
         self._aggiorna_stato_pulsanti()
-        self._stato(f"Ciclogramma pronto - T = {sol.T:.2f} s" + self._esito_breve())
+        self._stato(L("Ciclogramma pronto - T = {t} s", t=f"{sol.T:.2f}") + self._esito_breve())
 
     # ------------------------------------------------------------------
     # Il ciclogramma: comporlo, modificarlo, mostrarlo
@@ -930,9 +990,11 @@ class Applicazione(tk.Tk):
         self.schede.select(1)
         self._mostra_ciclogramma()
         self._stato(
-            "Modifica: trascina un prelievo sul grafico, cambia un tempo in "
-            "vasca, oppure clicca un trasporto per assegnarlo (e di nuovo per "
-            "toglierlo)"
+            L(
+                "Modifica: trascina un prelievo sul grafico, cambia un tempo "
+                "in vasca, oppure clicca un trasporto per assegnarlo (e di "
+                "nuovo per toglierlo)"
+            )
         )
 
     def _chiudi_modifica(self):
@@ -949,7 +1011,7 @@ class Applicazione(tk.Tk):
         self._reimposta_grafico()
         self._aggiorna_stato_pulsanti()
         self._mostra_ciclogramma()
-        self._stato("Modifica chiusa: si guarda il ciclogramma")
+        self._stato(L("Modifica chiusa: si guarda il ciclogramma"))
 
     def _componi_da_zero(self):
         """Butta via tutto e riparte dai tempi minimi di processo."""
@@ -980,7 +1042,7 @@ class Applicazione(tk.Tk):
         self.vista = "pettine"
         self.modifica_aperta = True
         self._ricomponi(
-            "Composizione da zero: fai clic sui trasporti per assegnarli"
+            L("Composizione da zero: fai clic sui trasporti per assegnarli")
         )
         self.schede.select(1)
 
@@ -996,7 +1058,7 @@ class Applicazione(tk.Tk):
             # Ultima rete: qui passa OGNI modifica, quindi basta questa riga
             # perche' nessuna possa infilarsi mentre il solutore lavora --
             # anche da una strada che oggi non esiste.
-            self._stato("Calcolo in corso: aspetta che finisca per modificare")
+            self._stato(L("Calcolo in corso: aspetta che finisca per modificare"))
             return
         if prima is not None:
             self._annulla.append(prima)
@@ -1140,7 +1202,7 @@ class Applicazione(tk.Tk):
             try:
                 valore = max(0.0, float(testo.replace(",", ".")))
             except ValueError:
-                self._stato("Valore non valido")
+                self._stato(L("Valore non valido"))
                 return
             self.permanenze[indice] = valore
             nome = self.config_linea.data.route[indice].tank_id
@@ -1254,7 +1316,7 @@ class Applicazione(tk.Tk):
                 self.dati,
                 self.soluzione,
                 n_cycles=2,
-                title=f"Ciclogramma - {os.path.basename(self.percorso_file or '')}",
+                title=L("Ciclogramma - {file}", file=os.path.basename(self.percorso_file or "")),
                 ax=self.assi,
             )
         except Exception as e:
@@ -1346,20 +1408,23 @@ class Applicazione(tk.Tk):
             scalinate[0][-1].t_end if scalinate else T
         )
         self.assi.set_xlim(0.0, fine)
-        self.assi.set_xlabel("tempo [s]")
-        self.assi.set_ylabel("posizione lungo la rotaia")
+        self.assi.set_xlabel(L("tempo [s]"))
+        self.assi.set_ylabel(L("posizione lungo la rotaia"))
         self.assi.set_title(
-            f"Modifica  —  takt time T = {T:.2f} s  —  "
-            f"clic sul percorso grigio per assegnarlo a un carroponte"
+            L(
+                "Modifica  —  takt time T = {t} s  —  clic sul percorso grigio "
+                "per assegnarlo a un carroponte",
+                t=f"{T:.2f}",
+            )
         )
         self.assi.grid(axis="x", color="#f0f0f0")
         self.assi.format_coord = lettura_coordinate
 
         legenda = [
-            Line2D([0], [0], color=_GRIGIO, lw=_SOTTILE, label="percorso dei pezzi"),
+            Line2D([0], [0], color=_GRIGIO, lw=_SOTTILE, label=L("percorso dei pezzi")),
             Line2D(
                 [0], [0], color="#333333", lw=_SPESSO,
-                label="giro dei carroponti",
+                label=L("giro dei carroponti"),
             ),
         ]
         self.assi.legend(
@@ -1439,83 +1504,112 @@ class Applicazione(tk.Tk):
         # riapriva un file rotto vedeva la riga e non sapeva cosa fosse.
         if self.incoerenze:
             self.banner.configure(
-                text=f"{len(self.incoerenze)} INCOERENZE   -   il ciclogramma "
-                f"non si tiene in piedi, vedi il Riepilogo",
+                text=L(
+                    "{n} INCOERENZE   -   il ciclogramma non si tiene in "
+                    "piedi, vedi il Riepilogo",
+                    n=len(self.incoerenze),
+                ),
                 background="#fce5cd",
                 foreground="#b45f06",
             )
             righe = [
-                "IL CICLOGRAMMA NON E' REALIZZABILE COSI' COM'E'.",
+                L("IL CICLOGRAMMA NON E' REALIZZABILE COSI' COM'E'."),
                 "",
-                "Il disegno le assorbe allungando le attese: se vedi una riga",
-                "orizzontale lunghissima, e' questa la ragione.",
+                L(
+                    "Il disegno le assorbe allungando le attese: se vedi una "
+                    "riga orizzontale lunghissima, e' questa la ragione."
+                ),
                 "",
             ]
             righe += [f"  - {m}" for m in self.incoerenze]
             righe += [
                 "",
-                "Se hai appena riaperto un file salvato con una versione",
-                "precedente del programma, ricalcolalo e risalvalo: i tempi di",
-                "presa, rilascio e permanenza sono cambiati, e i valori scritti",
-                "allora non vogliono piu' dire la stessa cosa.",
+                L(
+                    "Se hai appena riaperto un file salvato con una versione "
+                    "precedente del programma, ricalcolalo e risalvalo: i "
+                    "tempi di presa, rilascio e permanenza sono cambiati, e i "
+                    "valori scritti allora non vogliono piu' dire la stessa "
+                    "cosa."
+                ),
             ]
             self._scrivi_riepilogo("\n".join(righe))
             return
         if rep is None:
             self.banner.configure(
-                text=f"IN COMPOSIZIONE   -   T = {T:.2f} s   -   "
-                "premi Verifica adesso per il verdetto",
+                text=L(
+                    "IN COMPOSIZIONE   -   T = {t} s   -   premi Verifica "
+                    "adesso per il verdetto",
+                    t=f"{T:.2f}",
+                ),
                 background="#d0e0f0",
                 foreground="#1c4587",
             )
         elif rep.ok:
             self.banner.configure(
-                text=f"VERIFICA SUPERATA   -   T = {T:.2f} s   -   "
-                f"{3600.0 / T:.1f} pezzi/ora",
+                text=L(
+                    "VERIFICA SUPERATA   -   T = {t} s   -   {p} pezzi/ora",
+                    t=f"{T:.2f}",
+                    p=f"{3600.0 / T:.1f}",
+                ),
                 background="#d9ead3",
                 foreground="#274e13",
             )
         else:
             self.banner.configure(
-                text=f"{len(rep.errors)} ERRORI   -   vedi la scheda Verifica",
+                text=L("{n} ERRORI   -   vedi la scheda Verifica", n=len(rep.errors)),
                 background="#f4cccc",
                 foreground="#990000",
             )
 
-        origine = self.origine + (", poi modificato a mano" if self.modificato else "")
+        origine = L(self.origine) + (
+            L(", poi modificato a mano") if self.modificato else ""
+        )
         righe = [
-            f"Origine: {origine}",
+            L("Origine: {origine}", origine=origine),
             "",
-            f"Takt time:      {T:.2f} s",
-            f"Produttivita':  {3600.0 / T:.1f} pezzi/ora",
-            f"Carroponti:     {self.n_carroponti}",
+            L("Takt time:      {t} s", t=f"{T:.2f}"),
+            L("Produttivita':  {p} pezzi/ora", p=f"{3600.0 / T:.1f}"),
+            L("Carroponti:     {n}", n=self.n_carroponti),
         ]
         for h, z in enumerate(self.dati.zones):
             c = self._carro_della_zona(h)
             if c is None:
                 continue  # zona senza mosse assegnate: non e' di nessuno
             righe.append(
-                f"   {c + 1}: mosse {z.lo}-{z.hi}  "
-                f"({self.dati.route[z.lo].tank_id} -> "
-                f"{self.dati.route[z.hi + 1].tank_id})"
+                L(
+                    "   {n}: mosse {lo}-{hi}  ({da} -> {a})",
+                    n=c + 1,
+                    lo=z.lo,
+                    hi=z.hi,
+                    da=self.dati.route[z.lo].tank_id,
+                    a=self.dati.route[z.hi + 1].tank_id,
+                )
             )
         scoperte = [k for k in range(self.dati.n_moves) if k not in self.assegnazione]
         if scoperte:
             righe.append("")
             righe.append(
-                f"Ancora da assegnare: {len(scoperte)} trasporti su "
-                f"{self.dati.n_moves} (mosse {scoperte})."
+                L(
+                    "Ancora da assegnare: {n} trasporti su {tot} (mosse {mosse}).",
+                    n=len(scoperte),
+                    tot=self.dati.n_moves,
+                    mosse=scoperte,
+                )
             )
             righe.append(
-                "Fai clic sul trasporto nel grafico, oppure doppio clic sulla"
+                L(
+                    "Fai clic sul trasporto nel grafico, oppure doppio clic "
+                    "sulla riga nella tabella Assegnazione."
+                )
             )
-            righe.append("riga nella tabella Assegnazione.")
         righe.append("")
         if rep is None:
             righe.append(
-                "I controlli sono sospesi finche' non premi 'Verifica adesso'.\n"
-                "Da quel momento in poi il verdetto si tiene aggiornato da solo\n"
-                "a ogni modifica."
+                L(
+                    "I controlli sono sospesi finche' non premi 'Verifica "
+                    "adesso'. Da quel momento in poi il verdetto si tiene "
+                    "aggiornato da solo a ogni modifica."
+                )
             )
         else:
             if rep.min_separation != float("inf"):
@@ -1542,13 +1636,13 @@ class Applicazione(tk.Tk):
                 "",
                 tk.END,
                 values=(
-                    _ETICHETTE_GRAVITA.get(v.severity, v.severity),
+                    L(_ETICHETTE_GRAVITA.get(v.severity, v.severity)),
                     v.kind,
                     v.message,
                 ),
                 tags=(v.severity,),
             )
-        self.schede.tab(2, text=f"Verifica ({len(self.report.violations)})")
+        self.schede.tab(2, text=L("Verifica ({n})", n=len(self.report.violations)))
 
     def _verifica_adesso(self):
         if self.soluzione is None or self.dati is None:
@@ -1556,7 +1650,7 @@ class Applicazione(tk.Tk):
         try:
             self.report = verify_solution(self.dati, self.soluzione)
         except Exception as e:
-            self._errore("Verifica non eseguibile", str(e))
+            self._errore(L("Verifica non eseguibile"), str(e))
             return
         # da adesso in poi si tiene aggiornata da sola: chi l'ha chiesta una
         # volta la vuole anche dopo la prossima modifica
@@ -1565,7 +1659,7 @@ class Applicazione(tk.Tk):
         self.schede.select(2)
         self._aggiorna_banner_e_riepilogo()
         self._aggiorna_stato_pulsanti()
-        self._stato("Verifica eseguita" + self._esito_breve())
+        self._stato(L("Verifica eseguita") + self._esito_breve())
 
     # -- clic e trascinamento sul grafico -------------------------------
 
@@ -1743,7 +1837,7 @@ class Applicazione(tk.Tk):
 
     def _pronto_per_calcolare(self) -> bool:
         if self.config_linea is None:
-            self._errore("Nessuna linea", "Apri prima un file Excel con la linea.")
+            self._errore(L("Nessuna linea"), L("Apri prima un file Excel con la linea."))
             return False
         return True
 
@@ -1781,7 +1875,7 @@ class Applicazione(tk.Tk):
         )
         self.btn_modifica.configure(
             state=tk.NORMAL if c_e_ciclogramma else tk.DISABLED,
-            text="Fine modifica" if self.modifica_aperta else "Modifica",
+            text=L("Fine modifica") if self.modifica_aperta else L("Modifica"),
         )
         self.btn_verifica.configure(
             state=tk.NORMAL if c_e_ciclogramma else tk.DISABLED
