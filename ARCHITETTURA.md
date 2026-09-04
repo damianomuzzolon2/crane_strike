@@ -6,7 +6,7 @@ invarianti regge, e dove sono le trappole — comprese quelle in cui siamo gia'
 caduti, che sono la parte piu' utile.
 
 Stato al momento della scrittura: 16 file Python, 15.223 righe, cinque suite di
-test per **390 asserzioni** complessive.
+test per **395 asserzioni** complessive.
 
 ---
 
@@ -567,6 +567,15 @@ denominatore il disegno regge senza altri casi particolari — e le due stazioni
 si disegnano come POSTAZIONI e non come vasche, perche' la loro
 `Tank.lift_height` vale zero.
 
+**Anche la scena fissa passa dal rimappaggio.** Il piano di carico e quello di
+scarico stanno alla quota a cui il telaio ci viene posato — `intermediate1`
+riportato sul disegno da `_quota_disegnata`, meno l'altezza del simbolo del
+telaio perche' ci si appoggi sopra invece di attraversarlo. Lasciati alla quota
+di trasporto sembravano inghiottire il telaio, con le funi del carroponte che ci
+passavano dentro. E' il motivo per cui `_quota_disegnata` e' una funzione a se'
+e non il corpo di `_quota`: se la scena fissa e le cose che si muovono usassero
+due formule, il telaio finirebbe accanto al suo appoggio invece che sopra.
+
 **Le corsie.** Piu' pezzi nella stessa vasca si disegnavano nello stesso punto e
 sembravano uno solo. `_corsia(pezzo, stazione)` li affianca. I posti li detta il
 **ciclogramma** (quanto tempo un pezzo occupa la vasca, diviso il takt), non la
@@ -585,7 +594,7 @@ esterna avvia una seconda catena e le catene si moltiplicano.
 
 ---
 
-## 11. I test — 390 asserzioni, cinque suite
+## 11. I test — 395 asserzioni, cinque suite
 
 Nessun pytest: ogni file si lancia da solo, stampa cosa ha provato e restituisce
 un codice d'uscita.
@@ -594,7 +603,7 @@ un codice d'uscita.
 | --- | ---: | --- | --- |
 | `test_verify.py` | 98 | — | il verificatore trova davvero quello che deve? |
 | `test_excel_io.py` | 89 | — | un file compilato male viene respinto con un messaggio utile? |
-| `test_simulazione.py` | 65 | — | la simulazione mostra il ciclogramma che c'e'? |
+| `test_simulazione.py` | 70 | — | la simulazione mostra il ciclogramma che c'e'? |
 | `test_model.py` | 40 | OR-Tools | il modello produce soluzioni fisicamente valide? |
 | `test_interfaccia.py` | 98 | OR-Tools + grafica | l'interfaccia si comporta come deve? |
 

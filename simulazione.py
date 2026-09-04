@@ -961,6 +961,12 @@ class FinestraSimulazione(tk.Toplevel):
         self.quota_immersione = 0.70 * self.fondo_vasca
         # Quanto si spostano di lato i pezzi che dividono la stessa vasca.
         self.passo_corsia = 0.42 * larghezza
+        # Quanto e' alto un telaio nel disegno. Non e' un dato dell'impianto --
+        # del telaio non si sa nulla -- ma il simbolo con cui lo si disegna e'
+        # grande 22 punti e PENDE dal bilancino, quindi occupa questa fetta di
+        # disegno sotto la quota che gli si assegna. Serve a posare il telaio
+        # SOPRA un piano di carico invece che dentro.
+        self.altezza_telaio = 0.11 * h_max
 
         # -- il capannone: pavimento e colonne che reggono la rotaia -----
         self.assi.add_patch(
@@ -989,6 +995,8 @@ class FinestraSimulazione(tk.Toplevel):
             )
 
         # -- vasche e postazioni -----------------------------------------
+        # posizione sulla rotaia -> quota di disegno del piano di appoggio
+        self.quote_postazioni: dict[float, float] = {}
         pelo_x, pelo_y = [], []
         bordo_x, bordo_y = 0.045 * larghezza, 0.02 * h_max
         livello = self.bordo_vasca - 0.06 * h_max  # pelo libero, sotto il bordo
@@ -1006,12 +1014,43 @@ class FinestraSimulazione(tk.Toplevel):
                 # vasca ma una postazione, tipicamente il carico e lo scarico.
                 # Disegnarla come una vasca piena di bagno direbbe una cosa
                 # falsa, e proprio sulle due tappe che si guardano per prime.
-                self._appoggio(y, larghezza, -0.16 * h_max, pavimento)
+                #
+                # A CHE ALTEZZA. Di norma il telaio ci arriva alla quota di
+                # trasporto, e il piano sta li'. Con una ZONA DI CAMBIO QUOTA
+                # no: li' il telaio viene posato a `intermediate1`, che sta
+                # parecchio piu' in basso, e un piano lasciato in alto lo
+                # faceva sembrare infilato dentro alla postazione -- col
+                # carroponte che ci calava le funi attraverso. Il piano segue
+                # quindi la quota a cui il telaio riposa davvero, abbassato di
+                # quanto il telaio e' alto perche' ci si appoggi sopra invece
+                # di attraversarlo.
+                zona = next(
+                    (
+                        d.zona_cambio_quota(i)
+                        for i in range(d.n_stations)
+                        if abs(d.station_position(i) - y) < 1e-6
+                        and d.zona_cambio_quota(i) is not None
+                    ),
+                    None,
+                )
+                if zona is None:
+                    cima = 0.0
+                else:
+                    cima = (
+                        self._quota_disegnata(zona.z_int1, zona.corsa_totale)
+                        - self.altezza_telaio
+                    )
+                # a che quota e' finito il piano: e' l'unico numero del disegno
+                # che deve tornare con quello dei telai posati, e tenerlo qui
+                # permette di controllarlo senza andare a frugare fra le patch
+                self.quote_postazioni[y] = cima
+                spessore = 0.16 * h_max
+                self._appoggio(y, larghezza, cima - spessore, pavimento)
                 self.assi.add_patch(
                     Rectangle(
-                        (y - larghezza / 2, -0.16 * h_max),
+                        (y - larghezza / 2, cima - spessore),
                         larghezza,
-                        0.16 * h_max,
+                        spessore,
                         facecolor="#dfe4e8",
                         edgecolor="#9aa3ab",
                         linewidth=1.4,
@@ -1417,12 +1456,20 @@ class FinestraSimulazione(tk.Toplevel):
         carroponti sia per i pezzi, ed e' l'unico modo perche' continuino a
         stare nello stesso posto -- la coerenza fra i due la si controlla sulle
         quote VERE, in `Simulazione`, dove nessuno ha rimappato niente."""
-        if stato.z >= 0.0:
+        return self._quota_disegnata(stato.z, stato.corsa)
+
+    def _quota_disegnata(self, z: float, corsa: float) -> float:
+        """Il rimappaggio delle quote, nudo: quota vera e corsa dentro, altezza
+        di disegno fuori.
+
+        Sta a parte perche' non lo usa solo chi disegna cose che si muovono: lo
+        usa anche la scena fissa, per mettere il piano di carico all'altezza a
+        cui il telaio ci viene davvero posato. Se le due cose usassero due
+        formule diverse, il telaio finirebbe accanto al suo appoggio e non
+        sopra."""
+        if z >= 0.0 or corsa <= 0:
             return 0.0
-        corsa = stato.corsa
-        if corsa <= 0:
-            return 0.0
-        return min(1.0, -stato.z / corsa) * self.quota_immersione
+        return min(1.0, -z / corsa) * self.quota_immersione
 
     def _titolo(self, t: float, n_pezzi: int) -> str:
         return (

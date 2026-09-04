@@ -819,6 +819,54 @@ def test_cambio_quota():
         f"(scarto max {scarto:.2e} mm)",
     )
 
+    # -- il piano di carico sta dove il telaio ci viene posato -------------
+    # Con una zona di cambio quota il telaio si posa a intermediate1, non alla
+    # quota di trasporto. Un piano lasciato in alto lo faceva sembrare infilato
+    # dentro alla postazione, con le funi del carroponte che ci passavano
+    # attraverso. Si controlla sulle COORDINATE DISEGNATE, che e' dove il
+    # difetto si vedeva: sulle quote vere non c'era niente di sbagliato.
+    radice = tk.Tk()
+    radice.withdraw()
+    try:
+        from simulazione import FinestraSimulazione
+
+        f = FinestraSimulazione(radice, dati, sol)
+        f.update()
+        for verso, stazione, zona in (
+            ("carico", 0, d.cambio_quota_carico),
+            ("scarico", d.n_stations - 1, d.cambio_quota_scarico),
+        ):
+            y = d.station_position(stazione)
+            piano = f.quote_postazioni.get(y)
+            posa = f._quota_disegnata(zona.z_int1, zona.corsa_totale)
+            check(
+                piano is not None and piano < -1e-9,
+                f"il piano di {verso} non e' piu' alla quota di trasporto "
+                f"({piano if piano is None else round(piano, 1)})",
+            )
+            check(
+                piano is not None and abs(piano - (posa - f.altezza_telaio)) < 1e-9,
+                f"e sta giusto sotto al telaio posato "
+                f"(piano {piano:.1f}, telaio {posa:.1f})",
+            )
+        f.destroy()
+
+        # Senza zone di cambio quota nulla si muove: il piano resta dov'era.
+        sol_n, dati_n = proposta_semplice(dati_prova())
+        g = FinestraSimulazione(radice, dati_n, sol_n)
+        g.update()
+        y0 = dati_n.station_position(0)
+        check(
+            abs(g.quote_postazioni.get(y0, 9e9)) < 1e-9,
+            f"senza cambio quota il piano resta alla quota di trasporto "
+            f"({g.quote_postazioni.get(y0)})",
+        )
+        g.destroy()
+    except tk.TclError as e:
+        print(f"  --   ambiente grafico non disponibile, salto il disegno ({e})")
+    finally:
+        radice.destroy()
+
 
 def main() -> int:
     d = dati_prova()
