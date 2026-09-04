@@ -768,6 +768,135 @@ def _percorso_telaio() -> Path:
 _TELAIO = _percorso_telaio()
 
 
+# --------------------------------------------------------------------------
+# Le icone dei comandi
+#
+# Disegnate qui, pixel per pixel, e non prese da un font. I simboli media di
+# Unicode (U+23F8 e vicini) su Windows si vedono solo se il sistema trova un
+# font che li contiene: dove non lo trova compare un quadratino, che e' molto
+# peggio della parola che sostituiva. Cosi' invece sono identiche su qualunque
+# macchina, eseguibile impacchettato compreso, e non c'e' nessun file da
+# portarsi dietro.
+# --------------------------------------------------------------------------
+
+_COLORE_ICONA = "#2b2f33"
+
+
+def _colonna(img, x: int, y0: int, y1: int, colore: str):
+    if y1 >= y0:
+        img.put(colore, to=(x, y0, x + 1, y1 + 1))
+
+
+def _triangolo(img, x0: int, x1: int, alto: int, basso: int, verso: int, colore: str):
+    """Triangolo pieno fra le colonne x0..x1, con la punta a destra (verso=+1)
+    o a sinistra (verso=-1). Riempito per colonne: a questa dimensione i bordi
+    obliqui vengono dritti abbastanza."""
+    larghezza = max(1, x1 - x0)
+    mezzo = (alto + basso) / 2.0
+    meta = (basso - alto) / 2.0
+    for x in range(x0, x1 + 1):
+        f = (x - x0) / larghezza if verso > 0 else (x1 - x) / larghezza
+        h = (1.0 - f) * meta
+        _colonna(img, x, int(round(mezzo - h)), int(round(mezzo + h)), colore)
+
+
+def _barra(img, x0: int, x1: int, alto: int, basso: int, colore: str):
+    img.put(colore, to=(x0, alto, x1 + 1, basso + 1))
+
+
+def icona_comando(nome: str, lato: int = 18, colore: str = _COLORE_ICONA):
+    """L'icona di un comando, come immagine Tk.
+
+    Un'immagine appena creata e' TRASPARENTE, quindi si disegna solo la figura
+    e lo sfondo del pulsante resta quello del tema -- anche quando il tema
+    cambia. Chi la usa deve tenerne un riferimento: Tk non lo fa, e
+    un'immagine raccolta dal garbage collector lascia il pulsante vuoto."""
+    img = tk.PhotoImage(width=lato, height=lato)
+    alto, basso = 3, lato - 4
+    meta = lato // 2
+    if nome == "play":
+        _triangolo(img, 5, lato - 5, alto, basso, +1, colore)
+    elif nome == "pausa":
+        _barra(img, 5, 7, alto, basso, colore)
+        _barra(img, lato - 8, lato - 6, alto, basso, colore)
+    elif nome == "avanti":
+        _triangolo(img, 2, meta - 1, alto, basso, +1, colore)
+        _triangolo(img, meta, lato - 3, alto, basso, +1, colore)
+    elif nome == "indietro":
+        _triangolo(img, 2, meta - 1, alto, basso, -1, colore)
+        _triangolo(img, meta, lato - 3, alto, basso, -1, colore)
+    elif nome == "da_capo":
+        _barra(img, 3, 4, alto, basso, colore)
+        _triangolo(img, 6, lato - 3, alto, basso, -1, colore)
+    else:
+        raise ValueError(f"icona sconosciuta: {nome!r}")
+    return img
+
+
+class _Suggerimento:
+    """Il fumetto che compare fermandosi su un pulsante.
+
+    Serve perche' un'icona dice cosa fa il pulsante ma non tutto: che tenendo
+    premuto `Avanti` la simulazione scorre, per esempio, non si ricava da un
+    triangolo. Con le etichette scritte quell'informazione non c'era comunque,
+    quindi qui non si perde niente e si guadagna un posto dove metterla.
+
+    Il timer si annulla uscendo E alla distruzione del widget: un `after` che
+    scatta su una finestra gia' chiusa fa apparire "invalid command name" in
+    console, ed e' il modo in cui questa finestra ha gia' perso dei timer."""
+
+    RITARDO_MS = 450
+
+    def __init__(self, widget, testo: str):
+        self.widget = widget
+        self.testo = testo
+        self._attesa = None
+        self._fumetto = None
+        widget.bind("<Enter>", self._entra, add="+")
+        widget.bind("<Leave>", self._esce, add="+")
+        widget.bind("<ButtonPress>", self._esce, add="+")
+        widget.bind("<Destroy>", self._esce, add="+")
+
+    def _entra(self, _evento=None):
+        self._annulla()
+        self._attesa = self.widget.after(self.RITARDO_MS, self._mostra)
+
+    def _esce(self, _evento=None):
+        self._annulla()
+        if self._fumetto is not None:
+            self._fumetto.destroy()
+            self._fumetto = None
+
+    def _annulla(self):
+        if self._attesa is not None:
+            try:
+                self.widget.after_cancel(self._attesa)
+            except tk.TclError:
+                pass
+            self._attesa = None
+
+    def _mostra(self):
+        self._attesa = None
+        if self._fumetto is not None or not self.widget.winfo_ismapped():
+            return
+        x = self.widget.winfo_rootx()
+        y = self.widget.winfo_rooty() + self.widget.winfo_height() + 4
+        self._fumetto = tk.Toplevel(self.widget)
+        self._fumetto.wm_overrideredirect(True)  # niente barra del titolo
+        self._fumetto.wm_geometry(f"+{x}+{y}")
+        tk.Label(
+            self._fumetto,
+            text=self.testo,
+            background="#ffffe0",
+            foreground="#333333",
+            relief=tk.SOLID,
+            borderwidth=1,
+            padx=6,
+            pady=3,
+            justify=tk.LEFT,
+        ).pack()
+
+
 @dataclass
 class _Carro:
     """Gli oggetti grafici di un carroponte, creati una volta e poi solo
@@ -826,13 +955,34 @@ class FinestraSimulazione(tk.Toplevel):
         # movimento fa vedere cosa succede; per capire ESATTAMENTE quando due
         # carroponti si sfiorano bisogna potersi fermare sull'istante e
         # spostarsi di poco, avanti e indietro, senza rincorrere il cursore.
-        self._pulsante_passo(comandi, "Indietro", -1).pack(side=tk.LEFT)
-        self.btn_avvia = ttk.Button(comandi, text="Avvia", width=9, command=self.avvia_o_ferma)
-        self.btn_avvia.pack(side=tk.LEFT, padx=(6, 0))
-        self._pulsante_passo(comandi, "Avanti", +1).pack(side=tk.LEFT, padx=(6, 0))
-        ttk.Button(comandi, text="Da capo", width=9, command=self.da_capo).pack(
-            side=tk.LEFT, padx=(6, 0)
+        # Le immagini vanno tenute qui: Tk non conserva un riferimento suo, e
+        # un'icona raccolta dal garbage collector lascia il pulsante vuoto.
+        self.icone = {
+            n: icona_comando(n)
+            for n in ("indietro", "play", "pausa", "avanti", "da_capo")
+        }
+        self._pulsante_passo(
+            comandi,
+            "indietro",
+            -1,
+            "Indietro di un fotogramma\nTienilo premuto per scorrere all'indietro",
+        ).pack(side=tk.LEFT)
+        self.btn_avvia = ttk.Button(
+            comandi, image=self.icone["play"], command=self.avvia_o_ferma
         )
+        self.btn_avvia.pack(side=tk.LEFT, padx=(6, 0))
+        _Suggerimento(self.btn_avvia, "Avvia / Pausa")
+        self._pulsante_passo(
+            comandi,
+            "avanti",
+            +1,
+            "Avanti di un fotogramma\nTienilo premuto per scorrere in avanti",
+        ).pack(side=tk.LEFT, padx=(6, 0))
+        btn_capo = ttk.Button(
+            comandi, image=self.icone["da_capo"], command=self.da_capo
+        )
+        btn_capo.pack(side=tk.LEFT, padx=(6, 0))
+        _Suggerimento(btn_capo, "Torna all'inizio")
         ttk.Label(comandi, text="velocita':").pack(side=tk.LEFT, padx=(16, 4))
         # Si apre a TEMPO REALE. Un takt time dura quanto dura davvero, che su
         # una linea vera vuol dire un paio di minuti per un ciclo intero: e'
@@ -1301,7 +1451,9 @@ class FinestraSimulazione(tk.Toplevel):
 
     def avvia_o_ferma(self):
         self._in_moto = not self._in_moto
-        self.btn_avvia.configure(text="Pausa" if self._in_moto else "Avvia")
+        self.btn_avvia.configure(
+            image=self.icone["pausa" if self._in_moto else "play"]
+        )
         if self._in_moto:
             self._lavoro = self.after(self.PASSO_MS, self._passo)
         elif self._lavoro is not None:
@@ -1332,7 +1484,7 @@ class FinestraSimulazione(tk.Toplevel):
     def indietro(self):
         self._passo_a_mano(-1)
 
-    def _pulsante_passo(self, cornice, testo: str, verso: int):
+    def _pulsante_passo(self, cornice, nome_icona: str, verso: int, spiegazione: str):
         """Un pulsante che fa un passo se lo si preme, e continua se lo si
         TIENE premuto.
 
@@ -1343,9 +1495,10 @@ class FinestraSimulazione(tk.Toplevel):
         Tenendolo premuto la simulazione scorre in quel verso all'andatura
         scelta col menu della velocita': e' la stessa manopola, e per andare
         veloci si mette a 20x. All'indietro non c'e' altro modo di farlo."""
-        pulsante = ttk.Button(cornice, text=testo, width=9)
+        pulsante = ttk.Button(cornice, image=self.icone[nome_icona])
         pulsante.bind("<ButtonPress-1>", lambda e: self._inizia_raffica(verso))
         pulsante.bind("<ButtonRelease-1>", lambda e: self._ferma_raffica())
+        _Suggerimento(pulsante, spiegazione)
         return pulsante
 
     def _inizia_raffica(self, verso: int):

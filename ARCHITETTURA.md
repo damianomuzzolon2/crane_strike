@@ -590,7 +590,19 @@ l'attesa.
 
 Timer: un `after(PASSO_MS)` che si richiama. `_passo` e `_continua_raffica`
 **adottano il timer in corso** invece di affiancarglisi — senza, ogni chiamata
-esterna avvia una seconda catena e le catene si moltiplicano.
+esterna avvia una seconda catena e le catene si moltiplicano. Anche
+`_Suggerimento` ha un `after`, e lo annulla sia all'uscita dal pulsante sia
+alla distruzione del widget: un timer che scatta su una finestra gia' chiusa e'
+lo stesso `invalid command name` di sempre.
+
+**Le icone dei comandi sono disegnate, non scritte.** `icona_comando()` compone
+triangoli e barre dentro una `tk.PhotoImage`, che nasce trasparente e quindi si
+adatta a qualunque tema. I simboli media di Unicode (U+23F8 e vicini) sarebbero
+stati una riga di codice, ma si vedono solo dove il sistema trova un font che li
+contiene: dove non lo trova compare un quadratino, che e' peggio della parola
+che sostituivano. Chi usa le immagini deve **tenerne un riferimento** (qui
+`self.icone`): Tk non lo fa, e un'immagine raccolta dal garbage collector
+lascia il pulsante vuoto.
 
 ---
 

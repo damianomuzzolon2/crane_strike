@@ -312,9 +312,22 @@ programma non sa. La corsa vera non sparisce, cambia dove la si legge: sta nel
 perche' il gancio ci mette di piu' a scendere. In cambio i pezzi in vasca
 stanno in fila e le vasche si confrontano a colpo d'occhio.
 
-I comandi: `Indietro` / `Avvia`-`Pausa` / `Avanti`, `Da capo`, la velocita' (da
+I comandi sono quattro pulsanti con le icone dei riproduttori, la velocita' (da
 mezza a venti volte il tempo reale) e un cursore per portarsi a un istante
-preciso.
+preciso:
+
+| icona | cosa fa |
+| --- | --- |
+| ◀◀ | indietro di un fotogramma; **tenendolo premuto** scorre all'indietro |
+| ▶ / ❚❚ | avvia e mette in pausa |
+| ▶▶ | avanti di un fotogramma; **tenendolo premuto** scorre in avanti |
+| ❙◀ | torna all'inizio |
+
+Fermandosi su un pulsante compare un fumetto che dice cosa fa, compreso il
+tenere premuto — che con le etichette scritte non si sapeva comunque. Le icone
+non sono caratteri di un font ma sono disegnate dal programma: i simboli media
+di Unicode si vedono solo dove il sistema trova un font che li contiene, e dove
+non lo trova comparirebbe un quadratino.
 
 **Si apre a `1x`, cioe' a tempo reale**: un takt time dura quanto dura davvero,
 che su una linea vera vuol dire un paio di minuti per un ciclo intero. E' lento,
@@ -323,7 +336,7 @@ tempo un carroponte passa fermo, quanto e' lunga una discesa) resta sbagliata.
 Per scorrere in fretta si alza la velocita' col menu accanto, che regola anche
 la finezza del passo a passo.
 
-`Indietro` e `Avanti` spostano di **un fotogramma per volta**, e si possono
+◀◀ e ▶▶ spostano di **un fotogramma per volta**, e si possono
 premere anche con le frecce ← e →. Servono quando guardare non basta piu': per
 capire *esattamente* quando due carroponti si sfiorano bisogna fermarsi
 sull'istante e spostarsi di poco, avanti e indietro, senza rincorrere il
