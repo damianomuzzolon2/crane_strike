@@ -834,7 +834,14 @@ class FinestraSimulazione(tk.Toplevel):
             side=tk.LEFT, padx=(6, 0)
         )
         ttk.Label(comandi, text="velocita':").pack(side=tk.LEFT, padx=(16, 4))
-        self.var_velocita = tk.StringVar(value="5x")
+        # Si apre a TEMPO REALE. Un takt time dura quanto dura davvero, che su
+        # una linea vera vuol dire un paio di minuti per un ciclo intero: e'
+        # lento, ed e' il punto. Aprendo accelerati si guarda un movimento che
+        # non e' quello dell'impianto, e la prima impressione -- quanto tempo
+        # un carroponte passa fermo, quanto e' lunga una discesa -- resta
+        # sbagliata. Per scorrere in fretta basta cambiare qui: la manopola e'
+        # subito a fianco, e regola anche la finezza del passo a passo.
+        self.var_velocita = tk.StringVar(value="1x")
         ttk.Combobox(
             comandi,
             width=5,

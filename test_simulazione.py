@@ -341,6 +341,17 @@ def test_finestra(d: ProblemData):
         f._passo()
         check(f.t == fermo, "in pausa non si muove nemmeno a insistere")
 
+        # La finestra si apre a tempo reale: un takt time dura quanto dura,
+        # altrimenti la prima impressione di quanto sia lento l'impianto e'
+        # sbagliata.
+        check(
+            f.var_velocita.get() == "1x",
+            f"la simulazione si apre a tempo reale ({f.var_velocita.get()})",
+        )
+        # La velocita' si mette a mano invece di contare su quella iniziale:
+        # cosi' il conto qui sotto prova il MECCANISMO e non il valore
+        # predefinito, che e' una scelta e puo' cambiare.
+        f.var_velocita.set("5x")
         f._in_moto = True
         prima = f.t
         for _ in range(10):
@@ -351,6 +362,7 @@ def test_finestra(d: ProblemData):
             f"dieci passi a 5x fanno {10 * 5.0 * f.PASSO_MS / 1000.0:.1f} s "
             f"({prima:.2f} -> {f.t:.2f} s)",
         )
+        f.var_velocita.set("1x")
         # una sola catena di timer: chiamarlo a mano non ne fa partire un'altra
         f._passo()
         f._passo()

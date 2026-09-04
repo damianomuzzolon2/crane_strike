@@ -313,8 +313,15 @@ perche' il gancio ci mette di piu' a scendere. In cambio i pezzi in vasca
 stanno in fila e le vasche si confrontano a colpo d'occhio.
 
 I comandi: `Indietro` / `Avvia`-`Pausa` / `Avanti`, `Da capo`, la velocita' (da
-mezza a venti volte il tempo reale — a velocita' 1x un takt time dura quanto
-dura davvero, che e' parecchio) e un cursore per portarsi a un istante preciso.
+mezza a venti volte il tempo reale) e un cursore per portarsi a un istante
+preciso.
+
+**Si apre a `1x`, cioe' a tempo reale**: un takt time dura quanto dura davvero,
+che su una linea vera vuol dire un paio di minuti per un ciclo intero. E' lento,
+ed e' il punto — guardando un movimento accelerato la prima impressione (quanto
+tempo un carroponte passa fermo, quanto e' lunga una discesa) resta sbagliata.
+Per scorrere in fretta si alza la velocita' col menu accanto, che regola anche
+la finezza del passo a passo.
 
 `Indietro` e `Avanti` spostano di **un fotogramma per volta**, e si possono
 premere anche con le frecce ← e →. Servono quando guardare non basta piu': per
