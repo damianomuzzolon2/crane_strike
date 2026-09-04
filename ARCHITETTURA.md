@@ -6,7 +6,7 @@ invarianti regge, e dove sono le trappole — comprese quelle in cui siamo gia'
 caduti, che sono la parte piu' utile.
 
 Stato al momento della scrittura: 16 file Python, 15.223 righe, cinque suite di
-test per **401 asserzioni** complessive.
+test per **402 asserzioni** complessive.
 
 ---
 
@@ -583,6 +583,20 @@ capienza dichiarata: con tre posti e un pezzo solo lo si disegnerebbe fuori
 centro, e con un ciclogramma che sfora la capienza i pezzi di troppo
 sparirebbero uno sotto l'altro — nascondendo proprio l'errore da vedere.
 
+Per il CARROPONTE la corsia segue una regola sola: **sta sul posto del pezzo
+solo mentre lo tiene**, e in tutto il resto del giro si sposta di lato con
+continuita', da dove l'ha lasciato l'ultimo pezzo a dove lo vuole il prossimo.
+Gli intervalli in cui e' vincolato sono precalcolati in `_Traiettoria.impegni`,
+ricavati dalle fasi con `loaded=True`.
+
+> Legandola al TRATTO invece che al telaio — com'era prima — fuori dalle mosse
+> la corsia valeva zero, cioe' il centro della vasca, e il carrello **scattava**
+> di lato: appena finito un rilascio, e di nuovo passando da un pezzo al
+> successivo nella stessa vasca, dove fra i due non c'e' nemmeno un istante di
+> attesa in cui spostarsi. Su una vasca a un posto solo era invisibile, perche'
+> li' il centro E' il posto: e' un difetto che si vede solo dove ci sono piu'
+> posti, ed e' per questo che il test di continuita' sta nel caso a due pezzi.
+
 **Il gancio resta calato** finche' il carroponte sta fermo sopra una vasca, in
 tutti e due i casi in cui capita: dopo aver deposto, e aspettando di prelevare.
 Non serve nessun correttivo — da quando le corse a vuoto sono state spostate nel
@@ -616,7 +630,7 @@ lascia il pulsante vuoto.
 
 ---
 
-## 11. I test — 401 asserzioni, cinque suite
+## 11. I test — 402 asserzioni, cinque suite
 
 Nessun pytest: ogni file si lancia da solo, stampa cosa ha provato e restituisce
 un codice d'uscita.
@@ -625,7 +639,7 @@ un codice d'uscita.
 | --- | ---: | --- | --- |
 | `test_verify.py` | 98 | — | il verificatore trova davvero quello che deve? |
 | `test_excel_io.py` | 94 | — | un file compilato male viene respinto con un messaggio utile? |
-| `test_simulazione.py` | 71 | — | la simulazione mostra il ciclogramma che c'e'? |
+| `test_simulazione.py` | 72 | — | la simulazione mostra il ciclogramma che c'e'? |
 | `test_model.py` | 40 | OR-Tools | il modello produce soluzioni fisicamente valide? |
 | `test_interfaccia.py` | 98 | OR-Tools + grafica | l'interfaccia si comporta come deve? |
 

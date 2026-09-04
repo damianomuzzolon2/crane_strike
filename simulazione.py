@@ -149,6 +149,33 @@ class _Traiettoria:
     t0: float  # da dove parte il ciclo di QUESTO carroponte
     inizi_mossa: dict[int, float]  # mossa -> quando la comincia
     basso: dict[int, bool]  # tratto -> se il gancio scarico ci viaggia calato
+    # Gli IMPEGNI: (inizio, fine, mossa) degli intervalli in cui il telaio e'
+    # appeso al gancio. Solo li' il carroponte deve stare sul posto del pezzo;
+    # fuori e' libero di spostarsi di lato, e lo fa con calma invece di
+    # scattare. Ordinati per istante.
+    impegni: list[tuple[float, float, int]]
+
+
+def _fino_al_carico(fasi) -> float:
+    """Dall'inizio della presa a quando il telaio e' sul gancio: le fasi che
+    vengono prima della prima con il telaio appeso."""
+    quanto = 0.0
+    for f in fasi:
+        if f.loaded:
+            break
+        quanto += f.duration
+    return quanto
+
+
+def _finche_c_e_il_carico(fasi) -> float:
+    """Dall'inizio del rilascio a quando il telaio lascia il gancio: fino alla
+    fine dell'ultima fase con il telaio appeso."""
+    quanto, ultimo = 0.0, 0.0
+    for f in fasi:
+        quanto += f.duration
+        if f.loaded:
+            ultimo = quanto
+    return ultimo
 
 
 def _tratti_col_gancio_basso(segs: list) -> dict[int, bool]:
@@ -237,6 +264,17 @@ class Simulazione:
                     numero, ordinati, [s.t_start for s in ordinati],
                     ordinati[0].t_start, inizi_mossa,
                     _tratti_col_gancio_basso(ordinati),
+                    sorted(
+                        (
+                            inizio + _fino_al_carico(data.pick_phases(k)),
+                            inizio
+                            + data.pick_time_at(k)
+                            + data.horizontal_loaded_seconds(k)
+                            + _finche_c_e_il_carico(data.release_phases(k + 1)),
+                            k,
+                        )
+                        for k, inizio in inizi_mossa.items()
+                    ),
                 )
             )
 
@@ -359,34 +397,102 @@ class Simulazione:
                     con_pezzo=con_pezzo,
                     fase=fase,
                     vasca=vasca,
-                    corsia=self._corsia_carro(c, s, tau, t),
+                    corsia=self._corsia_carro(c, tau, t),
                     corsa=corsa,
                 )
             )
         return fuori
 
-    def _corsia_carro(self, c: "_Traiettoria", s, tau: float, t: float) -> float:
-        """Su quale posto della vasca sta lavorando il carroponte.
+    def _corsia_carro(self, c: "_Traiettoria", tau: float, t: float) -> float:
+        """Su quale posto della vasca sta il carroponte.
 
-        E' quello del pezzo che sta servendo, altrimenti il telaio si
-        staccherebbe dal bilancino. Quale pezzo sia lo dice l'aritmetica: il
-        carroponte ha cominciato questa mossa a `t - avanzamento`, e quella
-        mossa comincia per il pezzo j all'istante `catena[k] + j*T`."""
-        if s.move is None or s.move not in c.inizi_mossa:
-            return 0.0  # attesa o rientro a vuoto: nessun posto da occupare
-        k = s.move
-        avanzamento = tau - c.inizi_mossa[k]
-        pezzo = round((t - avanzamento - self._tempi[k]) / self.T)
-        gruppo = self._gruppo_verticale(c, s)
-        if gruppo is not None:
-            # presa o rilascio: il carroponte lavora sul posto del pezzo che
-            # sta servendo, anche mentre trasla fra il punto di cambio quota e
-            # la stazione
-            return self._corsia(pezzo, gruppo[1])
-        frazione = (
-            (tau - s.t_start) / (s.t_end - s.t_start) if s.t_end > s.t_start else 1.0
+        LA REGOLA E' UNA SOLA: mentre il telaio e' appeso al gancio il
+        carroponte sta sul posto di quel pezzo -- altrimenti il telaio si
+        staccherebbe dal bilancino -- e in tutto il resto del giro si sposta di
+        lato con calma, da dove l'ha lasciato l'ultimo pezzo a dove lo vuole il
+        prossimo.
+
+        Prima la corsia era legata al TRATTO invece che al telaio, e fuori dai
+        tratti di una mossa valeva zero, cioe' il centro della vasca. Su una
+        vasca a un posto solo non si vedeva -- il centro E' il posto -- ma su
+        una vasca a piu' posti il carrello scattava di lato: appena finito un
+        rilascio, e di nuovo passando da un pezzo al successivo nella stessa
+        vasca, dove fra i due non c'e' nemmeno un istante di attesa.
+
+        Che lo spostamento di lato si veda e' giusto: il carroponte deve
+        davvero mettersi sopra il posto in cui lavorera'. E' QUANDO lo fa che
+        il modello non dice, perche' li' la vasca e' un punto solo -- e allora
+        lo si distribuisce su tutto il tempo in cui e' libero, che e' l'unica
+        scelta che non inventa un istante privilegiato."""
+        if not c.impegni:
+            return 0.0
+        for inizio, fine, k in c.impegni:
+            if inizio - 1e-9 <= tau <= fine + 1e-9:
+                return self._corsia_impegno(c, k, tau, tau, t)
+        # libero: fra la fine di un impegno e l'inizio del prossimo. Il giro si
+        # richiude, quindi se da una parte non se ne trova si prende quello
+        # dall'altro capo della lista, spostato di un periodo.
+        prima = max(
+            ((fine, k, 0.0) for _, fine, k in c.impegni if fine <= tau), default=None
         )
-        return self._corsia_fra(pezzo, k, k + 1, frazione)
+        if prima is None:
+            _, fine, k = c.impegni[-1]
+            prima = (fine - self.T, k, -self.T)
+        dopo = min(
+            ((inizio, k, 0.0) for inizio, _, k in c.impegni if inizio >= tau),
+            default=None,
+        )
+        if dopo is None:
+            inizio, _, k = c.impegni[0]
+            dopo = (inizio + self.T, k, +self.T)
+        corsia0 = self._corsia_impegno(c, prima[1], prima[0], tau, t, prima[2])
+        corsia1 = self._corsia_impegno(c, dopo[1], dopo[0], tau, t, dopo[2])
+        if dopo[0] <= prima[0]:
+            return corsia1
+        f = min(1.0, max(0.0, (tau - prima[0]) / (dopo[0] - prima[0])))
+        return corsia0 + (corsia1 - corsia0) * f
+
+    def _corsia_impegno(
+        self,
+        c: "_Traiettoria",
+        k: int,
+        istante: float,
+        tau: float,
+        t: float,
+        scarto: float = 0.0,
+    ) -> float:
+        """La corsia del carroponte mentre porta il pezzo della mossa k: quella
+        della stazione di partenza, poi quella di arrivo, passando dall'una
+        all'altra durante la traslazione col pezzo.
+
+        `istante` e' il punto del giro da valutare e `tau` quello in cui si
+        trova adesso: sono diversi quando si chiede la corsia agli estremi di
+        un impegno vicino, per interpolare. Il PEZZO servito si ricava sempre
+        da `tau`, perche' e' quello del giro corrente."""
+        d = self.data
+        pezzo = self._pezzo_servito(c, k, tau, t, scarto)
+        avanzamento = istante - (c.inizi_mossa[k] + scarto)
+        presa = d.pick_time_at(k)
+        orizzontale = d.horizontal_loaded_seconds(k)
+        if avanzamento <= presa or orizzontale <= 0:
+            return self._corsia(pezzo, k)
+        if avanzamento >= presa + orizzontale:
+            return self._corsia(pezzo, k + 1)
+        return self._corsia_fra(
+            pezzo, k, k + 1, (avanzamento - presa) / orizzontale
+        )
+
+    def _pezzo_servito(
+        self, c: "_Traiettoria", k: int, tau: float, t: float, scarto: float = 0.0
+    ) -> int:
+        """Il numero d'ordine del pezzo che il carroponte serve nella mossa k.
+
+        Lo dice l'aritmetica: il carroponte ha cominciato quella mossa a
+        `t - avanzamento`, e la mossa comincia per il pezzo j all'istante
+        `catena[k] + j*T`. `scarto` sposta il riferimento di un periodo, per le
+        mosse che stanno dall'altra parte della fine del ciclo."""
+        avanzamento = tau - (c.inizi_mossa[k] + scarto)
+        return round((t - avanzamento - self._tempi[k]) / self.T)
 
     def _gruppo_verticale(self, c: "_Traiettoria", s):
         """A quale PRESA o RILASCIO appartiene il tratto, su quale stazione, e

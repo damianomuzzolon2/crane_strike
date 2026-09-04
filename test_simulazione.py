@@ -611,6 +611,31 @@ def test_vasca_a_piu_posti():
         f"dove sono due si alternano sui due posti ({doppia})",
     )
 
+    # -- il carroponte non salta da un posto all'altro --------------------
+    # Il carrello sta sul posto del pezzo solo MENTRE lo tiene; fuori si sposta
+    # di lato con calma. Legandolo al TRATTO invece che al telaio, fuori dalle
+    # mosse valeva zero -- il centro della vasca -- e il carrello scattava:
+    # appena finito un rilascio, e di nuovo passando da un pezzo al successivo
+    # nella stessa vasca, dove fra i due non c'e' un istante di attesa in cui
+    # spostarsi. Su una vasca a un posto solo non si vedrebbe, perche' li' il
+    # centro E' il posto: e' un difetto che si vede solo qui.
+    N = 4000
+    passo = sim.durata / N
+    peggio, quando = 0.0, 0.0
+    precedente: dict[int, float] = {}
+    for i in range(N + 1):
+        istante = sim.durata * i / N
+        for c in sim.istantanea(istante).carri:
+            prima = precedente.get(c.carro)
+            if prima is not None and abs(c.corsia - prima) > peggio:
+                peggio, quando = abs(c.corsia - prima), istante
+            precedente[c.carro] = c.corsia
+    check(
+        peggio < 0.1,
+        f"e il carroponte non scatta da un posto all'altro: al massimo "
+        f"{peggio:.3f} posti in {passo * 1000:.0f} ms (a t={quando:.1f} s)",
+    )
+
 
 def test_gancio_resta_giu(d: ProblemData):
     """Il gancio scarico non risale: trasla basso e alla vasca dopo ci arriva
