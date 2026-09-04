@@ -5,8 +5,8 @@ cosa fa il programma e come si usa; questo spiega com'e' fatto dentro, quali
 invarianti regge, e dove sono le trappole — comprese quelle in cui siamo gia'
 caduti, che sono la parte piu' utile.
 
-Stato al momento della scrittura: 16 file Python, 13.873 righe, cinque suite di
-test per **333 asserzioni** complessive.
+Stato al momento della scrittura: 16 file Python, 15.223 righe, cinque suite di
+test per **386 asserzioni** complessive.
 
 ---
 
@@ -98,15 +98,17 @@ Due dettagli che il resto del progetto sfrutta:
 ### 4.1 Le dataclass
 
 ```text
-Tank         id, position, capacity, lift_height, drain_time,
-             svincolo_pos, svincolo_neg
-StationSpec  tank_id, dwell_min, dwell_max          (una tappa del percorso)
-HoistZone    lo, hi                                  (intervallo di MOSSE)
-LiftPhase    name, duration, z_start, z_end, kin, loaded
-ProblemData  tutto il problema
-Segment      kind, t_start, t_end, x_start, x_end, kin, move
-HoistPlan    zone, order, local_pick, finish, dep_hi, arr_lo
-Solution     status, T, segments_per_hoist, raw, plans, actual_time
+Tank            id, position, capacity, lift_height, drain_time,
+                svincolo_pos, svincolo_neg
+StationSpec     tank_id, dwell_min, dwell_max       (una tappa del percorso)
+HoistZone       lo, hi                               (intervallo di MOSSE)
+ZonaCambioQuota position, intermediate1, intermediate2, corsa_totale
+LiftPhase       name, duration, z_start, z_end, kin, loaded,
+                x_start, x_end, kin_x
+ProblemData     tutto il problema
+Segment         kind, t_start, t_end, x_start, x_end, kin, move
+HoistPlan       zone, order, local_pick, finish, dep_hi, arr_lo
+Solution        status, T, segments_per_hoist, raw, plans, actual_time
 ```
 
 **Mossa contro stazione.** La mossa `k` porta il pezzo dalla stazione `k` alla
@@ -114,8 +116,9 @@ Solution     status, T, segments_per_hoist, raw, plans, actual_time
 indici e' l'errore piu' facile del progetto: `pick_time_at(k)` vuole una
 STAZIONE, `loaded_leg_seconds(k)` una MOSSA.
 
-**`Segment.kind`** vale `pick | loaded | release | empty | wait | lift_empty`.
-`move` e' valorizzato solo per `pick`, `loaded`, `release` — attesa e rientro a
+**`Segment.kind`** vale `pick | loaded | release | empty | wait | lift_empty |
+quota`.
+`move` e' valorizzato per `pick`, `loaded`, `release` e `quota` — attesa e rientro a
 vuoto stanno *fra* due mosse e attribuirli a una delle due sarebbe una
 convenzione arbitraria. Serve a risalire dalla traiettoria alla vasca (la presa
 della mossa `k` e' sulla stazione `k`, il rilascio sulla `k+1`) senza indovinare
@@ -137,15 +140,28 @@ pick_time_at(station)       # = somma delle fasi, non un calcolo parallelo
 release_time_at(station)    # idem
 horizontal_loaded_seconds(k)
 loaded_leg_seconds(k)       # presa(k) + traslazione + rilascio(k+1)
-empty_leg_seconds(a, b)     # il rientro a vuoto FRA DUE STAZIONI
+tratte_rientro(data, a, b)  # il rientro a vuoto: DA DOVE A DOVE, e quanto dura
+empty_leg_seconds(a, b)     # = somma delle durate delle sue tratte
 horizontal_empty_seconds(x, y)  # la singola tratta orizzontale
 bath_extra_seconds(station)
 slot_occupancy_seconds(station, bath)
+approach_position(station)  # dove sta il carroponte PRIMA della presa
+corsa_verticale(station)    # di quanto scende il gancio sotto la quota di trasporto
+quota_di_riposo(station)    # a che quota riposa il telaio
 ```
 
 `pick_time_at` **somma le fasi** invece di ricalcolare: al modello serve solo il
 totale, alla simulazione serve sapere dove sta il gancio istante per istante, e
-derivando l'uno dall'altre i due usi non possono divergere.
+derivando l'uno dall'altre i due usi non possono divergere. `tratte_rientro` fa
+la stessa cosa per il rientro a vuoto, e ne discendono tutte e tre le cose che
+se ne devono sapere: quanto dura, che aspetto ha, dove passa e quando (§5.3).
+
+**`approach_position` contro `station_position`.** Il punto di APPROCCIO e' dove
+il carroponte si trova prima di cominciare la presa e dopo aver finito il
+rilascio; la stazione e' dove sta il pezzo. Coincidono sempre, tranne sulle due
+tappe servite da una zona di cambio quota (§4.5). Per le distanze fra tratte del
+giro — durata delle mosse, rientri a vuoto, finestre di non collisione — si usa
+**sempre** il punto di approccio.
 
 ### 4.3 Il tempo in bagno — la definizione che e' stata sbagliata
 
@@ -206,6 +222,49 @@ va**. La scelta e' quindi determinata dalla geometria e non e' una decisione del
 solutore — ed e' questo che tiene le durate costanti e note prima di risolvere.
 Se una vasca non dichiara svincoli, li' il gancio sale e scende dov'e'.
 
+> Se da una parte lo svincolo manca si esce dall'altra, e allora **il rientro
+> torna indietro prima di ripartire**. Il percorso non e' monotono, e dedurre da
+> dove passa guardando solo i due estremi e' sbagliato: e' per questo che
+> `tratte_rientro` restituisce le tratte una per una.
+
+### 4.5 Le zone di cambio quota
+
+`ZonaCambioQuota` descrive un punto della rotaia in cui il carroponte cambia
+quota, per gli impianti in cui non puo' farlo sopra il carico e sopra lo
+scarico. Ce ne possono essere due, una per estremo:
+`ProblemData.cambio_quota_carico` e `cambio_quota_scarico`.
+
+**La scala verticale e' dichiarata dal basso**, e non e' quella interna: qui `0`
+e' la quota piu' bassa del carroponte e `corsa_totale` la cima, mentre nel
+modello la quota di trasporto vale `0` e si scende in negativo. La conversione
+sta tutta in `ZonaCambioQuota.quota_interna()` e nelle proprieta' `z_basso`,
+`z_int1`, `z_int2`: chi compila l'impianto misura da terra, non dalla trave.
+
+Il giro verso il carico e' sale-a-int1 → trasla → aggancia e solleva a int2 →
+torna → sale in cima, e verso lo scarico e' lo stesso a rovescio. **Sta tutto
+dentro `pick_phases` / `release_phases`**, traslazioni comprese, ed e' per
+questo che serve `LiftPhase.x_start` / `x_end` / `kin_x`: una fase puo' non
+essere solo verticale.
+
+Ne discendono tre conseguenze, tutte da tenere presenti:
+
+1. `approach_position` di quelle due tappe e' il punto di cambio quota. Il
+   tratto col pezzo comincia (o finisce) li'.
+2. **Durante la presa il carroponte NON e' fermo.** Vedi §5.3, che e' il posto
+   dove questa cosa fa danno.
+3. La presa non e' piu' un tratto solo: `_segmenti_fasi` la spezza in soste
+   (`pick` / `release`) e traslazioni (`quota`).
+
+La posizione dichiarata deve cadere **fra la stazione servita e quella accanto**,
+e `__post_init__` lo verifica. Porta due garanzie, non una: il carroponte non
+scavalca nessun'altra stazione per andarci, e il vai-e-torna dentro la presa si
+allontana dal resto della linea — quindi non lo avvicina a nessun confine di
+zona piu' di quanto gia' non lo sia il punto di cambio quota.
+
+La corsa verticale della vasca servita deve essere `0`: li' la corsa la
+definisce la zona (`corsa_telaio = intermediate2 - intermediate1`), e dichiararla
+due volte vorrebbe dire che uno dei due valori viene ignorato in silenzio.
+
 ---
 
 ## 5. Il modello CP-SAT (`solve`, in `model.py`)
@@ -249,20 +308,39 @@ Infittire il passo puo' solo far accettare soluzioni buone che prima venivano
 scartate, mai accettarne di pericolose. Costa un modello piu' grande.
 
 `near_boundary(zd, x_b, radius)` restituisce gli intervalli in cui un
-carroponte puo' trovarsi entro `radius` dal confine, partizionando il giro in
-blocchi in cui la distanza dal confine e' **monotona**. Il parametro `fermo` di
-`blocco()` e' li' per una ragione precisa:
+carroponte puo' trovarsi entro `radius` dal confine. Il giro di un periodo viene
+scomposto in **tratte elementari**, ciascuna di due specie sole:
 
-> **Il carroponte che sale o scende col gancio e' FERMO.** Se il modello lo
-> crede in movimento lo fa uscire dalla fascia troppo presto e lascia entrare il
-> vicino mentre e' ancora li'.
+| specie | com'e' fatta | come si tratta |
+| --- | --- | --- |
+| `fermo(t0, t1, a, b)` | il carroponte resta dentro l'intervallo di rotaia `[a,b]` | se `[a,b]` tocca la fascia, ci sta dentro tutto il tempo |
+| `traslazione(t0, t1, xa, xb)` | va da `xa` a `xb` senza inversioni | distanza monotona: bastano i due estremi, piu' il margine `escape_ticks` |
+
+Le tratte non si stimano: **vengono dalle stesse funzioni che le disegnano**.
+Presa e rilascio da `pick_phases` / `release_phases` (le fasi ferme consecutive
+sullo stesso punto si accorpano, cosi' su una linea normale ne esce una finestra
+sola, com'era prima); il rientro a vuoto da `tratte_rientro`, gli stessi tratti
+che `_segmenti_rientro` trasforma in `Segment`. Il vincolo protegge quindi il
+percorso vero, corse verticali e vai-e-torna compresi.
+
+> **Il carroponte che sale o scende col gancio e' FERMO, e quello che sembra
+> fermo puo' non esserlo.** Se il modello sbaglia una delle due cose, lascia
+> entrare il vicino mentre l'altro e' ancora li'.
 
 Questo errore e' stato commesso **due volte**: la prima con l'introduzione di
 `pick_time`/`release_time`, la seconda quando le corse a vuoto sono state
 spostate nel rientro senza riestendere le finestre. Il secondo caso dava
 **separazione zero** — due carroponti nello stesso punto con stato `OPTIMAL`.
-Se aggiungi una fase in cui il carroponte sta fermo vicino a un confine, quel
-tempo va sommato a `fermo`.
+
+Per un periodo la seconda e' stata tappata con un parametro `fermo`, che sommava
+in blocco il tempo verticale a tutti e due gli estremi del blocco. Era sicuro ma
+grossolano, e soprattutto **non copriva il rientro che torna indietro** (§4.4):
+li' gli estremi non limitano piu' la distanza, e il buco restava. Adesso non
+c'e' piu' nessuna stima — ogni tratta e' trattata per quello che e'.
+
+**Se aggiungi una fase alla presa, al rilascio o al rientro, non c'e' niente da
+aggiornare qui**: basta che la fase dichiari le sue posizioni. E' il punto di
+tutta la struttura.
 
 ---
 
@@ -281,7 +359,15 @@ Il parametro `incoerenze` decide il comportamento davanti a valori impossibili:
 
 `_segmenti_rientro` emette i cinque tratti del rientro **uno per uno** e non
 riassunti in uno: durante il giro il carroponte si spinge fino allo svincolo,
-che sta *oltre* la vasca, ed e' li' che puo' incontrare il vicino.
+che sta *oltre* la vasca, ed e' li' che puo' incontrare il vicino. I tratti li
+detta `tratte_rientro`, la stessa funzione che li detta al vincolo di non
+collisione.
+
+`_segmenti_fasi` fa la cosa analoga per presa e rilascio. Di norma ne esce un
+tratto solo (`pick` o `release`), identico a prima; se le fasi contengono una
+traslazione — cioe' con una zona di cambio quota — le soste e le traslazioni
+escono separate, e le seconde hanno `kind == "quota"`. Un tratto unico
+nasconderebbe un movimento vero, e chi campiona le posizioni lo crederebbe fermo.
 
 ### 6.1 I tre gradi di liberta', e la trappola del modulo
 
@@ -331,6 +417,13 @@ modello: ingombro pieno, ovunque, contro mezzo ingombro convertito in tempo alla
 sola stazione di confine. Per questo un `warning` di layout non e'
 necessariamente un difetto.
 
+Dove puo', misura **per una via diversa** dal modello. `_move_of_loaded_segment`
+riconosce una mossa dalla geometria degli estremi e non da `Segment.move`, cosi'
+un `move` sbagliato non si autoconferma; `_durata_traslazione_di_quota` confronta
+un tratto di cambio quota con la FASE che dovrebbe averlo generato, non con la
+cinematica scritta dentro il segmento — che e' proprio uno dei dati da
+verificare.
+
 **Regola d'oro**: se cambi una definizione in `model.py`, il verificatore deve
 essere aggiornato *pensando*, non copiando. Il valore di questo modulo sta
 tutto nel misurare le cose per una via diversa.
@@ -340,12 +433,13 @@ tutto nel misurare le cose per una via diversa.
 ## 8. `excel_io.py` — 1748 righe
 
 Un file di **ingresso** ha i fogli `Istruzioni`, `Vasche`, `Percorso`,
-`Parametri`, `Zone` (facoltativo), `Ciclogramma` (facoltativo).
+`Parametri`, `Zone` (facoltativo), `CambioQuota` (facoltativo), `Ciclogramma`
+(facoltativo).
 
 Il file dei **risultati** e' due cose insieme, in quest'ordine:
 
 ```text
-Input | Istruzioni Vasche Percorso Parametri Zone Ciclogramma
+Input | Istruzioni Vasche Percorso Parametri Zone CambioQuota Ciclogramma
 Output | Riepilogo Movimenti TempiVerticali FlussoPezzo Verifica
 ```
 
@@ -445,6 +539,10 @@ Diviso in due, apposta:
 
 - **`Simulazione`** — dato un istante dice dove sta ogni carroponte e ogni
   pezzo. Non importa tkinter: si prova senza finestre.
+  `_gruppo_verticale` dice a quale presa o rilascio appartiene un tratto e
+  **quando quel gruppo e' cominciato**: con una zona di cambio quota la presa e'
+  spezzata in piu' tratti, e il `t_start` del singolo non basta piu' a sapere a
+  che punto delle fasi si e' arrivati.
 - **`FinestraSimulazione`** — la finestra che la anima.
 
 Non calcola niente di nuovo: legge `segments_per_hoist` (i carroponti, con wrap
@@ -460,6 +558,14 @@ stanno tutti alla stessa altezza. Il rimappaggio vale identico per il gancio e
 per il telaio, altrimenti il pezzo si stacca dal bilancino — difetto del solo
 disegno, invisibile ai controlli sulle quote vere, e per questo c'e' un test
 che lo verifica **sulle coordinate disegnate**.
+
+Il denominatore del rimappaggio e' `corsa_verticale(stazione)`, non
+`lift_height_at`: su una zona di cambio quota il gancio scende fino in fondo
+alla corsa del carroponte, e le quote in gioco diventano quattro (fondo,
+intermediate1, intermediate2, cima) invece di due. Con la corsa giusta al
+denominatore il disegno regge senza altri casi particolari — e le due stazioni
+si disegnano come POSTAZIONI e non come vasche, perche' la loro
+`Tank.lift_height` vale zero.
 
 **Le corsie.** Piu' pezzi nella stessa vasca si disegnavano nello stesso punto e
 sembravano uno solo. `_corsia(pezzo, stazione)` li affianca. I posti li detta il
@@ -479,18 +585,24 @@ esterna avvia una seconda catena e le catene si moltiplicano.
 
 ---
 
-## 11. I test — 333 asserzioni, cinque suite
+## 11. I test — 386 asserzioni, cinque suite
 
 Nessun pytest: ogni file si lancia da solo, stampa cosa ha provato e restituisce
 un codice d'uscita.
 
 | file | asserzioni | richiede | domanda a cui risponde |
 | --- | ---: | --- | --- |
-| `test_verify.py` | 80 | — | il verificatore trova davvero quello che deve? |
-| `test_excel_io.py` | 83 | — | un file compilato male viene respinto con un messaggio utile? |
-| `test_simulazione.py` | 59 | — | la simulazione mostra il ciclogramma che c'e'? |
-| `test_model.py` | 35 | OR-Tools | il modello produce soluzioni fisicamente valide? |
+| `test_verify.py` | 98 | — | il verificatore trova davvero quello che deve? |
+| `test_excel_io.py` | 89 | — | un file compilato male viene respinto con un messaggio utile? |
+| `test_simulazione.py` | 64 | — | la simulazione mostra il ciclogramma che c'e'? |
+| `test_model.py` | 40 | OR-Tools | il modello produce soluzioni fisicamente valide? |
 | `test_interfaccia.py` | 95 | OR-Tools + grafica | l'interfaccia si comporta come deve? |
+
+> `test_model.py` risolve davvero, con limiti di tempo dell'ordine del minuto.
+> Su una macchina occupata un caso puo' scadere e restituire `UNKNOWN`: e'
+> l'unico modo in cui questa suite fallisce senza che ci sia un difetto, e si
+> riconosce perche' il messaggio dice `UNKNOWN` invece di `INFEASIBLE` o di una
+> violazione. Rilanciarlo da solo.
 
 Tre principi che vale la pena mantenere:
 
@@ -509,8 +621,12 @@ Tre principi che vale la pena mantenere:
 
 Queste sono costate tempo. Valgono piu' di qualunque descrizione di funzione.
 
-**Il carroponte fermo che il modello crede in moto.** §5.3. Commesso due volte.
-Sintomo: `OPTIMAL` con separazione sotto il minimo.
+**Il carroponte fermo che il modello crede in moto — e viceversa.** §5.3.
+Commesso due volte, in tutte e due le direzioni: prima le fasi verticali
+credute movimento, poi il rientro che torna indietro e la presa che con una
+zona di cambio quota non e' piu' una sosta. Sintomo: `OPTIMAL` con separazione
+sotto il minimo. La difesa strutturale e' che le finestre del vincolo vengano
+dalle stesse funzioni che disegnano il giro, mai da una copia.
 
 **Il modulo su un multiplo esatto del takt.** §6.1. Sintomo: un file riaperto
 diventa incoerente, con attese lunghe un periodo.
@@ -543,6 +659,17 @@ coincidono al numero, sospetta che la seconda non stia misurando niente — e'
 successo, con un monkeypatch che non agganciava (`AddNoOverlap` e' un alias di
 `add_no_overlap` in questa versione di OR-Tools).
 
+> Ultimo sweep, sulle zone di cambio quota: 192 configurazioni (punto di cambio
+> quota a distanze crescenti dal confine, con e senza traslazione a gancio
+> basso), **0 collisioni** su 121 risolte col vincolo attivo, **51** col vincolo
+> disattivato — la peggiore a separazione zero contro 1200 mm richiesti.
+
+**`UNKNOWN` non e' `INFEASIBLE`.** `test_model.py` risolve davvero: su una
+macchina occupata un caso scade e restituisce `UNKNOWN`, e il test fallisce
+senza che ci sia niente di rotto. Prima di mettersi a cercare un difetto,
+guardare quale delle due parole c'e' nel messaggio e rilanciare la suite da
+sola.
+
 ---
 
 ## 13. Come aggiungere qualcosa
@@ -554,9 +681,16 @@ messaggio che dice cosa fare → riga in `_PARAMETRI` di `excel_io.py` → lettu
 
 **Una durata nuova**: solo in §4.2, mai duplicata altrove.
 
+**Una fase nuova nella presa, nel rilascio o nel rientro**: si aggiunge in
+`pick_phases` / `release_phases` / `tratte_rientro`, dichiarando le posizioni se
+comporta uno spostamento. Durata, disegno e vincolo di non collisione la
+raccolgono da soli (§5.3). Se ti trovi ad aggiornare `near_boundary` a mano,
+fermati: vuol dire che la fase non ha detto dove passa.
+
 **Un tipo di segmento nuovo**: `_STYLE` in `plotting.py` (la riga che lo disegna
 va in `KeyError` altrimenti), `_STATIONARY_KINDS` o `_MOVING_KINDS` in
-`verify.py`, `_fase_verticale` in `simulazione.py`.
+`verify.py`, `_FASI` in `excel_io.py` (altrimenti il foglio Movimenti stampa il
+nome interno), `_fase_verticale` in `simulazione.py`.
 
 **Un controllo nuovo nel verificatore**: e un caso in `test_verify.py` che lo
 faccia scattare, altrimenti non sai se funziona.

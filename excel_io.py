@@ -29,14 +29,19 @@ from dataclasses import dataclass
 from typing import Optional
 
 from kinematics import Kinematics
-from model import HoistZone, ProblemData, StationSpec, Tank
+from model import HoistZone, ProblemData, StationSpec, Tank, ZonaCambioQuota
 
 FOGLIO_ISTRUZIONI = "Istruzioni"
 FOGLIO_VASCHE = "Vasche"
 FOGLIO_PERCORSO = "Percorso"
 FOGLIO_PARAMETRI = "Parametri"
 FOGLIO_ZONE = "Zone"
+FOGLIO_CAMBIO_QUOTA = "CambioQuota"
 FOGLIO_CICLOGRAMMA = "Ciclogramma"
+
+# Le due zone di cambio quota, nell'ordine in cui compaiono sul foglio.
+# L'etichetta e' quella che l'utente scrive nella prima colonna.
+_VERSI_CAMBIO_QUOTA = ("carico", "scarico")
 
 # nome parametro -> (unita', obbligatorio, default, descrizione)
 _PARAMETRI = {
@@ -290,6 +295,11 @@ def leggi_problema(percorso_file: str) -> Configurazione:
         if FOGLIO_ZONE in wb.sheetnames
         else None
     )
+    cambio_quota = (
+        _leggi_cambio_quota(wb[FOGLIO_CAMBIO_QUOTA], errori)
+        if FOGLIO_CAMBIO_QUOTA in wb.sheetnames
+        else {v: None for v in _VERSI_CAMBIO_QUOTA}
+    )
     ciclogramma = (
         _leggi_ciclogramma(wb[FOGLIO_CICLOGRAMMA], len(route) - 1, errori)
         if FOGLIO_CICLOGRAMMA in wb.sheetnames
@@ -329,6 +339,8 @@ def leggi_problema(percorso_file: str) -> Configurazione:
             empty_hook_travels_low=bool(par["traslazione_con_gancio_basso"]),
 
             clearance_step_mm=par["passo_controllo_distanza_mm"],
+            cambio_quota_carico=cambio_quota["carico"],
+            cambio_quota_scarico=cambio_quota["scarico"],
         )
     except ValueError as e:
         # le validazioni di ProblemData sono gia' scritte per un umano:
@@ -665,6 +677,68 @@ def _leggi_zone(ws, n_moves: int, errori: _Errori) -> Optional[list[HoistZone]]:
     return zone
 
 
+def _leggi_cambio_quota(
+    ws, errori: _Errori
+) -> dict[str, Optional[ZonaCambioQuota]]:
+    """Le due zone di cambio quota, per etichetta ('carico' / 'scarico').
+
+    Il foglio e' facoltativo, e lo sono anche le sue due righe: quasi nessun
+    impianto ne ha, e chi non ne ha lascia il foglio vuoto. Una riga scritta a
+    meta' invece e' un errore -- servono tutti e quattro i numeri, perche' con
+    tre di essi il giro non e' definito."""
+    fuori: dict[str, Optional[ZonaCambioQuota]] = {v: None for v in _VERSI_CAMBIO_QUOTA}
+    for riga in range(2, ws.max_row + 1):
+        etichetta = _testo(ws.cell(riga, 1).value).lower()
+        celle = [ws.cell(riga, c).value for c in range(2, 6)]
+        vuote = all(
+            c is None or (isinstance(c, str) and not c.strip()) for c in celle
+        )
+        if not etichetta and vuote:
+            continue
+        if etichetta not in _VERSI_CAMBIO_QUOTA:
+            errori.aggiungi(
+                FOGLIO_CAMBIO_QUOTA,
+                f"A{riga}",
+                (
+                    "manca il nome della zona"
+                    if not etichetta
+                    else f"zona '{ws.cell(riga, 1).value}' sconosciuta"
+                )
+                + ": le zone di cambio quota possono essere solo 'carico' "
+                "(fra il carico e la prima vasca) e 'scarico' (fra l'ultima "
+                "vasca e lo scarico). Lascia il foglio vuoto se l'impianto "
+                "non ne ha.",
+            )
+            continue
+        if fuori[etichetta] is not None:
+            errori.aggiungi(
+                FOGLIO_CAMBIO_QUOTA, f"A{riga}", f"zona '{etichetta}' ripetuta"
+            )
+            continue
+        valori = [
+            _numero(cella, FOGLIO_CAMBIO_QUOTA, f"{lettera}{riga}", nome, errori)
+            for cella, lettera, nome in zip(
+                celle,
+                "BCDE",
+                (
+                    "posizione",
+                    "intermediate1",
+                    "intermediate2",
+                    "corsa totale",
+                ),
+            )
+        ]
+        if any(v is None for v in valori):
+            continue
+        fuori[etichetta] = ZonaCambioQuota(
+            position=valori[0],
+            intermediate1=valori[1],
+            intermediate2=valori[2],
+            corsa_totale=valori[3],
+        )
+    return fuori
+
+
 # --------------------------------------------------------------------------
 # Generazione del file modello
 # --------------------------------------------------------------------------
@@ -715,7 +789,9 @@ def _righe_esempio():
         "max_carroponti": 4,
         "tempo_limite_per_tentativo_s": 15,
     }
-    return vasche, percorso, parametri, None
+    # La linea d'esempio non ha zone di cambio quota: il foglio nasce vuoto,
+    # con le sole intestazioni, cosi' si vede che c'e' e cosa vorrebbe.
+    return vasche, percorso, parametri, None, None
 
 
 def _righe_da_configurazione(cfg: Configurazione):
@@ -767,7 +843,15 @@ def _righe_da_configurazione(cfg: Configurazione):
         if cfg.zone_manuali is None
         else [(z.lo, z.hi) for z in cfg.zone_manuali]
     )
-    return vasche, percorso, parametri, zone
+    cambio_quota = [
+        (verso, z.position, z.intermediate1, z.intermediate2, z.corsa_totale)
+        for verso, z in (
+            ("carico", d.cambio_quota_carico),
+            ("scarico", d.cambio_quota_scarico),
+        )
+        if z is not None
+    ] or None
+    return vasche, percorso, parametri, zone, cambio_quota
 
 
 def scrivi_modello(percorso_file: str) -> str:
@@ -814,6 +898,7 @@ def _aggiungi_fogli_linea(
     percorso,
     parametri,
     zone=None,
+    cambio_quota=None,
     data=None,
     ciclogramma=None,
 ):
@@ -961,6 +1046,74 @@ def _aggiungi_fogli_linea(
             None,
         ),
         ("", None),
+        (f"Foglio {FOGLIO_CAMBIO_QUOTA} (facoltativo)", titolo_par),
+        (
+            "LASCIALO VUOTO se il carroponte puo' salire e scendere dove si "
+            "trova: e' il caso normale.",
+            None,
+        ),
+        (
+            "Serve agli impianti in cui, sopra il carico e sopra lo scarico, il "
+            "carroponte non puo'",
+            None,
+        ),
+        (
+            "cambiare quota e deve prima portarsi in un punto dedicato. Al "
+            "massimo due righe:",
+            None,
+        ),
+        (
+            "  zona          'carico' (fra il carico e la prima vasca) oppure "
+            "'scarico' (fra",
+            None,
+        ),
+        ("                l'ultima vasca e lo scarico)", None),
+        (
+            "  posizione_mm  dove sta il punto di cambio quota sulla rotaia. Deve "
+            "cadere FRA la",
+            None,
+        ),
+        ("                stazione servita e quella accanto", None),
+        (
+            "Le tre quote si misurano DAL BASSO: 0 e' la posizione piu' bassa del "
+            "carroponte,",
+            None,
+        ),
+        ("cioe' quella a cui gia' trasla quando viaggia col gancio calato.", None),
+        (
+            "  intermediate1_mm  quota a cui il gancio arriva alla stazione, e a "
+            "cui vi posa il telaio",
+            None,
+        ),
+        (
+            "  intermediate2_mm  quota a cui il telaio viene sollevato prima di "
+            "lasciare la stazione",
+            None,
+        ),
+        ("  corsa_totale_mm   distanza da 0 fino alla cima", None),
+        (
+            "Verso il CARICO il carroponte fa: trasla al punto di cambio quota, "
+            "sale a intermediate1,",
+            None,
+        ),
+        (
+            "va al carico, prende il pezzo salendo a intermediate2, torna al punto "
+            "di cambio quota",
+            None,
+        ),
+        (
+            "e sale in cima. Verso lo SCARICO fa lo stesso giro al contrario. Il "
+            "tempo di tutto il",
+            None,
+        ),
+        ("giro e' contato nella presa (o nel rilascio) di quella stazione.", None),
+        (
+            "La corsa della vasca di carico e di scarico deve essere 0: li' la "
+            "corsa la definisce",
+            None,
+        ),
+        ("questo foglio (il telaio va da intermediate1 a intermediate2).", None),
+        ("", None),
         (f"Foglio {FOGLIO_CICLOGRAMMA} (facoltativo)", titolo_par),
         (
             "Lo scrive il programma quando salvi, e serve a RIPRENDERE il lavoro: "
@@ -1054,6 +1207,31 @@ def _aggiungi_fogli_linea(
         )
         ws.cell(2, 4).font = nota
 
+    # -- CambioQuota (facoltativo) ---------------------------------------
+    ws = wb.create_sheet(FOGLIO_CAMBIO_QUOTA)
+    prepara(
+        ws,
+        [
+            "zona",
+            "posizione_mm",
+            "intermediate1_mm",
+            "intermediate2_mm",
+            "corsa_totale_mm",
+            "",
+            "note",
+        ],
+        [12, 14, 18, 18, 18, 4, 80],
+    )
+    if cambio_quota:
+        for riga in cambio_quota:
+            ws.append(list(riga))
+    else:
+        ws.cell(2, 7).value = (
+            "Vuoto = il carroponte sale e scende dove vuole, che e' il caso "
+            "normale. Vedi il foglio Istruzioni."
+        )
+        ws.cell(2, 7).font = nota
+
     # -- Ciclogramma (facoltativo) ---------------------------------------
     if ciclogramma is not None and data is not None:
         _scrivi_foglio_ciclogramma(
@@ -1136,8 +1314,10 @@ _FASI = {
     "release": "rilascio nella vasca",
     "empty": "spostamento a vuoto",
     "wait": "attesa",
+    "lift_empty": "corsa verticale a vuoto",
+    "quota": "traslazione di cambio quota",
 }
-_FASI_IN_MOVIMENTO = {"loaded", "empty"}
+_FASI_IN_MOVIMENTO = {"loaded", "empty", "quota"}
 
 _SEVERITA = {"error": "ERRORE", "warning": "avviso", "info": "nota"}
 
@@ -1155,7 +1335,14 @@ def _mosse_dei_segmenti(segs: list) -> list[int]:
             i += 1
             prossimo = i + 1
             out.append(i)
-        elif s.kind == "pick":
+        elif s.kind == "pick" or (
+            # una traslazione di cambio quota PRIMA del trasporto fa parte
+            # della presa, e quindi della mossa che sta per iniziare; quella
+            # dopo fa parte del rilascio, come tutto il resto
+            s.kind == "quota"
+            and prossimo < len(indici_loaded)
+            and j < indici_loaded[prossimo]
+        ):
             out.append(min(prossimo, len(indici_loaded) - 1))
         else:
             out.append(max(i, 0))
@@ -1171,6 +1358,9 @@ def _righe_movimenti(data: ProblemData, solution) -> list[list]:
         ordine = plan.order
         n = len(ordine)
         appartenenza = _mosse_dei_segmenti(segs)
+        # dove sta, nella lista, il trasporto di ciascuna mossa: separa le
+        # traslazioni di cambio quota della presa da quelle del rilascio
+        indice_loaded = {s.move: j for j, s in enumerate(segs) if s.kind == "loaded"}
         for j, seg in enumerate(segs):
             i = appartenenza[j]
             k = ordine[i]
@@ -1180,6 +1370,11 @@ def _righe_movimenti(data: ProblemData, solution) -> list[list]:
                 st_da, st_a = k, k + 1
             elif seg.kind == "release":
                 st_da = st_a = k + 1
+            elif seg.kind == "quota":
+                j_trasporto = indice_loaded.get(seg.move)
+                st_da = st_a = (
+                    k if j_trasporto is not None and j < j_trasporto else k + 1
+                )
             elif seg.kind == "empty":
                 st_da, st_a = k + 1, ordine[(i + 1) % n]
             else:  # attesa: fermo su una stazione, o prima o dopo il rientro
@@ -1233,6 +1428,9 @@ _COSA_CONTIENE = {
     FOGLIO_PERCORSO: "la ricetta: in che ordine il pezzo visita le vasche, e per quanto",
     FOGLIO_PARAMETRI: "carroponti, tolleranze, distanze di sicurezza",
     FOGLIO_ZONE: "quale carroponte serve quale tratto di linea (facoltativo)",
+    FOGLIO_CAMBIO_QUOTA: (
+        "dove il carroponte cambia quota agli estremi della linea (facoltativo)"
+    ),
     FOGLIO_CICLOGRAMMA: "il ciclogramma nei suoi tre gradi di liberta', per riprenderlo",
     "Riepilogo": "takt time, produttivita', carroponti, esito della verifica",
     "Movimenti": "ogni tratto di ogni carroponte: quando, da dove, a dove",
@@ -1515,19 +1713,38 @@ def scrivi_risultati(
         def quanto(nome):
             return durate.get(nome, 0.0)
 
+        tot_presa = round(sum(f.duration for f in presa), 3)
+        tot_rilascio = round(sum(f.duration for f in rilascio), 3)
+        # Quello che non sta in nessuna colonna con un nome: le salite, le
+        # discese e le due traslazioni del giro di CAMBIO QUOTA. Si ricava per
+        # differenza, e non elencando altre quattro colonne che sarebbero
+        # vuote su ogni linea normale. Cosi' la colonna in maiuscolo resta la
+        # somma di quelle alla sua sinistra -- che e' la sola cosa che chi
+        # legge questo foglio verifica a occhio.
+        nominate_presa = sum(
+            quanto(n)
+            for n in ("discesa del gancio", "aggancio", "sollevamento del telaio",
+                      "sgocciolamento")
+        )
+        nominate_rilascio = sum(
+            quanto(n)
+            for n in ("immersione del telaio", "sgancio", "risalita del gancio")
+        )
         righe.append(
             [
                 tid,
-                data.lift_height_at(s),
+                round(data.corsa_verticale(s), 1),
                 quanto("discesa del gancio"),
                 quanto("aggancio"),
                 quanto("sollevamento del telaio"),
                 quanto("sgocciolamento"),
-                round(sum(f.duration for f in presa), 3),
+                round(tot_presa - nominate_presa, 3),
+                tot_presa,
                 quanto("immersione del telaio"),
                 quanto("sgancio"),
                 quanto("risalita del gancio"),
-                round(sum(f.duration for f in rilascio), 3),
+                round(tot_rilascio - nominate_rilascio, 3),
+                tot_rilascio,
             ]
         )
     tabella(
@@ -1539,15 +1756,17 @@ def scrivi_risultati(
             "aggancio [s]",
             "sollevamento [s]",
             "sgocciolamento [s]",
+            "cambio quota [s]",
             "PRESA totale [s]",
             "immersione [s]",
             "sgancio [s]",
             "risalita gancio [s]",
+            "cambio quota [s]",
             "RILASCIO totale [s]",
         ],
-        [20, 12, 18, 13, 17, 18, 17, 15, 12, 18, 19],
+        [20, 12, 18, 13, 17, 18, 17, 17, 15, 12, 18, 17, 19],
         righe,
-        formati={c: "0.00" for c in range(2, 12)},
+        formati={c: "0.00" for c in range(2, 14)},
     )
     ws.append([])
     ws.append(
@@ -1559,6 +1778,14 @@ def scrivi_risultati(
             "nel foglio Movimenti."
         ]
     )
+    ws.append(
+        [
+            "La colonna 'cambio quota' e' zero ovunque, tranne sul carico e "
+            "sullo scarico di un impianto che ha una zona di cambio quota: li' "
+            "raccoglie le salite, le discese e le due traslazioni del giro."
+        ]
+    )
+    ws.cell(ws.max_row, 1).font = Font(italic=True, color="808080")
     ws.cell(ws.max_row, 1).font = Font(italic=True, color="808080")
 
     # -- Flusso del pezzo ------------------------------------------------

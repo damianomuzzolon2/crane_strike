@@ -42,12 +42,15 @@ _STYLE = {
     # salita/discesa del gancio scarico su una posizione di svincolo: il
     # carroponte e' fermo, orizzontalmente non si muove
     "lift_empty": dict(linewidth=_LARGHEZZA, zorder=2),
+    # andata e ritorno fra il punto di cambio quota e la stazione, dentro una
+    # presa o un rilascio: e' una traslazione vera, e si disegna come tale
+    "quota": dict(linewidth=_LARGHEZZA, zorder=3),
 }
 _HOIST_COLORS = ["#c0392b", "#2980b9", "#27ae60", "#8e44ad", "#d35400", "#16a085"]
 
 # I tratti in cui il carroponte trasla davvero lungo la rotaia. Presa,
 # rilascio, attesa e corse verticali no: li' e' fermo.
-_KINEMATIC_KINDS = {"loaded", "empty"}
+_KINEMATIC_KINDS = {"loaded", "empty", "quota"}
 
 # Stati che dichiarano esplicitamente l'assenza di una soluzione: gli unici
 # per cui non c'e' proprio niente da disegnare.
@@ -74,18 +77,29 @@ def _sample_segment(seg: Segment, n=25):
     return ts, xs
 
 
-def _durata_fase(fasi, nome: str) -> float:
-    return sum(f.duration for f in fasi if f.name == nome)
+def _aggancio_dall_inizio_presa(data: ProblemData, stazione: int) -> float:
+    """Quando il telaio si stacca dal fondo, contato dall'INIZIO della presa.
+
+    Si legge dalle fasi, non sottraendo sgocciolamento e sollevamento dalla
+    fine: con una zona di cambio quota la presa contiene anche due traslazioni
+    e una seconda salita, e il conto all'indietro metterebbe il punto in un
+    istante in cui il carroponte non e' nemmeno sopra la stazione."""
+    t = 0.0
+    for f in data.pick_phases(stazione):
+        if f.name == "sollevamento del telaio":
+            break
+        t += f.duration
+    return t
 
 
-def _sollevamento(data: ProblemData, stazione: int) -> float:
-    """Quanto dura il sollevamento del telaio nella presa a quella stazione."""
-    return _durata_fase(data.pick_phases(stazione), "sollevamento del telaio")
-
-
-def _immersione(data: ProblemData, stazione: int) -> float:
-    """Quanto dura l'immersione del telaio nel rilascio a quella stazione."""
-    return _durata_fase(data.release_phases(stazione), "immersione del telaio")
+def _immersione_dall_inizio_rilascio(data: ProblemData, stazione: int) -> float:
+    """Quando il telaio torna in vasca, contato dall'INIZIO del rilascio."""
+    t = 0.0
+    for f in data.release_phases(stazione):
+        t += f.duration
+        if f.name == "immersione del telaio":
+            break
+    return t
 
 
 def math_sign(v: float) -> float:
@@ -163,19 +177,23 @@ def plot_cyclogram(
         color = _HOIST_COLORS[h % len(_HOIST_COLORS)]
         eventi_t, eventi_x = [], []
         for seg in segs:
-            if seg.kind == "pick":
-                # il telaio si stacca dal fondo quando finisce l'aggancio
+            if seg.kind == "loaded" and seg.move is not None:
+                # I due istanti in cui il telaio cambia mano. Si ricavano dal
+                # tratto A CARICO, che c'e' sempre ed e' uno solo per mossa:
+                # presa e rilascio invece possono essere spezzati in piu'
+                # tratti da una zona di cambio quota, e prenderli uno per uno
+                # moltiplicherebbe i punti.
+                k = seg.move
+                inizio_presa = seg.t_start - data.pick_time_at(k)
                 eventi_t.append(
-                    seg.t_end
-                    - data.drain_time_at(seg.move)
-                    - _sollevamento(data, seg.move)
+                    inizio_presa + _aggancio_dall_inizio_presa(data, k)
                 )
-                eventi_x.append(seg.x_start)
-            elif seg.kind == "release":
-                # e torna alla vasca quando finisce l'immersione
-                eventi_t.append(seg.t_start + _immersione(data, seg.move + 1))
-                eventi_x.append(seg.x_end)
-            elif seg.kind in _KINEMATIC_KINDS and seg.x_end != seg.x_start:
+                eventi_x.append(data.station_position(k))
+                eventi_t.append(
+                    seg.t_end + _immersione_dall_inizio_rilascio(data, k + 1)
+                )
+                eventi_x.append(data.station_position(k + 1))
+            if seg.kind in _KINEMATIC_KINDS and seg.x_end != seg.x_start:
                 # una traslazione vera: si parte da una parte e si arriva
                 # dall'altra. I tratti di lunghezza nulla non sono partenze.
                 eventi_t.extend([seg.t_start, seg.t_end])

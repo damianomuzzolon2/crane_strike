@@ -727,6 +727,87 @@ def test_disegno_casi_limite():
             pass
 
 
+def test_cambio_quota():
+    """Con una zona di CAMBIO QUOTA il carroponte, durante la presa, non sta
+    fermo: esce dal punto di cambio quota, va alla stazione e torna. La
+    simulazione lo deve mostrare -- ed e' il caso in cui il telaio rischia di
+    staccarsi dal bilancino, perche' adesso si sposta anche lui."""
+    print("\n[10] zone di cambio quota")
+    import dataclasses
+
+    from model import ZonaCambioQuota
+
+    base = dati_prova()
+    tanks = dict(base.tanks)
+    for nome in ("CARICO", "SCARICO"):
+        tanks[nome] = dataclasses.replace(tanks[nome], lift_height=0.0, drain_time=0.0)
+    d = dataclasses.replace(
+        base,
+        tanks=tanks,
+        cambio_quota_carico=ZonaCambioQuota(2000.0, 500.0, 1700.0, 2600.0),
+        cambio_quota_scarico=ZonaCambioQuota(12000.0, 300.0, 1500.0, 2600.0),
+    )
+    sol, dati = proposta_semplice(d)
+    sim = Simulazione(dati, sol)
+
+    # -- il carroponte ci va davvero, e ci torna -------------------------
+    x_min, x_max, quote_carico = None, None, []
+    fasi = set()
+    orfani, scarto = 0, 0.0
+    for _, ist in campioni(sim, 2000):
+        for c in ist.carri:
+            fasi.add(c.fase)
+            if x_min is None or c.x < x_min:
+                x_min = c.x
+            if x_max is None or c.x > x_max:
+                x_max = c.x
+            if abs(c.x) < 1e-6:
+                quote_carico.append(c.z)
+        appesi = [p for p in ist.pezzi if p.appeso]
+        portanti = [c for c in ist.carri if c.con_pezzo]
+        for p in appesi:
+            vicino = min(
+                (
+                    abs(c.x - p.x) + abs(c.z - p.z) + abs(c.corsia - p.corsia)
+                    for c in portanti
+                ),
+                default=None,
+            )
+            if vicino is None:
+                orfani += 1
+            else:
+                scarto = max(scarto, vicino)
+
+    check(
+        abs(x_min) < 1e-6 and abs(x_max - 15000.0) < 1e-6,
+        f"il carroponte arriva fino al carico e allo scarico "
+        f"({x_min:.0f} - {x_max:.0f} mm), non si ferma ai punti di cambio quota",
+    )
+    check(
+        {"traslazione alla stazione", "traslazione al cambio quota"} <= fasi,
+        f"e le due traslazioni del giro si vedono per quello che sono ({sorted(fasi & {'traslazione alla stazione', 'traslazione al cambio quota'})})",
+    )
+    # sopra il carico il gancio sta fra le due quote intermedie, mai in cima
+    # e mai in fondo: e' li' che il giro serve
+    z = d.cambio_quota_carico
+    check(
+        quote_carico
+        and min(quote_carico) >= z.z_int1 - 1e-6
+        and max(quote_carico) <= z.z_int2 + 1e-6,
+        f"sopra il carico il gancio resta fra intermediate1 e intermediate2 "
+        f"({min(quote_carico):.0f} .. {max(quote_carico):.0f} mm su "
+        f"{z.z_int1:.0f} .. {z.z_int2:.0f})",
+    )
+
+    # -- e il telaio resta appeso al gancio anche mentre traslano insieme --
+    check(orfani == 0, f"nessun pezzo appeso al nulla ({orfani} casi)")
+    check(
+        scarto < 1e-9,
+        f"il telaio sta esattamente dove sta il gancio, giro compreso "
+        f"(scarto max {scarto:.2e} mm)",
+    )
+
+
 def main() -> int:
     d = dati_prova()
     test_fasi_verticali(d)
@@ -738,6 +819,7 @@ def main() -> int:
     test_assegnazione_parziale(d)
     test_vasca_a_piu_posti()
     test_gancio_resta_giu(d)
+    test_cambio_quota()
     try:
         test_finestra(d)
         test_disegno_casi_limite()

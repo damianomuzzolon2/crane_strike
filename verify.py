@@ -50,12 +50,15 @@ from typing import Optional
 from kinematics import position_profile, profile_breakpoints
 from model import HoistPlan, ProblemData, Segment, Solution, zone_layout_conflicts
 
-# Tipi di segmento in cui il carroponte e' fermo orizzontalmente. Tenuto come
-# insieme (e non come confronto == "wait") perche' in seguito si aggiungeranno
-# le fasi verticali di presa/rilascio, anch'esse a posizione costante.
+# Tipi di segmento in cui il carroponte e' fermo orizzontalmente: l'attesa, le
+# fasi verticali di presa e rilascio, e la corsa del gancio scarico su uno
+# svincolo. Tenuto come insieme, e non come confronto == "wait", perche' i tipi
+# fermi sono cresciuti nel tempo e cresceranno ancora.
 _STATIONARY_KINDS = {"wait", "pick", "release", "lift_empty"}
-# Tipi di segmento che descrivono una traslazione orizzontale vera.
-_MOVING_KINDS = {"loaded", "empty"}
+# Tipi di segmento che descrivono una traslazione orizzontale vera. 'quota' e'
+# l'andata (o il ritorno) fra il punto di cambio quota e la stazione, dentro
+# una presa o un rilascio: e' dentro la presa, ma il carroponte si muove.
+_MOVING_KINDS = {"loaded", "empty", "quota"}
 # Stati che dichiarano esplicitamente l'assenza di una soluzione.
 _STATI_SENZA_SOLUZIONE = {"INFEASIBLE", "MODEL_INVALID", "UNKNOWN", "NOT_SOLVED"}
 
@@ -366,12 +369,12 @@ def _resolve_plans(
         # dep_hi / arr_lo: partenza dal confine alto e arrivo al confine basso
         dep_hi = next(
             (s.t_start for s in segs if s.kind == "empty" and _at(
-                s.x_start, data.station_position(zone.hi + 1))),
+                s.x_start, data.approach_position(zone.hi + 1))),
             float("nan"),
         )
         arr_lo = next(
             (s.t_end for s in segs if s.kind == "empty" and _at(
-                s.x_end, data.station_position(zone.lo))),
+                s.x_end, data.approach_position(zone.lo))),
             float("nan"),
         )
         plans.append(HoistPlan(zone, order, local_pick, finish, dep_hi, arr_lo))
@@ -385,9 +388,16 @@ def _at(x: float, target: float, tol: float = 1e-6) -> bool:
 def _move_of_loaded_segment(
     data: ProblemData, zone, seg: Segment, tol: float = 1e-6
 ) -> Optional[int]:
+    """A quale mossa appartiene un tratto a carico, riconosciuto dai suoi
+    estremi. Sono i punti di APPROCCIO: con una zona di cambio quota il tratto
+    col pezzo parte (o finisce) sul punto di cambio quota, non sulla stazione.
+
+    Si riconosce dalla geometria e non da `seg.move` apposta: il verificatore
+    deve poter controllare anche una traiettoria che il modello non ha
+    prodotto, dove `move` potrebbe essere sbagliato o assente."""
     for k in range(zone.lo, zone.hi + 1):
-        if _at(seg.x_start, data.station_position(k), tol) and _at(
-            seg.x_end, data.station_position(k + 1), tol
+        if _at(seg.x_start, data.approach_position(k), tol) and _at(
+            seg.x_end, data.approach_position(k + 1), tol
         ):
             return k
     return None
@@ -598,6 +608,33 @@ def _check_per_hoist(data, solution, plans, T, time_tol, add) -> list[_Trajector
                         bound=atteso,
                         slack=durata - atteso,
                     )
+            elif s.kind == "quota":
+                atteso = _durata_traslazione_di_quota(data, s)
+                durata = s.t_end - s.t_start
+                if atteso is None:
+                    add(
+                        "segment_duration",
+                        "error",
+                        f"traslazione di cambio quota da {s.x_start:.0f} a "
+                        f"{s.x_end:.0f} mm che non corrisponde a nessuna fase "
+                        f"di presa o di rilascio",
+                        hoists=(h,),
+                        t=s.t_start,
+                    )
+                elif abs(durata - atteso) > time_tol:
+                    add(
+                        "segment_duration",
+                        "error",
+                        f"la traslazione di cambio quota da {s.x_start:.0f} a "
+                        f"{s.x_end:.0f} mm dura {durata:.3f}s invece di "
+                        f"{atteso:.3f}s",
+                        hoists=(h,),
+                        move=s.move,
+                        t=s.t_start,
+                        value=durata,
+                        bound=atteso,
+                        slack=durata - atteso,
+                    )
             elif s.kind not in _STATIONARY_KINDS:
                 add(
                     "continuity",
@@ -644,14 +681,46 @@ def _check_per_hoist(data, solution, plans, T, time_tol, add) -> list[_Trajector
 
 def _leg_duration(segs: list[Segment], i: int) -> float:
     """Durata totale della mossa il cui tratto a carico e' segs[i]: comprende
-    le eventuali fasi verticali immediatamente adiacenti (presa prima del
-    trasporto, rilascio dopo)."""
-    t_start, t_end = segs[i].t_start, segs[i].t_end
-    if i > 0 and segs[i - 1].kind == "pick":
-        t_start = segs[i - 1].t_start
-    if i + 1 < len(segs) and segs[i + 1].kind == "release":
-        t_end = segs[i + 1].t_end
-    return t_end - t_start
+    le fasi verticali immediatamente adiacenti (presa prima del trasporto,
+    rilascio dopo) e, dove c'e' una zona di cambio quota, anche le traslazioni
+    che stanno DENTRO la presa e dentro il rilascio.
+
+    Ci si allarga finche' i tratti dichiarano la stessa mossa: e' l'unico
+    criterio che regge quando presa e rilascio sono spezzati in piu' tratti.
+    Attesa e rientro a vuoto non dichiarano nessuna mossa, quindi fermano da
+    soli l'allargamento."""
+    k = segs[i].move
+    if k is None:
+        return segs[i].t_end - segs[i].t_start
+    a = i
+    while a > 0 and segs[a - 1].move == k and segs[a - 1].kind in ("pick", "quota"):
+        a -= 1
+    b = i
+    while (
+        b + 1 < len(segs)
+        and segs[b + 1].move == k
+        and segs[b + 1].kind in ("release", "quota")
+    ):
+        b += 1
+    return segs[b].t_end - segs[a].t_start
+
+
+def _durata_traslazione_di_quota(data: ProblemData, seg: Segment) -> Optional[float]:
+    """Quanto deve durare una traslazione fatta dentro una presa o un
+    rilascio, cercandola fra le fasi della stazione in base agli estremi.
+
+    Si guarda la FASE e non la cinematica scritta nel segmento: quella e' uno
+    dei dati che il verificatore deve controllare, non uno su cui appoggiarsi."""
+    if seg.move is None:
+        return None
+    for fasi in (
+        data.pick_phases(seg.move),
+        data.release_phases(seg.move + 1),
+    ):
+        for f in fasi:
+            if f.trasla and _at(f.x_start, seg.x_start) and _at(f.x_end, seg.x_end):
+                return f.duration
+    return None
 
 
 def _check_phase_and_dwell(data, solution, plans, T, time_tol, add):

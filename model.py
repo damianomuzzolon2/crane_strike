@@ -158,6 +158,60 @@ class HoistZone:
 
 
 @dataclass(frozen=True)
+class ZonaCambioQuota:
+    """Il punto della rotaia in cui il carroponte cambia quota, per gli
+    impianti in cui non puo' salire e scendere sopra il carico e lo scarico.
+
+    Ce ne possono essere due, una per estremo della linea: fra il CARICO e la
+    prima vasca, e fra l'ultima vasca e lo SCARICO. Servono a chi ha un
+    passaggio obbligato -- una porta, un tunnel, una struttura -- che il
+    carroponte deve attraversare a una quota e non a un'altra.
+
+    LA SCALA VERTICALE E' DICHIARATA DAL BASSO, e non e' quella che il resto
+    del modello usa dentro (dove la quota di trasporto vale 0 e si scende in
+    negativo). Qui `0` e' la quota piu' bassa del carroponte -- la stessa a cui
+    gia' trasla quando viaggia col gancio calato -- e `corsa_totale` e' la
+    cima. La conversione e' `z_codice = quota_dichiarata - corsa_totale`, e la
+    fa `quota_interna()`: chi compila l'impianto misura da terra, non dalla
+    trave.
+
+        corsa_totale --- cima ------------- quota di trasporto  (z = 0)
+                     --- intermediate2 ---- il telaio sale fin qui al CARICO
+                     --- intermediate1 ---- il gancio scende fin qui per andarci
+                   0 --- ----------------- quota piu' bassa  (z = -corsa_totale)
+    """
+
+    position: float  # [mm] posizione ORIZZONTALE del punto sulla rotaia
+    intermediate1: float  # [mm] quota intermedia bassa, misurata da terra
+    intermediate2: float  # [mm] quota intermedia alta, misurata da terra
+    corsa_totale: float  # [mm] distanza da 0 alla cima
+
+    def quota_interna(self, quota_dichiarata: float) -> float:
+        """Dalla scala dichiarata (0 = piu' bassa) a quella del modello
+        (0 = quota di trasporto, negativo verso il basso)."""
+        return quota_dichiarata - self.corsa_totale
+
+    @property
+    def z_basso(self) -> float:
+        return -self.corsa_totale
+
+    @property
+    def z_int1(self) -> float:
+        return self.quota_interna(self.intermediate1)
+
+    @property
+    def z_int2(self) -> float:
+        return self.quota_interna(self.intermediate2)
+
+    @property
+    def corsa_telaio(self) -> float:
+        """Di quanto sale il telaio alla stazione servita da questa zona: dalla
+        quota a cui riposa (intermediate1) a quella a cui viene portato via
+        (intermediate2)."""
+        return self.intermediate2 - self.intermediate1
+
+
+@dataclass(frozen=True)
 class LiftPhase:
     """Un tratto della movimentazione VERTICALE sopra una vasca.
 
@@ -173,6 +227,24 @@ class LiftPhase:
     z_end: float  # [mm] quota finale
     kin: Optional[Kinematics]  # profilo del moto, None se la quota non cambia
     loaded: bool  # se il telaio e' appeso al gancio durante questa fase
+    # Dove sta il carroponte, ORIZZONTALMENTE, durante la fase. Quasi sempre e'
+    # fermo sopra la stazione e i due valori restano None: la posizione la
+    # conosce gia' chi chiama. Le riempie soltanto una zona di CAMBIO QUOTA,
+    # dove la presa e il rilascio comprendono due traslazioni fra il punto di
+    # cambio quota e la stazione -- e li' il carroponte, durante la presa, NON
+    # e' fermo. Chi campiona le posizioni deve saperlo (vedi `near_boundary`).
+    x_start: Optional[float] = field(default=None, kw_only=True)
+    x_end: Optional[float] = field(default=None, kw_only=True)
+    kin_x: Optional[Kinematics] = field(default=None, kw_only=True)
+
+    @property
+    def trasla(self) -> bool:
+        """Se la fase comporta uno spostamento orizzontale vero."""
+        return (
+            self.x_start is not None
+            and self.x_end is not None
+            and abs(self.x_end - self.x_start) > 1e-9
+        )
 
 
 @dataclass
@@ -243,6 +315,13 @@ class ProblemData:
     # soluzioni buone che prima venivano scartate, mai accettarne di
     # pericolose. Costa un modello piu' grande: le verifiche sono D/passo.
     clearance_step_mm: float = 200.0
+    # Le due ZONE DI CAMBIO QUOTA, se l'impianto le ha (vedi ZonaCambioQuota).
+    # Una serve il CARICO -- la prima tappa del percorso -- e sta fra il carico
+    # e la prima vasca; l'altra serve lo SCARICO e sta fra l'ultima vasca e lo
+    # scarico. Sono in fondo alla dataclass apposta: aggiungerle in mezzo
+    # romperebbe le costruzioni posizionali gia' scritte.
+    cambio_quota_carico: Optional[ZonaCambioQuota] = None
+    cambio_quota_scarico: Optional[ZonaCambioQuota] = None
 
     def __post_init__(self):
         n_moves = len(self.route) - 1
@@ -316,6 +395,75 @@ class ProblemData:
                     "gancio basso dovrebbe scavalcare un'altra vasca per "
                     "arrivarci."
                 )
+        # -- zone di cambio quota -------------------------------------------
+        #
+        # La posizione deve stare FRA la stazione servita e quella accanto, ed
+        # e' un vincolo che porta due garanzie, non una:
+        #   - il carroponte, per andarci, non scavalca nessun'altra stazione
+        #     (lo stesso motivo per cui esiste il controllo sugli svincoli);
+        #   - il vai-e-torna dentro la presa si allontana dal resto della
+        #     linea, quindi non avvicina il carroponte a nessun confine di zona
+        #     piu' di quanto gia' non lo sia il punto di cambio quota.
+        # La seconda e' quella che tiene in piedi il vincolo di non collisione:
+        # senza, un carroponte si muoverebbe in un intervallo in cui il modello
+        # lo crede fermo. Vedi `near_boundary`.
+        ultima = len(self.route) - 1
+        for zona, stazione, vicina, verso in (
+            (self.cambio_quota_carico, 0, 1, "carico"),
+            (self.cambio_quota_scarico, ultima, ultima - 1, "scarico"),
+        ):
+            if zona is None:
+                continue
+            if zona.corsa_totale <= 0:
+                raise ValueError(
+                    f"la zona di cambio quota del {verso} ha corsa_totale="
+                    f"{zona.corsa_totale:.0f} mm: e' la distanza dalla quota "
+                    f"piu' bassa del carroponte fino alla cima, e deve essere "
+                    f"maggiore di zero."
+                )
+            if not (
+                0 <= zona.intermediate1 <= zona.intermediate2 <= zona.corsa_totale
+            ):
+                raise ValueError(
+                    f"la zona di cambio quota del {verso} ha quote incoerenti: "
+                    f"servono 0 <= intermediate1 <= intermediate2 <= "
+                    f"corsa_totale, ma sono intermediate1="
+                    f"{zona.intermediate1:.0f}, intermediate2="
+                    f"{zona.intermediate2:.0f}, corsa_totale="
+                    f"{zona.corsa_totale:.0f} mm. Le quote si misurano dal "
+                    f"basso: 0 e' la posizione piu' bassa del carroponte."
+                )
+            x_st = self.station_position(stazione)
+            x_vic = self.station_position(vicina)
+            lo, hi = (x_st, x_vic) if x_st <= x_vic else (x_vic, x_st)
+            if not (lo < zona.position < hi):
+                raise ValueError(
+                    f"la zona di cambio quota del {verso} e' a "
+                    f"{zona.position:.0f} mm: deve stare fra "
+                    f"'{self.route[stazione].tank_id}' ({x_st:.0f} mm) e "
+                    f"'{self.route[vicina].tank_id}' ({x_vic:.0f} mm), "
+                    f"altrimenti il carroponte dovrebbe scavalcare un'altra "
+                    f"stazione per andare a cambiare quota."
+                )
+            corsa_dichiarata = self.tanks[self.route[stazione].tank_id].lift_height
+            if corsa_dichiarata != 0:
+                raise ValueError(
+                    f"la stazione di {verso} "
+                    f"('{self.route[stazione].tank_id}') dichiara una corsa "
+                    f"verticale di {corsa_dichiarata:.0f} mm, ma li' la corsa "
+                    f"la definisce la zona di cambio quota: il telaio va da "
+                    f"intermediate1 a intermediate2, cioe' "
+                    f"{zona.corsa_telaio:.0f} mm. Metti 0 nella corsa della "
+                    f"vasca '{self.route[stazione].tank_id}'."
+                )
+            if self.kin_lift_loaded is None or self.kin_lift_empty is None:
+                raise ValueError(
+                    f"la zona di cambio quota del {verso} fa salire e scendere "
+                    f"il carroponte sia col telaio sia a gancio scarico: "
+                    f"servono kin_lift_loaded e kin_lift_empty per sapere "
+                    f"quanto ci mette."
+                )
+
         # Il sollevamento a vuoto serve SOLO all'impianto in cui il gancio
         # calato non passa fra le vasche: se puo' traslare basso -- il caso
         # normale -- quelle corse non le fa nessuno, e pretendere il dato
@@ -418,6 +566,50 @@ class ProblemData:
     def station_position(self, idx: int) -> float:
         return self.tanks[self.route[idx].tank_id].position
 
+    def zona_cambio_quota(self, station_idx: int) -> Optional[ZonaCambioQuota]:
+        """La zona di cambio quota che serve la tappa data, se c'e'.
+
+        Solo la PRIMA e l'ULTIMA tappa possono averne una: sono le uniche due
+        che stanno agli estremi della linea, dove il carroponte esce dal
+        campo delle vasche. Se la stessa vasca ricompare a meta' percorso non
+        c'entra nulla -- li' e' una vasca come le altre."""
+        if station_idx == 0:
+            return self.cambio_quota_carico
+        if station_idx == len(self.route) - 1:
+            return self.cambio_quota_scarico
+        return None
+
+    def approach_position(self, station_idx: int) -> float:
+        """Dove sta il carroponte, ORIZZONTALMENTE, prima di cominciare la
+        presa e dopo aver finito il rilascio alla tappa data.
+
+        Di norma e' la stazione stessa. Con una zona di cambio quota e' il
+        punto di cambio quota: li' finiscono i rientri a vuoto e li' comincia
+        la traslazione col pezzo, perche' l'andata alla stazione e il ritorno
+        sono dentro la presa (o il rilascio).
+
+        E' QUESTA, non `station_position`, la posizione da usare per le
+        distanze fra tratte del giro."""
+        zona = self.zona_cambio_quota(station_idx)
+        return self.station_position(station_idx) if zona is None else zona.position
+
+    def quota_di_riposo(self, station_idx: int) -> float:
+        """Quota [mm] a cui il telaio riposa alla tappa data, sulla scala del
+        modello (0 = quota di trasporto, negativo verso il basso)."""
+        zona = self.zona_cambio_quota(station_idx)
+        if zona is None:
+            return -self.lift_height_at(station_idx)
+        return zona.z_int1
+
+    def corsa_verticale(self, station_idx: int) -> float:
+        """Di quanto il gancio scende sotto la quota di trasporto alla tappa
+        data: la corsa della vasca, oppure -- con una zona di cambio quota --
+        l'intera corsa del carroponte, perche' li' arriva fino in fondo."""
+        zona = self.zona_cambio_quota(station_idx)
+        return (
+            self.lift_height_at(station_idx) if zona is None else zona.corsa_totale
+        )
+
     def tank_capacity(self, idx: int) -> int:
         """Posti della vasca usata alla tappa `idx` del percorso."""
         return self.tanks[self.route[idx].tank_id].capacity
@@ -432,7 +624,13 @@ class ProblemData:
         return out
 
     def move_distance(self, k: int) -> float:
-        return abs(self.station_position(k + 1) - self.station_position(k))
+        """Quanta rotaia percorre il carroponte col pezzo appeso, nella mossa k.
+
+        Fra i due punti di APPROCCIO, non fra le due vasche: con una zona di
+        cambio quota il tratto col pezzo comincia (o finisce) sul punto di
+        cambio quota, perche' l'ultimo pezzo di strada fino alla stazione lo fa
+        la presa (o il rilascio)."""
+        return abs(self.approach_position(k + 1) - self.approach_position(k))
 
     def to_ticks(self, seconds: float) -> int:
         return round(seconds * self.time_scale)
@@ -480,6 +678,9 @@ class ProblemData:
         gancio gia' in fondo, oppure il gancio scende su una posizione di
         svincolo -- e quella e' parte del rientro a vuoto, non della presa
         (vedi `empty_leg_seconds`)."""
+        zona = self.zona_cambio_quota(station_idx)
+        if zona is not None:
+            return self._pick_phases_cambio_quota(station_idx, zona)
         h = self.lift_height_at(station_idx)
         return [
             LiftPhase("aggancio", self.engage_time, -h, -h, None, False),
@@ -502,6 +703,9 @@ class ProblemData:
         La risalita del gancio scarico non c'e' MAI qui dentro: o il gancio
         trasla basso e non risale affatto, oppure risale da una posizione di
         svincolo -- e quella e' parte del rientro a vuoto."""
+        zona = self.zona_cambio_quota(station_idx)
+        if zona is not None:
+            return self._release_phases_cambio_quota(station_idx, zona)
         h = self.lift_height_at(station_idx)
         return [
             LiftPhase(
@@ -513,6 +717,170 @@ class ProblemData:
                 True,
             ),
             LiftPhase("sgancio", self.disengage_time, -h, -h, None, True),
+        ]
+
+    def _pick_phases_cambio_quota(
+        self, station_idx: int, zona: ZonaCambioQuota
+    ) -> list["LiftPhase"]:
+        """La presa su una stazione servita da una zona di CAMBIO QUOTA.
+
+        Il carroponte ci arriva fermo sul punto di cambio quota, alla sua quota
+        piu' bassa, e fa il giro:
+
+            sale a intermediate1 -> trasla alla stazione -> aggancia ->
+            solleva il telaio a intermediate2 -> torna al punto di cambio
+            quota -> sale in cima
+
+        Le due traslazioni stanno QUI dentro, e non sono un dettaglio di
+        disegno: sono tempo di presa a tutti gli effetti, ed e' per questo che
+        durante la presa il carroponte non e' fermo. Chi campiona le posizioni
+        deve leggerle dalle fasi (`LiftPhase.x_start`/`x_end`)."""
+        p = zona.position
+        q = self.station_position(station_idx)
+        h = zona.corsa_telaio
+        return [
+            LiftPhase(
+                "salita alla quota intermedia bassa",
+                self._lift_seconds(zona.intermediate1, self.kin_lift_empty),
+                zona.z_basso,
+                zona.z_int1,
+                self.kin_lift_empty,
+                False,
+                x_start=p,
+                x_end=p,
+            ),
+            LiftPhase(
+                "traslazione alla stazione",
+                _travel_time_seconds(abs(q - p), self.kin_empty),
+                zona.z_int1,
+                zona.z_int1,
+                None,
+                False,
+                x_start=p,
+                x_end=q,
+                kin_x=self.kin_empty,
+            ),
+            LiftPhase(
+                "aggancio", self.engage_time, zona.z_int1, zona.z_int1, None, False,
+                x_start=q, x_end=q,
+            ),
+            LiftPhase(
+                "sollevamento del telaio",
+                self._lift_seconds(h, self.kin_lift_loaded),
+                zona.z_int1,
+                zona.z_int2,
+                self.kin_lift_loaded,
+                True,
+                x_start=q,
+                x_end=q,
+            ),
+            LiftPhase(
+                "sgocciolamento",
+                self.drain_time_at(station_idx),
+                zona.z_int2,
+                zona.z_int2,
+                None,
+                True,
+                x_start=q,
+                x_end=q,
+            ),
+            LiftPhase(
+                "traslazione al cambio quota",
+                _travel_time_seconds(abs(p - q), self.kin_loaded),
+                zona.z_int2,
+                zona.z_int2,
+                None,
+                True,
+                x_start=q,
+                x_end=p,
+                kin_x=self.kin_loaded,
+            ),
+            LiftPhase(
+                "salita alla quota di trasporto",
+                self._lift_seconds(
+                    zona.corsa_totale - zona.intermediate2, self.kin_lift_loaded
+                ),
+                zona.z_int2,
+                0.0,
+                self.kin_lift_loaded,
+                True,
+                x_start=p,
+                x_end=p,
+            ),
+        ]
+
+    def _release_phases_cambio_quota(
+        self, station_idx: int, zona: ZonaCambioQuota
+    ) -> list["LiftPhase"]:
+        """Il rilascio su una stazione servita da una zona di CAMBIO QUOTA:
+        lo stesso giro della presa, percorso al contrario.
+
+        Il carroponte arriva col pezzo sul punto di cambio quota, alla quota di
+        trasporto, scende a intermediate2, va alla stazione, posa il telaio a
+        intermediate1, torna indietro e scende fino in fondo -- pronto per il
+        rientro a vuoto, che riparte da li'."""
+        p = zona.position
+        q = self.station_position(station_idx)
+        h = zona.corsa_telaio
+        return [
+            LiftPhase(
+                "discesa alla quota intermedia alta",
+                self._lift_seconds(
+                    zona.corsa_totale - zona.intermediate2, self.kin_lift_loaded
+                ),
+                0.0,
+                zona.z_int2,
+                self.kin_lift_loaded,
+                True,
+                x_start=p,
+                x_end=p,
+            ),
+            LiftPhase(
+                "traslazione alla stazione",
+                _travel_time_seconds(abs(q - p), self.kin_loaded),
+                zona.z_int2,
+                zona.z_int2,
+                None,
+                True,
+                x_start=p,
+                x_end=q,
+                kin_x=self.kin_loaded,
+            ),
+            LiftPhase(
+                "immersione del telaio",
+                self._lift_seconds(h, self.kin_lift_loaded),
+                zona.z_int2,
+                zona.z_int1,
+                self.kin_lift_loaded,
+                True,
+                x_start=q,
+                x_end=q,
+            ),
+            LiftPhase(
+                "sgancio", self.disengage_time, zona.z_int1, zona.z_int1, None, True,
+                x_start=q, x_end=q,
+            ),
+            LiftPhase(
+                "traslazione al cambio quota",
+                _travel_time_seconds(abs(p - q), self.kin_empty),
+                zona.z_int1,
+                zona.z_int1,
+                None,
+                False,
+                x_start=q,
+                x_end=p,
+                kin_x=self.kin_empty,
+            ),
+            LiftPhase(
+                "discesa alla quota bassa",
+                self._lift_seconds(zona.intermediate1, self.kin_lift_empty),
+                zona.z_int1,
+                zona.z_basso,
+                self.kin_lift_empty,
+                False,
+                x_start=p,
+                x_end=p,
+            ),
         ]
 
     def pick_time_at(self, station_idx: int) -> float:
@@ -557,10 +925,16 @@ class ProblemData:
         per ricalare prima dell'aggancio.
 
         Zero se l'impianto lascia traslare il gancio calato, che e' il caso
-        normale: quelle corse non le fa nessuno."""
+        normale: quelle corse non le fa nessuno.
+
+        Su una stazione servita da una zona di cambio quota la corsa non e'
+        quella della vasca ma l'INTERA corsa del carroponte: li' il gancio
+        arriva fino in fondo, ed e' da li' che deve ripartire."""
         if self.empty_hook_travels_low:
             return 0.0
-        return self._lift_seconds(self.lift_height_at(station_idx), self.kin_lift_empty)
+        return self._lift_seconds(
+            self.corsa_verticale(station_idx), self.kin_lift_empty
+        )
 
     def slot_occupancy_seconds(self, station_idx: int, bath: float) -> float:
         """Per quanto tempo [s] un pezzo tiene occupato un POSTO nella vasca
@@ -605,7 +979,14 @@ class ProblemData:
         tratto percorso basso e' il piu' corto e non si torna indietro. Se da
         quella parte non ce n'e' si prende l'altro; se non ce n'e' nessuno, li'
         il gancio sale e scende dov'e', perche' quella vasca non e' un
-        ostacolo."""
+        ostacolo.
+
+        Su una stazione con una zona di cambio quota lo svincolo e' il punto di
+        cambio quota stesso: e' li', e solo li', che il carroponte puo'
+        cambiare quota -- che il gancio sia carico o vuoto."""
+        zona = self.zona_cambio_quota(station_idx)
+        if zona is not None:
+            return zona.position
         if self.empty_hook_travels_low:
             return self.station_position(station_idx)
         t = self.tanks[self.route[station_idx].tank_id]
@@ -633,19 +1014,8 @@ class ProblemData:
         bassa fino alla vasca. Sta qui e non dentro presa e rilascio perche' e'
         un movimento che avviene FRA due mosse, e chi lo paga e' lo
         spostamento -- non il pezzo, che nel frattempo e' in bagno."""
-        pos_a = self.station_position(station_a)
-        pos_b = self.station_position(station_b)
-        if self.empty_hook_travels_low or station_a == station_b:
-            # stessa stazione: il gancio resta dov'e', non c'e' niente da fare
-            return _travel_time_seconds(abs(pos_b - pos_a), self.kin_empty)
-        sv_a = self.svincolo_verso(station_a, pos_b)
-        sv_b = self.svincolo_verso(station_b, pos_a)
-        return (
-            _travel_time_seconds(abs(sv_a - pos_a), self.kin_empty)
-            + self._lift_seconds(self.lift_height_at(station_a), self.kin_lift_empty)
-            + _travel_time_seconds(abs(sv_b - sv_a), self.kin_empty)
-            + self._lift_seconds(self.lift_height_at(station_b), self.kin_lift_empty)
-            + _travel_time_seconds(abs(pos_b - sv_b), self.kin_empty)
+        return sum(
+            durata for _, _, durata in tratte_rientro(self, station_a, station_b)
         )
 
 
@@ -654,11 +1024,55 @@ class ProblemData:
 # --------------------------------------------------------------------------
 
 
+def tratte_rientro(
+    data: "ProblemData", stazione_a: int, stazione_b: int
+) -> list[tuple[float, float, float]]:
+    """Il rientro a vuoto come sequenza di tratte `(da, a, durata [s])`.
+
+    E' L'UNICA DEFINIZIONE del rientro, e da qui discendono tutte e tre le
+    cose che se ne devono sapere:
+
+      - quanto dura           -> `empty_leg_seconds`, che ne somma le durate;
+      - che aspetto ha        -> `_segmenti_rientro`, che ne fa dei Segment;
+      - dove passa e quando   -> `near_boundary`, che ne ricava le finestre del
+                                 vincolo di non collisione.
+
+    Averne una sola non e' eleganza: e' quello che impedisce al vincolo di
+    protegger un percorso diverso da quello che il carroponte fa davvero.
+
+    Una tratta con `da == a` e' una corsa VERTICALE del gancio scarico: lungo
+    la rotaia il carroponte e' FERMO. Chi ne campiona le posizioni deve
+    trattarla come tale -- crederla un movimento e' l'errore che ha gia'
+    prodotto due carroponti nello stesso punto con stato OPTIMAL.
+
+    Il percorso NON e' detto sia monotono: se da una parte lo svincolo non e'
+    dichiarato si esce dall'altra, e allora il carroponte torna indietro prima
+    di ripartire. E' proprio per questo che le tratte vanno guardate una per
+    una, invece di dedurre tutto dai due estremi."""
+    pos_a = data.approach_position(stazione_a)
+    pos_b = data.approach_position(stazione_b)
+    if data.empty_hook_travels_low or stazione_a == stazione_b:
+        # stessa stazione, o gancio che trasla basso: il gancio resta dov'e'
+        return [(pos_a, pos_b, data.horizontal_empty_seconds(pos_a, pos_b))]
+    sv_a = data.svincolo_verso(stazione_a, pos_b)
+    sv_b = data.svincolo_verso(stazione_b, pos_a)
+    return [
+        (pos_a, sv_a, data.horizontal_empty_seconds(pos_a, sv_a)),
+        (sv_a, sv_a, data.empty_lift_seconds(stazione_a)),
+        (sv_a, sv_b, data.horizontal_empty_seconds(sv_a, sv_b)),
+        (sv_b, sv_b, data.empty_lift_seconds(stazione_b)),
+        (sv_b, pos_b, data.horizontal_empty_seconds(sv_b, pos_b)),
+    ]
+
+
 @dataclass
 class Segment:
     """Un tratto della traiettoria di un carroponte entro un ciclo."""
 
-    kind: str  # 'pick'|'loaded'|'release'|'empty'|'wait'|'lift_empty'
+    # 'quota': traslazione fra il punto di cambio quota e la stazione, dentro
+    # una presa o un rilascio. E' l'unico tratto in cui il carroponte si muove
+    # senza che il tratto appartenga ne' al trasporto ne' al rientro a vuoto.
+    kind: str  # 'pick'|'loaded'|'release'|'empty'|'wait'|'lift_empty'|'quota'
     t_start: float  # [s], relativo all'inizio del ciclo (puo' iniziare prima di 0)
     t_end: float  # [s]
     x_start: float  # [m]
@@ -1179,76 +1593,131 @@ def solve(
         """Intervalli (start, end, lit) in cui il carroponte della zona `zd`
         puo' trovarsi a meno di `radius` millimetri dalla stazione in x_b.
 
-        La traiettoria di un periodo e' partizionata in blocchi: una mossa
-        (sosta di presa, traslazione a carico, sosta di rilascio) e un
-        trasferimento a vuoto (sosta, traslazione, sosta). Dentro un blocco il
-        carroponte va da una stazione u a una stazione v senza inversioni,
-        quindi la distanza da b e' monotona fra d(u) e d(v)."""
+        Il giro di un periodo si scompone in TRATTE elementari, ciascuna delle
+        quali e' o una sosta (il carroponte sta fermo in un punto, o si muove
+        dentro un intervallo noto) o una traslazione monotona fra due punti. Su
+        una tratta monotona la distanza dal confine e' monotona, quindi bastano
+        i due estremi; su una sosta si guarda tutto l'intervallo occupato.
+
+        Non si fanno stime: le tratte del rientro a vuoto vengono da
+        `tratte_rientro`, cioe' dalla stessa definizione che il disegno usa per
+        farne dei segmenti. Il vincolo protegge quindi il percorso vero, corse
+        verticali comprese -- ed e' proprio dimenticarsene che ha gia' prodotto
+        due volte due carroponti nello stesso punto."""
         lp, fin = zd["local_pick"], zd["finish"]
         out = []
 
-        def dist(station_idx: int) -> float:
-            return abs(data.station_position(station_idx) - x_b)
+        def fermo(t_a, t_b, a: float, b: float, lit):
+            """Un tratto in cui il carroponte resta dentro l'intervallo [a,b],
+            senza percorrerlo in un verso solo: una sosta sopra una stazione
+            (a == b), la corsa verticale del gancio su uno svincolo, oppure il
+            vai-e-torna della presa su una zona di CAMBIO QUOTA.
 
-        def blocco(u, v, span_start, leave_u, reach_v, span_end, lit, fermo=0):
-            """`fermo`: tick che il carroponte passa IMMOBILE dentro il blocco,
-            oltre alle soste gia' escluse da leave_u/reach_v.
+            Se quell'intervallo tocca la fascia, ci si sta dentro tutto il
+            tempo. Stimare quando si entra e quando si esce vorrebbe dire
+            modellare il vai-e-torna, e per guadagnare qualche decimo su una
+            sosta corta non vale la pena rischiare di sbagliarlo."""
+            lo, hi = (a, b) if a <= b else (b, a)
+            dentro = lo - x_b if x_b < lo else (x_b - hi if x_b > hi else 0.0)
+            if dentro < radius:
+                out.append((t_a, t_b, lit))
 
-            Serve alle corse verticali del gancio scarico, che avvengono a
-            meta' di un rientro a vuoto: li' il carroponte non trasla, e
-            calcolare quando esce dalla fascia con la sola velocita' di
-            traslazione lo fa uscire troppo presto -- cioe' lascia entrare il
-            vicino mentre e' ancora li'. E' lo stesso errore gia' corretto per
-            le fasi verticali di presa e rilascio, che qui si ripresentava
-            perche' le corse a vuoto sono state aggiunte dopo.
-
-            Si somma per intero a tutte e due gli estremi senza chiedersi in
-            quale punto del blocco cada: e' una costante piccola, e sbagliare
-            dal lato largo qui costa qualche soluzione in piu' scartata,
-            mentre sbagliare dal lato stretto costa una collisione."""
-            du, dv = dist(u), dist(v)
-            if du < radius and dv < radius:
-                # tutto il blocco e' dentro la fascia
-                out.append((span_start, span_end, lit))
-            elif du < radius:
+        def traslazione(t_a, t_b, xa: float, xb: float, lit):
+            """Una traslazione monotona da xa a xb, fra gli istanti dati. Parte
+            e arriva da ferma, quindi `escape_ticks` ne limita davvero il tempo
+            speso dentro la fascia."""
+            da, db = abs(xa - x_b), abs(xb - x_b)
+            if da < radius and db < radius:
+                out.append((t_a, t_b, lit))
+            elif da < radius:
                 # si esce dalla fascia durante la traslazione
-                out.append(
-                    (span_start, leave_u + fermo + escape_ticks(radius - du), lit)
-                )
-            elif dv < radius:
+                out.append((t_a, t_a + escape_ticks(radius - da), lit))
+            elif db < radius:
                 # si entra nella fascia durante la traslazione
-                out.append(
-                    (reach_v - fermo - escape_ticks(radius - dv), span_end, lit)
-                )
-            # se entrambe le stazioni sono fuori, il tratto non entra mai
-            # nella fascia (la distanza da b e' monotona lungo il blocco)
+                out.append((t_b - escape_ticks(radius - db), t_b, lit))
+            # entrambi fuori: la distanza e' monotona, non si entra mai
+
+        def fasi_verticali(fasi, t_inizio, x_default, lit):
+            """Le finestre di una PRESA o di un RILASCIO, fase per fase.
+
+            Su una stazione normale tutte le fasi sono ferme sullo stesso
+            punto e ne esce una finestra sola, identica a quella che si
+            otteneva trattando la presa come un blocco unico. Su una zona di
+            CAMBIO QUOTA no: li' in mezzo ci sono due traslazioni, e il
+            carroponte per un buon pezzo della presa sta lontano dalla
+            stazione. Trattare tutto il giro come una sosta sarebbe sicuro ma
+            sprecone -- venti secondi bloccati per una vicinanza che dura un
+            istante -- e basterebbe a rendere infattibili linee che non lo
+            sono.
+
+            Le fasi ferme consecutive sullo stesso punto si accorpano: e' cio'
+            che tiene il modello della stessa dimensione di prima sulle linee
+            senza cambio quota."""
+            secondi, prec = 0.0, 0
+            da, punto = None, None  # la corsa di fasi ferme in accumulo
+            for f in fasi:
+                xa = x_default if f.x_start is None else f.x_start
+                xb = x_default if f.x_end is None else f.x_end
+                secondi += f.duration
+                adesso = T_(secondi)
+                if xa == xb:
+                    if da is None:
+                        da, punto = prec, xa
+                    elif punto != xa:
+                        fermo(t_inizio + da, t_inizio + prec, punto, punto, lit)
+                        da, punto = prec, xa
+                else:
+                    if da is not None and prec > da:
+                        fermo(t_inizio + da, t_inizio + prec, punto, punto, lit)
+                    da = None
+                    if adesso > prec:
+                        traslazione(
+                            t_inizio + prec, t_inizio + adesso, xa, xb, lit
+                        )
+                prec = adesso
+            if da is not None and prec > da:
+                fermo(t_inizio + da, t_inizio + prec, punto, punto, lit)
 
         for k in zd["moves"]:
-            blocco(
-                u=k,
-                v=k + 1,
-                span_start=lp[k],
-                leave_u=lp[k] + T_(data.pick_time_at(k)),
-                reach_v=fin[k] - T_(data.release_time_at(k + 1)),
-                span_end=fin[k],
-                lit=None,
+            # La mossa in tre pezzi: presa, traslazione col pezzo, rilascio.
+            t_presa = lp[k] + T_(data.pick_time_at(k))
+            t_arrivo = fin[k] - T_(data.release_time_at(k + 1))
+            fasi_verticali(
+                data.pick_phases(k), lp[k], data.station_position(k), None
             )
+            traslazione(
+                t_presa, t_arrivo,
+                data.approach_position(k), data.approach_position(k + 1), None,
+            )
+            fasi_verticali(
+                data.release_phases(k + 1),
+                t_arrivo,
+                data.station_position(k + 1),
+                None,
+            )
+
         for arc in zd["arcs"]:
             u, v = arc["k1"] + 1, arc["k2"]
-            blocco(
-                u=u,
-                v=v,
-                span_start=arc["span_start"],
-                leave_u=arc["depart"],
-                reach_v=arc["arrive"],
-                span_end=arc["span_end"],
-                lit=arc["lit"],
-                # il gancio scarico che sale e che riscende: due soste in mezzo
-                # al rientro, durante le quali il carroponte non si muove
-                fermo=T_(
-                    data.empty_lift_seconds(u) + data.empty_lift_seconds(v)
-                ),
-            )
+            depart, lit = arc["depart"], arc["lit"]
+            tratte = tratte_rientro(data, u, v)
+            # l'attesa prima di partire, e quella dopo essere arrivato
+            fermo(arc["span_start"], depart, tratte[0][0], tratte[0][0], lit)
+            fermo(arc["arrive"], arc["span_end"], tratte[-1][1], tratte[-1][1], lit)
+            # Le tratte del rientro, una per una. I confini si convertono in
+            # tick sul tempo CUMULATO e non tratta per tratta: cosi' l'ultimo
+            # coincide con T_(empty_leg_seconds), che e' quello che il modello
+            # ha usato per legare `arrive` a `depart`, e fra le tratte non si
+            # aprono buchi da arrotondamento.
+            secondi, prec = 0.0, 0
+            for xa, xb, durata in tratte:
+                secondi += durata
+                adesso = T_(secondi)
+                if adesso > prec:
+                    if xa == xb:
+                        fermo(depart + prec, depart + adesso, xa, xa, lit)
+                    else:
+                        traslazione(depart + prec, depart + adesso, xa, xb, lit)
+                prec = adesso
         return out
 
     # Quante traslazioni di T servono perche' due blocchi possano incontrarsi.
@@ -1646,21 +2115,11 @@ def _segmenti_rientro(
     giro si spinge FINO ALLO SVINCOLO, che sta oltre la vasca, ed e' li' che
     puo' incontrare il vicino. Un tratto unico da vasca a vasca nasconderebbe
     proprio le posizioni in cui la collisione e' piu' probabile."""
-    pos_a, pos_b = data.station_position(stazione_a), data.station_position(stazione_b)
-    if data.empty_hook_travels_low or stazione_a == stazione_b:
-        return [Segment("empty", t0, t1, pos_a, pos_b, data.kin_empty)]
+    tratte = tratte_rientro(data, stazione_a, stazione_b)
+    if len(tratte) == 1:
+        xa, xb, _ = tratte[0]
+        return [Segment("empty", t0, t1, xa, xb, data.kin_empty)]
 
-    sv_a = data.svincolo_verso(stazione_a, pos_b)
-    sv_b = data.svincolo_verso(stazione_b, pos_a)
-    salita = data._lift_seconds(data.lift_height_at(stazione_a), data.kin_lift_empty)
-    discesa = data._lift_seconds(data.lift_height_at(stazione_b), data.kin_lift_empty)
-    tratte = [
-        (pos_a, sv_a, _travel_time_seconds(abs(sv_a - pos_a), data.kin_empty)),
-        (sv_a, sv_a, salita),
-        (sv_a, sv_b, _travel_time_seconds(abs(sv_b - sv_a), data.kin_empty)),
-        (sv_b, sv_b, discesa),
-        (sv_b, pos_b, _travel_time_seconds(abs(pos_b - sv_b), data.kin_empty)),
-    ]
     segs, t = [], t0
     for xa, xb, durata in tratte:
         if durata <= 0:
@@ -1678,6 +2137,53 @@ def _segmenti_rientro(
             else Segment("empty", t, fine, xa, xb, data.kin_empty)
         )
         t = fine
+    return segs
+
+
+def _segmenti_fasi(
+    data: ProblemData,
+    fasi: list[LiftPhase],
+    kind: str,
+    t0: float,
+    x_fermo: float,
+    move: int,
+) -> list[Segment]:
+    """I tratti disegnabili di una PRESA o di un RILASCIO.
+
+    Di norma e' un tratto solo: il carroponte sta fermo sopra la stazione e
+    tutto quello che succede e' verticale. Con una zona di CAMBIO QUOTA no --
+    dentro la presa ci sono due traslazioni fra il punto di cambio quota e la
+    stazione -- e allora le fasi vanno emesse per quello che sono: le soste
+    con il loro `kind`, le traslazioni con `kind='quota'`.
+
+    Un tratto unico nasconderebbe un movimento vero, e chi campiona le
+    posizioni -- il verificatore, la simulazione -- lo crederebbe fermo."""
+    if not any(f.trasla for f in fasi):
+        durata = sum(f.duration for f in fasi)
+        if durata <= 0:
+            return []
+        return [Segment(kind, t0, t0 + durata, x_fermo, x_fermo, None, move=move)]
+
+    segs: list[Segment] = []
+    t = t0
+    x = fasi[0].x_start if fasi[0].x_start is not None else x_fermo
+    fermo_inizio: Optional[float] = None
+    for f in fasi:
+        if f.trasla:
+            if fermo_inizio is not None and t > fermo_inizio:
+                segs.append(Segment(kind, fermo_inizio, t, x, x, None, move=move))
+            fermo_inizio = None
+            segs.append(
+                Segment(
+                    "quota", t, t + f.duration, f.x_start, f.x_end, f.kin_x, move=move
+                )
+            )
+            x = f.x_end
+        elif fermo_inizio is None:
+            fermo_inizio = t
+        t += f.duration
+    if fermo_inizio is not None and t > fermo_inizio:
+        segs.append(Segment(kind, fermo_inizio, t, x, x, None, move=move))
     return segs
 
 
@@ -1715,8 +2221,11 @@ def _build_zone_trajectory(
     n = len(order)
 
     for i, k in enumerate(order):
-        x0 = data.station_position(k)
-        x1 = data.station_position(k + 1)
+        # I punti di APPROCCIO, non le vasche: con una zona di cambio quota la
+        # traslazione col pezzo comincia (o finisce) sul punto di cambio quota,
+        # e il tratto fino alla stazione sta dentro la presa o il rilascio.
+        x0 = data.approach_position(k)
+        x1 = data.approach_position(k + 1)
         t0 = local_pick[k]
         # La mossa si scompone in tre fasi: presa (fermi sopra la vasca k),
         # traslazione orizzontale col pezzo, rilascio (fermi sopra la vasca
@@ -1726,17 +2235,19 @@ def _build_zone_trajectory(
         t_pick_end = t0 + data.pick_time_at(k)
         t_arrive = t_pick_end + data.horizontal_loaded_seconds(k)
         t1 = t_arrive + data.release_time_at(k + 1)
-        if t_pick_end > t0:
-            segs.append(Segment("pick", t0, t_pick_end, x0, x0, None, move=k))
+        segs.extend(_segmenti_fasi(data, data.pick_phases(k), "pick", t0, x0, k))
         segs.append(
             Segment("loaded", t_pick_end, t_arrive, x0, x1, data.kin_loaded, move=k)
         )
-        if t1 > t_arrive:
-            segs.append(Segment("release", t_arrive, t1, x1, x1, None, move=k))
+        segs.extend(
+            _segmenti_fasi(
+                data, data.release_phases(k + 1), "release", t_arrive, x1, k
+            )
+        )
 
         is_last = i == n - 1
         nxt_k = order[0] if is_last else order[i + 1]
-        x1_next = data.station_position(nxt_k)
+        x1_next = data.approach_position(nxt_k)
         travel_e = data.empty_leg_seconds(k + 1, nxt_k)
 
         depart_known = k == zone.hi

@@ -381,6 +381,97 @@ def test_confine_con_corse_a_vuoto():
             )
 
 
+def test_cambio_quota_end_to_end():
+    """Le ZONE DI CAMBIO QUOTA, risolte davvero.
+
+    Il punto delicato non e' il tempo in piu': e' che durante la presa il
+    carroponte NON e' fermo -- fa due traslazioni fra il punto di cambio quota
+    e la stazione. Qui il punto di cambio quota sta a 600 mm dal confine fra le
+    due zone, cioe' esattamente alla distanza minima richiesta: la vicinanza e'
+    reale e il modello la deve rappresentare per quella che e'."""
+    print("\n[5-quinquies] zone di cambio quota, risolte davvero")
+    import dataclasses
+
+    from model import ZonaCambioQuota
+
+    base = linea(
+        4,
+        3000,
+        [HoistZone(0, 0), HoistZone(1, 3)],
+        dwell=(20, 400),
+        capacity=4,
+        lift_height=800,
+        drain_time=3.0,
+        kin_lift_empty=Kinematics(v_max=500, a_max=800),
+        kin_lift_loaded=Kinematics(v_max=300, a_max=500),
+        engage_time=2.0,
+        disengage_time=1.0,
+        takt_min=15.0,
+        takt_max=400.0,
+        # carroponti piccoli: cosi' la linea resta risolvibile con la prima
+        # zona ridotta a una sola mossa, che e' la disposizione in cui il giro
+        # di cambio quota pesa di piu' sul ciclo
+        hoist_extent_pos=200,
+        hoist_extent_neg=200,
+        safety_distance=200,
+    )
+    # carico e scarico senza corsa: li' la definisce la zona di cambio quota
+    tanks = dict(base.tanks)
+    for nome in ("V0", "V4"):
+        tanks[nome] = dataclasses.replace(
+            tanks[nome], lift_height=0.0, drain_time=0.0
+        )
+    senza = dataclasses.replace(base, tanks=tanks)
+    # Il punto di cambio quota del carico sta a 2400 mm, cioe' a 600 mm dalla
+    # vasca V1 che e' il CONFINE fra la zona 1 e la zona 2: il carroponte 1 va
+    # avanti e indietro proprio sotto il naso del carroponte 2.
+    con = dataclasses.replace(
+        senza,
+        cambio_quota_carico=ZonaCambioQuota(2400, 400, 1400, 2200),
+        cambio_quota_scarico=ZonaCambioQuota(9600, 400, 1400, 2200),
+    )
+
+    senza_sol, senza_r = risolvi_e_verifica(senza, "senza cambio quota", 60.0)
+    con_sol, con_r = risolvi_e_verifica(con, "con cambio quota", 60.0)
+    check(
+        con_r is not None and con_r.ok,
+        _esito(con_sol, con_r, "con cambio quota: soluzione valida"),
+    )
+    check(
+        senza_sol.T is not None
+        and con_sol.T is not None
+        and con_sol.T >= senza_sol.T - 1e-9,
+        f"il giro di cambio quota non puo' accorciare il ciclo "
+        f"(T={con_sol.T:.2f}s contro {senza_sol.T:.2f}s)"
+        if con_sol.T and senza_sol.T
+        else f"stati: {con_sol.status} / {senza_sol.status}",
+    )
+    if con_r is not None:
+        check(
+            con_r.min_separation >= con_r.required_separation - 1.0,
+            f"separazione {con_r.min_separation:.0f} mm >= "
+            f"{con_r.required_separation:.0f} mm richiesti, col punto di cambio "
+            f"quota a 600 mm dal confine",
+        )
+    if con_sol.T is not None:
+        tratti = [s for segs in con_sol.segments_per_hoist for s in segs]
+        check(
+            any(abs(s.x_end) < 1e-9 for s in tratti),
+            "il carroponte arriva fino al carico (0 mm), oltre il punto di "
+            "cambio quota",
+        )
+        check(
+            all(
+                abs(s.x_start - con.approach_position(s.move)) < 1e-6
+                and abs(s.x_end - con.approach_position(s.move + 1)) < 1e-6
+                for s in tratti
+                if s.kind == "loaded"
+            ),
+            "e i tratti col pezzo vanno da punto di approccio a punto di "
+            "approccio",
+        )
+
+
 def test_passo_controllo():
     print("\n[6] passo di controllo: piu' fitto = meno cautelativo, sempre sicuro")
     risultati = {}
@@ -572,6 +663,7 @@ def main():
     test_bagno_comprende_i_tempi_morti()
     test_svincoli_end_to_end()
     test_confine_con_corse_a_vuoto()
+    test_cambio_quota_end_to_end()
     test_passo_controllo()
     test_scelta_automatica()
     test_vasca_ripetuta()

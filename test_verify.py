@@ -26,6 +26,7 @@ from model import (
     Solution,
     StationSpec,
     Tank,
+    ZonaCambioQuota,
     _build_zone_trajectory,
     solve,
     zone_layout_conflicts,
@@ -1006,6 +1007,214 @@ def test_fase_su_multiplo_esatto():
     )
 
 
+def _linea_cambio_quota(**kw) -> ProblemData:
+    """Una linea con le due zone di cambio quota, usata da piu' test.
+
+    Le vasche di carico e scarico hanno corsa 0 apposta: dove c'e' una zona di
+    cambio quota, e' lei a dire di quanto sale il telaio."""
+    positions = [0, 5000, 10000, 15000, 20000]
+    caps = [1, 1, 1, 1, 1]
+    tanks = {
+        f"V{i}": Tank(
+            f"V{i}",
+            p,
+            caps[i],
+            # carico e scarico: la corsa la definisce la zona di cambio quota
+            lift_height=0.0 if i in (0, 4) else 800.0,
+            drain_time=0.0 if i in (0, 4) else 4.0,
+        )
+        for i, p in enumerate(positions)
+    }
+    route = [
+        StationSpec("V0", 0, 0),
+        StationSpec("V1", 30, 200),
+        StationSpec("V2", 30, 200),
+        StationSpec("V3", 30, 200),
+        StationSpec("V4", 0, 0),
+    ]
+    params = dict(
+        tanks=tanks,
+        route=route,
+        takt_min=50.0,
+        takt_max=400.0,
+        kin_empty=KIN_EMPTY,
+        kin_loaded=KIN_LOADED,
+        hoist_extent_pos=500,
+        hoist_extent_neg=700,
+        safety_distance=600,
+        zones=[HoistZone(0, 1), HoistZone(2, 3)],
+        time_scale=100,
+        kin_lift_empty=KIN_LIFT_EMPTY,
+        kin_lift_loaded=KIN_LIFT_LOADED,
+        engage_time=2.0,
+        disengage_time=1.0,
+        cambio_quota_carico=ZonaCambioQuota(2500, 400, 1600, 2500),
+        cambio_quota_scarico=ZonaCambioQuota(17500, 400, 1600, 2500),
+    )
+    params.update(kw)
+    return ProblemData(**params)
+
+
+def test_cambio_quota():
+    """Le ZONE DI CAMBIO QUOTA: il giro che il carroponte fa agli estremi della
+    linea quando non puo' cambiare quota sopra il carico e lo scarico."""
+    print("\n[23] zone di cambio quota")
+    data = _linea_cambio_quota()
+    zona = data.cambio_quota_carico
+
+    # -- il punto di approccio non e' piu' la stazione --------------------
+    check(
+        data.approach_position(0) == 2500
+        and data.approach_position(4) == 17500
+        and data.approach_position(2) == data.station_position(2),
+        "carico e scarico si approcciano dal punto di cambio quota, le vasche no",
+    )
+    check(
+        data.move_distance(0) == 2500 and data.move_distance(3) == 2500,
+        f"il tratto col pezzo parte (e finisce) dal punto di cambio quota "
+        f"({data.move_distance(0):.0f} mm invece di 5000)",
+    )
+
+    # -- le sei fasi del giro, e la loro somma ----------------------------
+    presa = data.pick_phases(0)
+    traslazioni = [f for f in presa if f.trasla]
+    check(
+        len(traslazioni) == 2
+        and {(f.x_start, f.x_end) for f in traslazioni} == {(2500, 0), (0, 2500)},
+        f"la presa al carico contiene le due traslazioni del giro "
+        f"({[(f.x_start, f.x_end) for f in traslazioni]})",
+    )
+    check(
+        abs(data.pick_time_at(0) - sum(f.duration for f in presa)) < 1e-12,
+        "e la durata della presa e' la somma delle sue fasi, non un conto a parte",
+    )
+    check(
+        presa[0].z_start == -zona.corsa_totale and presa[-1].z_end == 0.0,
+        f"si parte dalla quota piu' bassa ({presa[0].z_start:.0f} mm) e si "
+        f"arriva a quella di trasporto ({presa[-1].z_end:.0f} mm)",
+    )
+    sollevamento = next(f for f in presa if f.name == "sollevamento del telaio")
+    check(
+        abs((sollevamento.z_end - sollevamento.z_start) - zona.corsa_telaio) < 1e-9,
+        f"il telaio sale da intermediate1 a intermediate2 "
+        f"({zona.corsa_telaio:.0f} mm)",
+    )
+    rilascio = data.release_phases(4)
+    check(
+        rilascio[0].z_start == 0.0 and rilascio[-1].z_end == -zona.corsa_totale,
+        "e allo scarico si fa lo stesso giro al contrario",
+    )
+    senza = dataclasses.replace(
+        data, cambio_quota_carico=None, cambio_quota_scarico=None
+    )
+    check(
+        data.pick_time_at(0) > senza.pick_time_at(0)
+        and data.release_time_at(4) > senza.release_time_at(4),
+        f"il giro costa tempo: presa {data.pick_time_at(0):.2f} s contro "
+        f"{senza.pick_time_at(0):.2f} s",
+    )
+
+    # -- una soluzione completa deve superare la verifica ------------------
+    T = 200.0
+    d0, d1, d2, d3 = (data.loaded_leg_seconds(k) for k in range(4))
+    lp = {0: 0.0, 1: d0 + 40.0, 2: 10.0, 3: 10.0 + d2 + 40.0}
+    sol = costruisci(data, T, lp, status="OPTIMAL")
+    report = verify_solution(data, sol)
+    check(
+        report.ok,
+        "una soluzione con le zone di cambio quota supera la verifica"
+        + ("" if report.ok else f": {[str(v) for v in report.errors][:2]}"),
+    )
+    tratti = [s for segs in sol.segments_per_hoist for s in segs]
+    check(
+        any(s.kind == "quota" for s in tratti),
+        "la traiettoria contiene i tratti di cambio quota",
+    )
+    check(
+        any(abs(s.x_end - data.station_position(0)) < 1e-9 for s in tratti)
+        and any(abs(s.x_end - data.station_position(4)) < 1e-9 for s in tratti),
+        "e il carroponte ci arriva davvero, fino al carico e fino allo scarico",
+    )
+
+    # -- il controllo nuovo deve SCATTARE ----------------------------------
+    # Una traslazione di cambio quota che dura 5 s piu' del dovuto. Il tempo in
+    # piu' si propaga a tutto quello che segue, altrimenti la traiettoria
+    # sarebbe discontinua e a scattare sarebbe un altro controllo.
+    segs = list(sol.segments_per_hoist[0])
+    j = next(i for i, s in enumerate(segs) if s.kind == "quota")
+    segs[j] = dataclasses.replace(segs[j], t_end=segs[j].t_end + 5.0)
+    for i in range(j + 1, len(segs)):
+        segs[i] = dataclasses.replace(
+            segs[i], t_start=segs[i].t_start + 5.0, t_end=segs[i].t_end + 5.0
+        )
+    rotta = dataclasses.replace(
+        sol, segments_per_hoist=[segs] + list(sol.segments_per_hoist[1:])
+    )
+    r2 = verify_solution(data, rotta)
+    check(
+        any(
+            "cambio quota" in v.message
+            for v in kinds(r2, "segment_duration", "error")
+        ),
+        "una traslazione di cambio quota allungata viene segnalata",
+    )
+
+
+def test_cambio_quota_validazione():
+    """I dati incoerenti devono essere respinti subito, con un messaggio che
+    dica cosa scrivere: qui l'errore e' nel disegno dell'impianto, e scoprirlo
+    da un INFEASIBLE muto costerebbe ore."""
+    print("\n[23-bis] zone di cambio quota: dati incoerenti")
+    casi = [
+        (
+            dict(cambio_quota_carico=ZonaCambioQuota(7000, 400, 1600, 2500)),
+            "fra",
+            "punto di cambio quota oltre la vasca accanto",
+        ),
+        (
+            dict(cambio_quota_carico=ZonaCambioQuota(2500, 1600, 400, 2500)),
+            "intermediate1",
+            "intermediate2 sotto intermediate1",
+        ),
+        (
+            dict(cambio_quota_carico=ZonaCambioQuota(2500, 400, 1600, 1000)),
+            "intermediate",
+            "quote intermedie oltre la corsa totale",
+        ),
+        (
+            dict(cambio_quota_carico=ZonaCambioQuota(2500, 400, 1600, 0)),
+            "corsa_totale",
+            "corsa totale nulla",
+        ),
+        (
+            dict(kin_lift_empty=None),
+            "kin_lift_empty",
+            "manca la cinematica di sollevamento a vuoto",
+        ),
+    ]
+    for kw, atteso, descrizione in casi:
+        try:
+            _linea_cambio_quota(**kw)
+            check(False, f"{descrizione}: NON segnalato")
+        except ValueError as e:
+            check(atteso in str(e), f"{descrizione}: segnalato ({atteso})")
+
+    # La corsa dichiarata sulla vasca di carico sarebbe un secondo valore per
+    # la stessa grandezza: uno dei due verrebbe ignorato in silenzio.
+    base = _linea_cambio_quota()
+    tanks = dict(base.tanks)
+    tanks["V0"] = dataclasses.replace(tanks["V0"], lift_height=1200.0)
+    try:
+        dataclasses.replace(base, tanks=tanks)
+        check(False, "corsa dichiarata sul carico: NON segnalata")
+    except ValueError as e:
+        check(
+            "cambio quota" in str(e) and "1200" in str(e),
+            f"corsa dichiarata sul carico: segnalata, e dice cosa scrivere "
+            f"(\"{str(e).splitlines()[-1][:60]}\")",
+        )
+
+
 def main():
     print("=" * 72)
     print("TEST DEL VERIFICATORE (verify.py) -- non richiede OR-Tools")
@@ -1027,6 +1236,8 @@ def main():
     test_vasca_ripetuta()
     test_fasi_verticali()
     test_svincoli()
+    test_cambio_quota()
+    test_cambio_quota_validazione()
     test_fase_su_multiplo_esatto()
     test_zero_verticale_non_regressione()
     test_stazione_condivisa()

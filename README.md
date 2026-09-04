@@ -1020,6 +1020,60 @@ svincolo, che sta *oltre* la vasca, ed e' li' che puo' incontrare il vicino.
 Riassumerli nasconderebbe proprio le posizioni in cui la collisione e' piu'
 probabile.
 
+#### Le zone di cambio quota
+
+Su alcuni impianti il carroponte non puo' cambiare quota **sopra il carico e
+sopra lo scarico**: c'e' di mezzo una porta, un tunnel, una struttura, e per
+salire o scendere deve prima portarsi in un punto dedicato. Sono le due zone
+di cambio quota, al massimo una per estremo della linea, e si dichiarano nel
+foglio facoltativo `CambioQuota`:
+
+| colonna | cosa contiene |
+| --- | --- |
+| `zona` | `carico` (fra il carico e la prima vasca) oppure `scarico` (fra l'ultima vasca e lo scarico) |
+| `posizione_mm` | dove sta il punto di cambio quota sulla rotaia |
+| `intermediate1_mm` | la quota a cui il gancio arriva alla stazione, e a cui vi posa il telaio |
+| `intermediate2_mm` | la quota a cui il telaio viene sollevato prima di lasciare la stazione |
+| `corsa_totale_mm` | la distanza da `0` fino alla cima |
+
+**Le tre quote si misurano dal basso.** `0` e' la posizione piu' bassa del
+carroponte, la stessa a cui gia' trasla quando viaggia col gancio calato; la
+cima e' la quota di trasporto:
+
+```text
+   corsa_totale ─┬─ cima ──────────────  quota di trasporto
+                 ├─ intermediate2 ─────  il telaio sale fin qui
+                 ├─ intermediate1 ─────  il gancio scende fin qui per andarci
+               0 ─┴─ ───────────────────  quota piu' bassa
+```
+
+Verso il **carico** il giro e' questo:
+
+```text
+  trasla al punto di cambio quota -> sale a intermediate1 ->
+  trasla al carico -> aggancia e solleva il telaio a intermediate2 ->
+  torna al punto di cambio quota -> sale in cima
+```
+
+e verso lo **scarico** e' lo stesso a rovescio. Il tempo di tutto il giro,
+traslazioni comprese, e' contato nella **presa** (o nel **rilascio**) di quella
+stazione: e' li' che avviene, ed e' cosi' che il ciclogramma lo mostra.
+
+Ne segue che, per quelle due stazioni, il tratto col pezzo comincia (o
+finisce) sul **punto di cambio quota** e non sulla vasca. Nel foglio `Movimenti`
+le due traslazioni del giro compaiono come `traslazione di cambio quota`, e nel
+foglio `TempiVerticali` il loro tempo sta nella colonna `cambio quota`.
+
+Il punto di cambio quota deve cadere **fra la stazione servita e quella
+accanto**, e il programma lo controlla. Non e' un capriccio: e' quel vincolo a
+garantire che il carroponte, andando e tornando, si allontani dal resto della
+linea invece di avvicinarsi al vicino — oltre a evitare che scavalchi un'altra
+stazione per andare a cambiare quota.
+
+La corsa verticale della vasca di carico e di scarico deve essere **0**: li' la
+corsa la definisce la zona di cambio quota, e dichiararla due volte vorrebbe
+dire che uno dei due valori viene ignorato senza dirlo.
+
 ```text
         immersione   sgancio    il gancio se ne va e torna    aggancio  emersione
    ──────────────┬──────────┬───────── ... ─────────────────┬─────────┬───────────

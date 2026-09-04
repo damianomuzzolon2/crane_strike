@@ -23,6 +23,7 @@ from excel_io import (
     FOGLIO_PERCORSO,
     FOGLIO_VASCHE,
     FOGLIO_ZONE,
+    FOGLIO_CAMBIO_QUOTA,
     leggi_problema,
     scrivi_modello,
 )
@@ -780,6 +781,7 @@ def test_risultati_due_meta():
         FOGLIO_PERCORSO,
         FOGLIO_PARAMETRI,
         FOGLIO_ZONE,
+        FOGLIO_CAMBIO_QUOTA,
         FOGLIO_CICLOGRAMMA,
         "Output",
         "Riepilogo",
@@ -872,7 +874,7 @@ def test_tempi_verticali():
     try:
         ws = wb["TempiVerticali"]
         righe = [
-            [ws.cell(r, c).value for c in range(1, 12)]
+            [ws.cell(r, c).value for c in range(1, 14)]
             for r in range(2, ws.max_row + 1)
             if isinstance(ws.cell(r, 2).value, (int, float))
         ]
@@ -885,7 +887,7 @@ def test_tempi_verticali():
         # cosa detta due volte, e se divergessero il foglio mentirebbe proprio
         # dove serve a chiarire.
         somme = all(
-            abs(sum(r[2:6]) - r[6]) < 5e-3 and abs(sum(r[7:10]) - r[10]) < 5e-3
+            abs(sum(r[2:7]) - r[7]) < 5e-3 and abs(sum(r[8:12]) - r[12]) < 5e-3
             for r in righe
         )
         check(somme, "il dettaglio somma ai totali di presa e rilascio")
@@ -902,7 +904,7 @@ def test_tempi_verticali():
             )
             if fase in ("presa dalla vasca", "rilascio nella vasca"):
                 durate.setdefault((fase, vasca), set()).add(round(durata, 2))
-        totali = {r[0]: (round(r[6], 2), round(r[10], 2)) for r in righe}
+        totali = {r[0]: (round(r[7], 2), round(r[12], 2)) for r in righe}
         coerenti = all(
             valori == {totali[vasca][0 if fase.startswith("presa") else 1]}
             for (fase, vasca), valori in durate.items()
@@ -914,6 +916,80 @@ def test_tempi_verticali():
         )
     finally:
         os.unlink(percorso)
+
+
+def test_cambio_quota():
+    print("\n[20] foglio CambioQuota: va e torna, e gli errori si vedono")
+    import dataclasses
+
+    from excel_io import scrivi_linea
+    from model import ZonaCambioQuota
+
+    p = modello_temporaneo()
+    try:
+        cfg = leggi_problema(p)
+        check(
+            cfg.data.cambio_quota_carico is None
+            and cfg.data.cambio_quota_scarico is None,
+            "il modello d'esempio non ha zone di cambio quota: foglio vuoto",
+        )
+        # CARICO e' a 0 con SGRASSO a 2500; SCARICO a 20000 con PASSIVAZIONE a
+        # 16500: le due zone devono cadere dentro quegli intervalli.
+        con = dataclasses.replace(
+            cfg,
+            data=dataclasses.replace(
+                cfg.data,
+                cambio_quota_carico=ZonaCambioQuota(1200, 350, 1650, 2400),
+                cambio_quota_scarico=ZonaCambioQuota(18000, 350, 1650, 2400),
+            ),
+        )
+        fd, con_zone = tempfile.mkstemp(suffix=".xlsx")
+        os.close(fd)
+        try:
+            scrivi_linea(con_zone, con)
+            riletto = leggi_problema(con_zone)
+            check(
+                riletto.data.cambio_quota_carico == con.data.cambio_quota_carico
+                and riletto.data.cambio_quota_scarico
+                == con.data.cambio_quota_scarico,
+                "le due zone tornano identiche dal file",
+            )
+            check(riletto.data == con.data, "e con loro tutto il resto della linea")
+
+            # Una riga a meta' non deve passare: con tre numeri su quattro il
+            # giro non e' definito, e indovinare il quarto sarebbe peggio.
+            modifica(con_zone, FOGLIO_CAMBIO_QUOTA, "D2", None)
+            msg = errore_leggendo(con_zone)
+            check(
+                f"{FOGLIO_CAMBIO_QUOTA}!D2" in msg,
+                f"riga incompleta: segnalata in {FOGLIO_CAMBIO_QUOTA}!D2",
+            )
+
+            # Un'etichetta sbagliata: le zone possono essere solo due, e dire
+            # quali evita di far cercare l'errore altrove.
+            modifica(con_zone, FOGLIO_CAMBIO_QUOTA, "D2", 1650)
+            modifica(con_zone, FOGLIO_CAMBIO_QUOTA, "A2", "centro")
+            msg = errore_leggendo(con_zone)
+            check(
+                f"{FOGLIO_CAMBIO_QUOTA}!A2" in msg and "'carico'" in msg,
+                f"etichetta sconosciuta: segnalata, e dice quali sono ammesse",
+            )
+
+            # Punto di cambio quota oltre la vasca accanto: e' un errore di
+            # geometria dell'impianto, e va detto leggendo il file.
+            modifica(con_zone, FOGLIO_CAMBIO_QUOTA, "A2", "carico")
+            modifica(con_zone, FOGLIO_CAMBIO_QUOTA, "B2", 9000)
+            msg = errore_leggendo(con_zone)
+            check(
+                "cambio quota" in msg and "SGRASSO" in msg,
+                f"punto fuori posto: segnalato con le due stazioni fra cui deve "
+                f"stare",
+            )
+        finally:
+            if os.path.exists(con_zone):
+                os.unlink(con_zone)
+    finally:
+        os.unlink(p)
 
 
 def main():
@@ -944,6 +1020,7 @@ def main():
     test_risultati_verifica()
     test_risultati_due_meta()
     test_tempi_verticali()
+    test_cambio_quota()
     print("\n" + "=" * 72)
     print(f"RISULTATO: {_n_pass} ok, {_n_fail} falliti")
     print("=" * 72)

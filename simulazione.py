@@ -425,8 +425,9 @@ class Simulazione:
             i = max(0, bisect.bisect_right(c.inizi, tau) - 1)
             s = c.segmenti[i]
             x = _valuta(tau, s.t_start, s.t_end, s.x_start, s.x_end, s.kin)
+            gruppo = self._gruppo_verticale(c, s)
             z, con_pezzo, fase, vasca, corsa = self._fase_verticale(
-                s, tau, c.giu.get(i), c.basso.get(i, False)
+                s, tau, c.giu.get(i), c.basso.get(i, False), gruppo
             )
             fuori.append(
                 StatoCarro(
@@ -454,17 +455,54 @@ class Simulazione:
         k = s.move
         avanzamento = tau - c.inizi_mossa[k]
         pezzo = round((t - avanzamento - self._tempi[k]) / self.T)
-        if s.kind == "pick":
-            return self._corsia(pezzo, k)
-        if s.kind == "release":
-            return self._corsia(pezzo, k + 1)
+        gruppo = self._gruppo_verticale(c, s)
+        if gruppo is not None:
+            # presa o rilascio: il carroponte lavora sul posto del pezzo che
+            # sta servendo, anche mentre trasla fra il punto di cambio quota e
+            # la stazione
+            return self._corsia(pezzo, gruppo[1])
         frazione = (
             (tau - s.t_start) / (s.t_end - s.t_start) if s.t_end > s.t_start else 1.0
         )
         return self._corsia_fra(pezzo, k, k + 1, frazione)
 
+    def _gruppo_verticale(self, c: "_Traiettoria", s):
+        """A quale PRESA o RILASCIO appartiene il tratto, su quale stazione, e
+        quando quel gruppo e' cominciato. None se il tratto non fa parte di
+        nessuno dei due.
+
+        Serve perche' con una zona di cambio quota la presa non e' piu' un
+        tratto solo: e' sosta, traslazione, sosta, traslazione, sosta. Il
+        `t_start` del singolo tratto non dice piu' a che punto della presa si
+        e' arrivati -- lo dice l'inizio del gruppo, che e' l'unico riferimento
+        rispetto a cui le fasi si susseguono."""
+        k = s.move
+        if (
+            k is None
+            or k not in c.inizi_mossa
+            or s.kind not in ("pick", "release", "quota")
+        ):
+            return None
+        d = self.data
+        t_presa = c.inizi_mossa[k]
+        t_rilascio = (
+            t_presa + d.pick_time_at(k) + d.horizontal_loaded_seconds(k)
+        )
+        # una traslazione di cambio quota sta nella presa o nel rilascio a
+        # seconda di quando cade: il trasporto separa le due
+        if s.kind == "release" or (
+            s.kind == "quota" and s.t_start > t_rilascio - 1e-9
+        ):
+            return "release", k + 1, t_rilascio
+        return "pick", k, t_presa
+
     def _fase_verticale(
-        self, s, tau: float, giu: Optional[int] = None, basso_prima: bool = False
+        self,
+        s,
+        tau: float,
+        giu: Optional[int] = None,
+        basso_prima: bool = False,
+        gruppo=None,
     ):
         """Quota del gancio, se ha il pezzo, cosa sta facendo e sopra cosa.
 
@@ -513,25 +551,25 @@ class Simulazione:
             return -corsa, False, etichetta, self._vasca_a(s.x_start), corsa
         if s.kind == "empty":
             return 0.0, False, "rientro a vuoto", None, 0.0
-        if s.kind == "pick" and s.move is not None:
-            stazione = s.move
-            fasi = d.pick_phases(stazione)
-            if giu is not None:
-                # la discesa non c'e': il gancio e' gia' giu' da prima, e si
-                # riaccosta al telaio solo all'ultimo
-                fasi = (
-                    _fasi_di_attesa(fasi[0], d.lift_height_at(stazione), False)
-                    + fasi[1:]
-                )
-        elif s.kind == "release" and s.move is not None:
-            stazione = s.move + 1
-            fasi = d.release_phases(stazione)
-            if giu is not None:
-                # la risalita non c'e': il gancio si stacca dal telaio e
-                # resta li' ad aspettare
-                fasi = fasi[:-1] + _fasi_di_attesa(
-                    fasi[-1], d.lift_height_at(stazione), True
-                )
+        if gruppo is not None:
+            tipo, stazione, inizio = gruppo
+            if tipo == "pick":
+                fasi = d.pick_phases(stazione)
+                if giu is not None:
+                    # la discesa non c'e': il gancio e' gia' giu' da prima, e
+                    # si riaccosta al telaio solo all'ultimo
+                    fasi = (
+                        _fasi_di_attesa(fasi[0], d.lift_height_at(stazione), False)
+                        + fasi[1:]
+                    )
+            else:
+                fasi = d.release_phases(stazione)
+                if giu is not None:
+                    # la risalita non c'e': il gancio si stacca dal telaio e
+                    # resta li' ad aspettare
+                    fasi = fasi[:-1] + _fasi_di_attesa(
+                        fasi[-1], d.lift_height_at(stazione), True
+                    )
         elif giu is not None:
             # attesa col gancio calato, fra un rilascio e il prelievo successivo
             corsa = d.lift_height_at(giu)
@@ -546,8 +584,10 @@ class Simulazione:
             # attesa sopra una vasca: il gancio e' in alto, vuoto
             return 0.0, False, "attesa", self._vasca_a(s.x_start), 0.0
         vasca = d.route[stazione].tank_id
-        corsa = d.lift_height_at(stazione)
-        dt = tau - s.t_start
+        corsa = d.corsa_verticale(stazione)
+        # dall'inizio del GRUPPO, non del singolo tratto: una presa con cambio
+        # quota e' spezzata in piu' tratti, e le fasi si contano da capo
+        dt = tau - inizio
         for f in fasi:
             if dt <= f.duration or f is fasi[-1]:
                 z = _valuta(dt, 0.0, f.duration, f.z_start, f.z_end, f.kin)
@@ -562,24 +602,35 @@ class Simulazione:
         return None
 
     def _corsa_vicina(self, x: float) -> float:
-        """Corsa verticale della vasca piu' vicina a `x`.
+        """Corsa verticale della postazione piu' vicina a `x`.
 
         Serve sugli SVINCOLI, che non sono posizioni di vasca ma stanno per
         costruzione fra una vasca e quella accanto: la piu' vicina e' la
-        propria."""
+        propria. Un punto di CAMBIO QUOTA e' invece esso stesso il punto di
+        approccio della sua stazione, e li' la corsa e' quella intera del
+        carroponte: si guarda prima se la quota corrisponde esattamente a
+        un punto di approccio, che e' una risposta certa, e solo dopo si
+        ripiega sulla piu' vicina."""
+        esatta = self._corsa_a(x)
+        if esatta > 0:
+            return esatta
         migliore, distanza = 0.0, None
         for i in range(self.data.n_stations):
-            dist = abs(self.data.station_position(i) - x)
+            dist = abs(self.data.approach_position(i) - x)
             if distanza is None or dist < distanza:
-                migliore, distanza = self.data.lift_height_at(i), dist
+                migliore, distanza = self.data.corsa_verticale(i), dist
         return migliore
 
     def _corsa_a(self, x: float) -> float:
-        """Corsa verticale della vasca che sta in `x`, o zero se li' non ce
-        n'e' nessuna."""
+        """Corsa verticale della postazione che sta in `x`, o zero se li' non
+        ce n'e' nessuna.
+
+        Si guardano i punti di APPROCCIO: e' li' che il gancio si trova quando
+        comincia un rientro a vuoto, e su una stazione con cambio quota il
+        punto di approccio non e' la vasca ma il punto di cambio quota."""
         for i in range(self.data.n_stations):
-            if abs(self.data.station_position(i) - x) < 1e-6:
-                return self.data.lift_height_at(i)
+            if abs(self.data.approach_position(i) - x) < 1e-6:
+                return self.data.corsa_verticale(i)
         return 0.0
 
     def _stato_pezzi(self, t: float) -> list[StatoPezzo]:
@@ -606,7 +657,9 @@ class Simulazione:
             appeso=f.appeso,
             vasca=f.vasca,
             corsia=self._corsia_fra(indice, f.st_da, f.st_a, frazione),
-            corsa=self.data.lift_height_at(f.st_da if f.st_da == f.st_a else f.st_a),
+            corsa=self.data.corsa_verticale(
+                f.st_da if f.st_da == f.st_a else f.st_a
+            ),
         )
 
 
@@ -617,29 +670,51 @@ def _fasi_pezzo(data: ProblemData, tempi: list[float]) -> list[_Fase]:
     prenderlo, o risale vuoto dopo averlo sganciato, il pezzo sta fermo in
     fondo alla vasca. E' quello che distingue le fasi `loaded` dalle altre."""
     fasi: list[_Fase] = []
+
+    def fase_appesa(t: float, f, x_riposo: float, riposo: float, vasca, st):
+        """Una fase verticale vista DAL PEZZO.
+
+        Se il telaio e' appeso segue il gancio dappertutto, traslazioni
+        comprese: su una zona di cambio quota il pezzo fa avanti e indietro
+        insieme al carroponte. Se non e' appeso resta dov'e', in fondo alla
+        vasca, e il gancio va per conto suo."""
+        if f.loaded:
+            xa = f.x_start if f.x_start is not None else x_riposo
+            xb = f.x_end if f.x_end is not None else x_riposo
+            return _Fase(
+                t, t + f.duration, xa, xb, f.kin_x,
+                f.z_start, f.z_end, f.kin, True, vasca, st, st,
+            )
+        return _Fase(
+            t, t + f.duration, x_riposo, x_riposo, None,
+            riposo, riposo, None, False, vasca, st, st,
+        )
+
     for k in range(data.n_moves):
+        # dove il pezzo aspetta (la stazione) e dove il carroponte lo prende in
+        # consegna (il punto di approccio): coincidono, tranne che su una zona
+        # di cambio quota
         x0 = data.station_position(k)
         x1 = data.station_position(k + 1)
+        app0 = data.approach_position(k)
+        app1 = data.approach_position(k + 1)
         v0 = data.route[k].tank_id
         v1 = data.route[k + 1].tank_id
-        fondo0 = -data.lift_height_at(k)
-        fondo1 = -data.lift_height_at(k + 1)
+        riposo0 = data.quota_di_riposo(k)
+        riposo1 = data.quota_di_riposo(k + 1)
 
         t = tempi[k]
         for f in data.pick_phases(k):
             if f.duration <= 0:
                 continue
-            z0, z1, kz = (f.z_start, f.z_end, f.kin) if f.loaded else (fondo0, fondo0, None)
-            fasi.append(
-                _Fase(t, t + f.duration, x0, x0, None, z0, z1, kz, f.loaded, v0, k, k)
-            )
+            fasi.append(fase_appesa(t, f, x0, riposo0, v0, k))
             t += f.duration
 
         durata = data.horizontal_loaded_seconds(k)
         fasi.append(
             _Fase(
-                t, t + durata, x0, x1, data.kin_loaded, 0.0, 0.0, None, True, None,
-                k, k + 1,
+                t, t + durata, app0, app1, data.kin_loaded, 0.0, 0.0, None, True,
+                None, k, k + 1,
             )
         )
         t += durata
@@ -647,13 +722,7 @@ def _fasi_pezzo(data: ProblemData, tempi: list[float]) -> list[_Fase]:
         for f in data.release_phases(k + 1):
             if f.duration <= 0:
                 continue
-            z0, z1, kz = (f.z_start, f.z_end, f.kin) if f.loaded else (fondo1, fondo1, None)
-            fasi.append(
-                _Fase(
-                    t, t + f.duration, x1, x1, None, z0, z1, kz, f.loaded, v1,
-                    k + 1, k + 1,
-                )
-            )
+            fasi.append(fase_appesa(t, f, x1, riposo1, v1, k + 1))
             t += f.duration
 
         # sosta in vasca fino al prelievo successivo. Dopo l'ultima mossa non
@@ -661,8 +730,8 @@ def _fasi_pezzo(data: ProblemData, tempi: list[float]) -> list[_Fase]:
         if k + 1 < data.n_moves and tempi[k + 1] > t:
             fasi.append(
                 _Fase(
-                    t, tempi[k + 1], x1, x1, None, fondo1, fondo1, None, False, v1,
-                    k + 1, k + 1,
+                    t, tempi[k + 1], x1, x1, None, riposo1, riposo1, None, False,
+                    v1, k + 1, k + 1,
                 )
             )
     return fasi
