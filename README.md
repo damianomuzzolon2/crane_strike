@@ -1005,8 +1005,14 @@ colonne facoltative del foglio `Vasche`:
 
 | colonna | cosa contiene |
 | --- | --- |
-| `svincolo_positivo_mm` | la quota, dopo la vasca, in cui il gancio scarico puo' salire e scendere |
-| `svincolo_negativo_mm` | la stessa cosa dal lato delle posizioni decrescenti |
+| `svincolo_negativo_mm` | la quota, **prima** della vasca, in cui il gancio scarico puo' salire e scendere |
+| `svincolo_positivo_mm` | la stessa cosa **dopo** la vasca, dal lato delle posizioni crescenti |
+
+Stanno in quest'ordine perche' e' quello della rotaia: compilando da sinistra a
+destra si scrive prima quello a sinistra della vasca. Un file scritto quando le
+due colonne erano invertite viene riconosciuto e segnalato per quello che e' —
+con la cella e cosa scambiare — invece di essere respinto per una geometria
+impossibile.
 
 Sono **quote assolute** sulla rotaia, come `posizione_mm`, e ciascuna deve
 cadere **fra la sua vasca e quella accanto** — la positiva dopo, la negativa

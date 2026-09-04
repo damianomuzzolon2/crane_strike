@@ -399,21 +399,57 @@ def _leggi_vasche(ws, errori: _Errori) -> dict[str, Tank]:
         # Gli svincoli sono FACOLTATIVI: servono solo agli impianti in cui il
         # gancio calato non passa fra le vasche, e li' solo dove la vasca e'
         # davvero un ostacolo. Cella vuota = quella vasca non lo e'.
-        svincoli = []
-        for colonna, lettera, verso in ((6, "F", "positivo"), (7, "G", "negativo")):
+        #
+        # L'ordine delle colonne e' NEGATIVO poi POSITIVO, cioe' lo stesso in
+        # cui si vedono sulla rotaia guardando il disegno: prima quello a
+        # sinistra della vasca, poi quello a destra. Compilando si legge da
+        # sinistra a destra, e non si deve invertire niente nella testa.
+        svincoli = {}
+        for colonna, lettera, verso in ((6, "F", "negativo"), (7, "G", "positivo")):
             cella = ws.cell(riga, colonna).value
             if cella is None or (isinstance(cella, str) and not cella.strip()):
-                svincoli.append(None)
+                svincoli[verso] = None
                 continue
-            svincoli.append(
-                _numero(
-                    cella,
-                    FOGLIO_VASCHE,
-                    f"{lettera}{riga}",
-                    f"svincolo {verso}",
-                    errori,
-                )
+            svincoli[verso] = _numero(
+                cella,
+                FOGLIO_VASCHE,
+                f"{lettera}{riga}",
+                f"svincolo {verso}",
+                errori,
             )
+        # Un file scritto quando le due colonne erano al contrario si riconosce
+        # a colpo d'occhio: lo svincolo "negativo" finisce dopo la vasca e il
+        # "positivo" prima. La geometria lo respingerebbe comunque, ma con un
+        # messaggio che manda a cercare l'errore nell'impianto invece che nel
+        # file -- e chi ha compilato quel file non ha sbagliato niente.
+        invertiti = [
+            (lettera, verso, valore)
+            for lettera, verso, valore, atteso_sotto in (
+                ("F", "negativo", svincoli["negativo"], True),
+                ("G", "positivo", svincoli["positivo"], False),
+            )
+            if valore is not None
+            and pos is not None
+            and (valore > pos) == atteso_sotto
+        ]
+        if len(invertiti) == 2:
+            errori.aggiungi(
+                FOGLIO_VASCHE,
+                f"F{riga}",
+                f"i due svincoli della vasca '{tid}' sembrano scambiati fra "
+                f"loro: in F c'e' {invertiti[0][2]:.0f} mm, che sta DOPO la "
+                f"vasca ({pos:.0f} mm), e in G c'e' {invertiti[1][2]:.0f} mm, "
+                f"che sta prima. Dalla versione in cui le colonne sono state "
+                f"messe nell'ordine della rotaia, F e' lo svincolo NEGATIVO "
+                f"(prima della vasca) e G il POSITIVO (dopo). Scambia le due "
+                f"celle.",
+            )
+            # NIENTE `continue`: la vasca si registra lo stesso, anche se con
+            # valori che non useremo mai -- gli errori si sollevano tutti
+            # insieme prima di costruire il problema. Saltandola, il foglio
+            # Percorso non la troverebbe piu' e aggiungerebbe un "vasca non
+            # definita" che non c'entra niente e che coprirebbe proprio il
+            # messaggio utile.
         if pos is None or posti is None or corsa is None or sgocciolamento is None:
             continue
         tanks[tid] = Tank(
@@ -422,8 +458,8 @@ def _leggi_vasche(ws, errori: _Errori) -> dict[str, Tank]:
             capacity=posti,
             lift_height=corsa,
             drain_time=sgocciolamento,
-            svincolo_pos=svincoli[0],
-            svincolo_neg=svincoli[1],
+            svincolo_pos=svincoli["positivo"],
+            svincolo_neg=svincoli["negativo"],
         )
     if not tanks:
         errori.aggiungi(FOGLIO_VASCHE, "A2", "nessuna vasca definita")
@@ -810,8 +846,9 @@ def _righe_da_configurazione(cfg: Configurazione):
             t.capacity,
             t.lift_height,
             t.drain_time,
-            t.svincolo_pos,
+            # nell'ordine della rotaia: prima quello a sinistra della vasca
             t.svincolo_neg,
+            t.svincolo_pos,
         )
         for t in d.tanks.values()
     ]
@@ -968,6 +1005,16 @@ def _aggiungi_fogli_linea(
         (
             "                      sulla rotaia, e ciascuna deve cadere fra "
             "questa vasca e quella accanto.",
+            None,
+        ),
+        (
+            "                      Stanno nell'ordine della rotaia: prima il "
+            "NEGATIVO (a sinistra della",
+            None,
+        ),
+        (
+            "                      vasca, quote piu' piccole), poi il POSITIVO "
+            "(a destra, quote piu' grandi).",
             None,
         ),
         (
@@ -1168,8 +1215,8 @@ def _aggiungi_fogli_linea(
             "posti",
             "corsa_verticale_mm",
             "sgocciolamento_s",
-            "svincolo_positivo_mm",
             "svincolo_negativo_mm",
+            "svincolo_positivo_mm",
         ],
         [22, 14, 8, 20, 20, 22, 22],
     )

@@ -992,6 +992,64 @@ def test_cambio_quota():
         os.unlink(p)
 
 
+def test_ordine_svincoli():
+    print("\n[21] gli svincoli stanno nell'ordine della rotaia")
+    from openpyxl import load_workbook
+
+    from excel_io import scrivi_linea
+
+    p = modello_temporaneo()
+    try:
+        wb = load_workbook(p)
+        intestazioni = [wb[FOGLIO_VASCHE].cell(1, c).value for c in (6, 7)]
+        check(
+            intestazioni == ["svincolo_negativo_mm", "svincolo_positivo_mm"],
+            f"prima il negativo, poi il positivo ({intestazioni})",
+        )
+        # SGRASSO sta a 2500: il negativo prima, il positivo dopo
+        modifica(p, FOGLIO_VASCHE, "F3", 1800)
+        modifica(p, FOGLIO_VASCHE, "G3", 3200)
+        cfg = leggi_problema(p)
+        t = cfg.data.tanks["SGRASSO"]
+        check(
+            (t.svincolo_neg, t.svincolo_pos) == (1800.0, 3200.0),
+            f"letti dalla colonna giusta (neg {t.svincolo_neg}, pos {t.svincolo_pos})",
+        )
+        # Riscrivendo la linea le due colonne devono tornare nello stesso
+        # ordine: altrimenti salvare e riaprire scambierebbe i valori a ogni
+        # giro, e nessuno se ne accorgerebbe finche' la geometria non lo
+        # respinge.
+        fd, rifatto = tempfile.mkstemp(suffix=".xlsx")
+        os.close(fd)
+        try:
+            scrivi_linea(rifatto, cfg)
+            t2 = leggi_problema(rifatto).data.tanks["SGRASSO"]
+            check(
+                (t2.svincolo_neg, t2.svincolo_pos) == (1800.0, 3200.0),
+                "e salvando e riaprendo restano dov'erano",
+            )
+        finally:
+            if os.path.exists(rifatto):
+                os.unlink(rifatto)
+
+        # Un file scritto quando le colonne erano al contrario: va riconosciuto
+        # per quello che e', non respinto per una geometria impossibile -- chi
+        # lo ha compilato non ha sbagliato niente.
+        modifica(p, FOGLIO_VASCHE, "F3", 3200)
+        modifica(p, FOGLIO_VASCHE, "G3", 1800)
+        msg = errore_leggendo(p)
+        check(
+            f"{FOGLIO_VASCHE}!F3" in msg and "scambiati" in msg,
+            f"le colonne invertite di un file vecchio vengono riconosciute",
+        )
+        check(
+            "non e' definita" not in msg,
+            "e il messaggio resta uno solo, senza errori a cascata",
+        )
+    finally:
+        os.unlink(p)
+
+
 def main():
     print("=" * 72)
     print("TEST DI LETTURA E SCRITTURA EXCEL (richiede openpyxl, non OR-Tools)")
@@ -1021,6 +1079,7 @@ def main():
     test_risultati_due_meta()
     test_tempi_verticali()
     test_cambio_quota()
+    test_ordine_svincoli()
     print("\n" + "=" * 72)
     print(f"RISULTATO: {_n_pass} ok, {_n_fail} falliti")
     print("=" * 72)
