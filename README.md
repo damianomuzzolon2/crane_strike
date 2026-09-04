@@ -279,13 +279,12 @@ Cosa c'e' da guardare:
   che resta fra due carrelli vicini si vede per quello che e'. Sotto il
   carrello ci sono l'argano, le due funi e il bilancino a cui il telaio si
   appende: la lunghezza delle funi dice a che punto e' la discesa.
-- **un carroponte che deposita un telaio e resta li'** ad aspettare, per
-  prenderne un altro dalla stessa vasca, **tiene il gancio calato** per tutta
-  l'attesa: si stacca appena dal telaio, aspetta in basso, e si riaccosta solo
-  all'ultimo, prima di agganciare. Alzarlo per ricalarlo subito dopo non serve
-  a niente e a vederlo sembra un difetto. **Non e' un tempo che si guadagna**:
-  il telaio successivo viene agganciato nello stesso identico istante di prima,
-  e il ciclogramma resta quello — cambia solo dove il gancio passa l'attesa.
+- **un carroponte fermo sopra una vasca tiene il gancio a fondo corsa**, che
+  abbia appena deposto un telaio o sia arrivato in anticipo per prenderne uno.
+  Alzarlo per ricalarlo subito dopo e' una cosa che la macchina non fa, e a
+  vederlo sembra un difetto. **Non e' un tempo che si guadagna**: il telaio
+  viene agganciato nello stesso identico istante, e il ciclogramma resta quello
+  — cambia solo dove il gancio passa l'attesa.
 - **il gancio scarico non risale**: trasla basso e alla vasca dopo ci arriva
   gia' in fondo. E' come lavorano quasi tutti gli impianti, e non e' solo
   disegno — sono secondi in meno su ogni presa e ogni rilascio (vedi

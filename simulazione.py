@@ -43,8 +43,8 @@ from matplotlib.patches import Rectangle
 from matplotlib.path import Path
 from matplotlib.text import Text
 
-from kinematics import Kinematics, position_profile, travel_time
-from model import LiftPhase, ProblemData, Solution
+from kinematics import Kinematics, position_profile
+from model import ProblemData, Solution
 from plotting import _HOIST_COLORS
 
 # Colori del disegno. Il colore dei carroponti e' lo stesso del ciclogramma
@@ -148,45 +148,7 @@ class _Traiettoria:
     inizi: list[float]  # i loro t_start, per la ricerca binaria
     t0: float  # da dove parte il ciclo di QUESTO carroponte
     inizi_mossa: dict[int, float]  # mossa -> quando la comincia
-    giu: dict[int, int]  # tratto -> stazione in cui il gancio resta calato
     basso: dict[int, bool]  # tratto -> se il gancio scarico ci viaggia calato
-
-
-# Di quanto il gancio si stacca dal telaio quando lo sgancia e resta li' ad
-# aspettare, in frazione della corsa. Non e' un dato del problema: e' quel
-# tanto che serve a liberare il telaio dai supporti -- e a farlo vedere, perche'
-# un gancio disegnato alla stessa quota del telaio sembra tenerlo ancora.
-_FRANCO_GANCIO = 0.12
-
-
-def _quota_di_attesa(corsa: float) -> float:
-    return -corsa * (1.0 - _FRANCO_GANCIO)
-
-
-def _fasi_di_attesa(fase, corsa: float, in_salita: bool) -> list[LiftPhase]:
-    """La stessa fase, ma con il gancio che si limita a staccarsi dal telaio
-    (o a riaccostarsi) invece di fare tutta la corsa.
-
-    Dura quanto durava -- il tempo e' quello che il calcolo ha stabilito e non
-    si tocca -- e cambia solo quanta strada ci fa dentro.
-
-    L'ordine conta. Staccandosi, il gancio si toglie di mezzo SUBITO e poi
-    aspetta. Riaccostandosi fa il contrario: aspetta staccato e si abbassa
-    ALL'ULTIMO, appena prima di agganciare. E' quello che farebbe una macchina
-    -- non ha motivo di accostarsi in anticipo -- e soprattutto e' l'unico
-    modo perche' si veda che il telaio, per tutta l'attesa, non e' appeso a
-    niente: un gancio fermo alla stessa quota del telaio sembra tenerlo."""
-    attesa = _quota_di_attesa(corsa)
-    franco = corsa - abs(attesa)
-    moto = min(fase.duration, travel_time(franco, fase.kin) if fase.kin else 0.0)
-    fermo = LiftPhase(
-        "attesa in vasca", fase.duration - moto, attesa, attesa, None, False
-    )
-    if in_salita:
-        stacco = LiftPhase("attesa in vasca", moto, -corsa, attesa, fase.kin, False)
-        return [stacco, fermo]
-    accosto = LiftPhase("attesa in vasca", moto, attesa, -corsa, fase.kin, False)
-    return [fermo, accosto]
 
 
 def _tratti_col_gancio_basso(segs: list) -> dict[int, bool]:
@@ -207,41 +169,6 @@ def _tratti_col_gancio_basso(segs: list) -> dict[int, bool]:
         elif s.kind == "pick":
             stato = False  # esce dal bagno col telaio
     return basso
-
-
-def _tratti_col_gancio_giu(segs: list) -> dict[int, int]:
-    """I tratti in cui conviene lasciare il gancio calato, e in quale vasca.
-
-    Succede quando un carroponte deposita un telaio e resta li' ad aspettare
-    per prelevarne un altro dalla STESSA vasca. Il conto dei tempi dice:
-    risalita del gancio, attesa, e poi di nuovo discesa. Alzarlo per calarlo
-    subito dopo non serve a niente -- e a vederlo sembra un difetto.
-
-    Non e' un tempo che si guadagna, ed e' importante che sia chiaro: il
-    telaio successivo viene agganciato nello stesso identico istante di
-    prima. Cambia solo DOVE il gancio passa l'attesa, fermo in basso invece
-    che fermo in alto. Il ciclogramma resta quello, tempi compresi."""
-    giu: dict[int, int] = {}
-    n = len(segs)
-    for i, s in enumerate(segs):
-        if s.kind != "release" or s.move is None:
-            continue
-        # il prossimo tratto che non sia un'attesa, girando in tondo perche' il
-        # giro si richiude
-        j, attese = (i + 1) % n, []
-        while segs[j].kind == "wait" and j != i:
-            attese.append(j)
-            j = (j + 1) % n
-        prossimo = segs[j]
-        # il rilascio della mossa k avviene sulla stazione k+1: il prelievo che
-        # riparte da li' e' quello della mossa k+1, e nessun altro
-        if prossimo.kind == "pick" and prossimo.move == s.move + 1:
-            stazione = s.move + 1
-            giu[i] = stazione
-            for a in attese:
-                giu[a] = stazione
-            giu[j] = stazione
-    return giu
 
 
 def _valuta(
@@ -309,11 +236,6 @@ class Simulazione:
                 _Traiettoria(
                     numero, ordinati, [s.t_start for s in ordinati],
                     ordinati[0].t_start, inizi_mossa,
-                    # Col gancio che trasla basso non c'e' niente da
-                    # correggere: quando e' scarico e' gia' giu' comunque.
-                    {}
-                    if data.empty_hook_travels_low
-                    else _tratti_col_gancio_giu(ordinati),
                     _tratti_col_gancio_basso(ordinati),
                 )
             )
@@ -427,7 +349,7 @@ class Simulazione:
             x = _valuta(tau, s.t_start, s.t_end, s.x_start, s.x_end, s.kin)
             gruppo = self._gruppo_verticale(c, s)
             z, con_pezzo, fase, vasca, corsa = self._fase_verticale(
-                s, tau, c.giu.get(i), c.basso.get(i, False), gruppo
+                s, tau, c.basso.get(i, False), gruppo
             )
             fuori.append(
                 StatoCarro(
@@ -496,23 +418,23 @@ class Simulazione:
             return "release", k + 1, t_rilascio
         return "pick", k, t_presa
 
-    def _fase_verticale(
-        self,
-        s,
-        tau: float,
-        giu: Optional[int] = None,
-        basso_prima: bool = False,
-        gruppo=None,
-    ):
+    def _fase_verticale(self, s, tau: float, basso_prima: bool = False, gruppo=None):
         """Quota del gancio, se ha il pezzo, cosa sta facendo e sopra cosa.
 
         La stazione NON si indovina dalla posizione: la dice il segmento
         (`Segment.move`), perche' la stessa vasca puo' comparire due volte
         nella ricetta e due vasche possono stare vicine quanto si vuole.
 
-        `giu` e' la stazione in cui il gancio resta calato per tutta l'attesa
-        invece di risalire e ricalarsi subito dopo (vedi
-        `_tratti_col_gancio_giu`)."""
+        ASPETTANDO SOPRA UNA VASCA IL GANCIO STA IN FONDO. Vale sia dopo aver
+        deposto un telaio sia arrivando in anticipo per prelevarne uno, e non
+        c'e' niente da correggere: le corse a vuoto del gancio non stanno in
+        presa e rilascio -- stanno nel rientro, che e' dove avvengono -- quindi
+        le fasi lo lasciano gia' dov'e'.
+
+        Per un periodo il gancio si staccava di un dito dal telaio durante
+        l'attesa, per far vedere che non lo teneva piu'. Era una cosa che il
+        carroponte non fa, e si e' tolta: la macchina non ha nessun motivo di
+        alzarsi per poi riabbassarsi, e il disegno non deve inventargliene uno."""
         d = self.data
         if s.kind == "loaded":
             return 0.0, True, "trasporto", None, 0.0
@@ -553,32 +475,10 @@ class Simulazione:
             return 0.0, False, "rientro a vuoto", None, 0.0
         if gruppo is not None:
             tipo, stazione, inizio = gruppo
-            if tipo == "pick":
-                fasi = d.pick_phases(stazione)
-                if giu is not None:
-                    # la discesa non c'e': il gancio e' gia' giu' da prima, e
-                    # si riaccosta al telaio solo all'ultimo
-                    fasi = (
-                        _fasi_di_attesa(fasi[0], d.lift_height_at(stazione), False)
-                        + fasi[1:]
-                    )
-            else:
-                fasi = d.release_phases(stazione)
-                if giu is not None:
-                    # la risalita non c'e': il gancio si stacca dal telaio e
-                    # resta li' ad aspettare
-                    fasi = fasi[:-1] + _fasi_di_attesa(
-                        fasi[-1], d.lift_height_at(stazione), True
-                    )
-        elif giu is not None:
-            # attesa col gancio calato, fra un rilascio e il prelievo successivo
-            corsa = d.lift_height_at(giu)
-            return (
-                _quota_di_attesa(corsa),
-                False,
-                "attesa in vasca",
-                d.route[giu].tank_id,
-                corsa,
+            fasi = (
+                d.pick_phases(stazione)
+                if tipo == "pick"
+                else d.release_phases(stazione)
             )
         else:
             # attesa sopra una vasca: il gancio e' in alto, vuoto

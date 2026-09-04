@@ -655,17 +655,31 @@ def test_gancio_resta_giu(d: ProblemData):
         f"{d.empty_leg_seconds(1, 2):.1f}, e il bagno non cambia",
     )
 
-    # Sull'impianto in cui il gancio DEVE risalire resta il caso in cui non
-    # avrebbe senso farlo: quando aspetta sulla stessa vasca per riprendere.
-    from simulazione import _tratti_col_gancio_giu
-
-    sol_a, dati_a = proposta_semplice(alto_d)
-    sim_a = Simulazione(dati_a, sol_a)
-    check(
-        any(c.giu for c in sim_a._carri),
-        f"e li' l'attesa sulla stessa vasca si fa comunque col gancio calato "
-        f"({[c.giu for c in sim_a._carri]})",
-    )
+    # ASPETTANDO SOPRA UNA VASCA IL GANCIO STA IN FONDO, e vale anche
+    # sull'impianto in cui il gancio DEVE risalire per traslare: fermo li' non
+    # ha nessun motivo di alzarsi. Si controlla la PROPRIETA' e non il
+    # meccanismo che la produce -- per un periodo c'era un correttivo apposta,
+    # poi le corse a vuoto sono passate nel rientro e il correttivo e' rimasto
+    # solo a staccare il gancio di un dito dal telaio, cosa che il carroponte
+    # non fa. Scritto cosi', il test regge a tutte e due le versioni.
+    for etichetta, linea in (("gancio basso", d), ("gancio alto", alto_d)):
+        sol_x, dati_x = proposta_semplice(linea)
+        sim_x = Simulazione(dati_x, sol_x)
+        alzate = []
+        for _, ist in campioni(sim_x, 2000):
+            for c in ist.carri:
+                # solo l'attesa FERMO SOPRA UNA VASCA, col gancio scarico
+                if c.con_pezzo or c.corsa <= 0 or c.vasca is None:
+                    continue
+                if c.fase.startswith("attesa") and c.z > -c.corsa + 1e-6:
+                    alzate.append((c.fase, round(c.z / c.corsa, 3)))
+        check(
+            not alzate,
+            f"{etichetta}: aspettando sopra una vasca il gancio resta a fondo "
+            f"corsa ({len(alzate)} istanti alzato"
+            + (f", es. {alzate[0]}" if alzate else "")
+            + ")",
+        )
 
 
 def test_disegno_casi_limite():

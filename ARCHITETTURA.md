@@ -6,7 +6,7 @@ invarianti regge, e dove sono le trappole — comprese quelle in cui siamo gia'
 caduti, che sono la parte piu' utile.
 
 Stato al momento della scrittura: 16 file Python, 15.223 righe, cinque suite di
-test per **400 asserzioni** complessive.
+test per **401 asserzioni** complessive.
 
 ---
 
@@ -583,10 +583,20 @@ capienza dichiarata: con tre posti e un pezzo solo lo si disegnerebbe fuori
 centro, e con un ciclogramma che sfora la capienza i pezzi di troppo
 sparirebbero uno sotto l'altro — nascondendo proprio l'errore da vedere.
 
-**Il gancio resta calato** quando il carroponte deposita e aspetta sulla stessa
-vasca (`_tratti_col_gancio_giu`). Non e' un tempo che si guadagna: l'aggancio
-successivo avviene nello stesso istante, cambia solo dove il gancio passa
-l'attesa.
+**Il gancio resta calato** finche' il carroponte sta fermo sopra una vasca, in
+tutti e due i casi in cui capita: dopo aver deposto, e aspettando di prelevare.
+Non serve nessun correttivo — da quando le corse a vuoto sono state spostate nel
+rientro (§4.4), `pick_phases` e `release_phases` lasciano gia' il gancio dov'e'.
+
+> C'e' stato un `_tratti_col_gancio_giu` che serviva proprio a questo, quando le
+> corse a vuoto stavano ancora dentro presa e rilascio. Spostate quelle, e'
+> rimasto a fare una cosa sola: staccare il gancio di un dito dal telaio durante
+> l'attesa, per far vedere che non lo teneva piu'. Era un movimento che il
+> carroponte non compie, ed e' stato tolto insieme al meccanismo — 118 righe in
+> meno. **Un correttivo sopravvissuto alla ragione per cui esisteva** e' una
+> cosa da cercare quando si sposta una definizione: qui la ragione era sparita
+> da un pezzo, e nessuno se n'era accorto perche' il test controllava che il
+> meccanismo ci fosse invece di controllare che il gancio stesse giu'.
 
 Timer: un `after(PASSO_MS)` che si richiama. `_passo` e `_continua_raffica`
 **adottano il timer in corso** invece di affiancarglisi — senza, ogni chiamata
@@ -606,7 +616,7 @@ lascia il pulsante vuoto.
 
 ---
 
-## 11. I test — 400 asserzioni, cinque suite
+## 11. I test — 401 asserzioni, cinque suite
 
 Nessun pytest: ogni file si lancia da solo, stampa cosa ha provato e restituisce
 un codice d'uscita.
@@ -615,7 +625,7 @@ un codice d'uscita.
 | --- | ---: | --- | --- |
 | `test_verify.py` | 98 | — | il verificatore trova davvero quello che deve? |
 | `test_excel_io.py` | 94 | — | un file compilato male viene respinto con un messaggio utile? |
-| `test_simulazione.py` | 70 | — | la simulazione mostra il ciclogramma che c'e'? |
+| `test_simulazione.py` | 71 | — | la simulazione mostra il ciclogramma che c'e'? |
 | `test_model.py` | 40 | OR-Tools | il modello produce soluzioni fisicamente valide? |
 | `test_interfaccia.py` | 98 | OR-Tools + grafica | l'interfaccia si comporta come deve? |
 
