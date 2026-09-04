@@ -362,9 +362,19 @@ questo non finisce mai dentro una scheda:
 
 ### Le tre schede
 
-**Riepilogo** — da dove viene il ciclogramma, takt time, produttivita' in
-pezzi/ora, quanti carroponti e che tratto di linea serve ciascuno, distanza
-minima raggiunta fra i carri contro quella richiesta, esito della verifica.
+**Riepilogo** — da dove viene il ciclogramma, **quanto e' durato il calcolo**,
+takt time, produttivita' in pezzi/ora, quanti carroponti e che tratto di linea
+serve ciascuno, distanza minima raggiunta fra i carri contro quella richiesta,
+esito della verifica.
+
+> Il tempo di calcolo compare anche nella barra di stato appena il calcolo
+> finisce (`Ciclogramma pronto in 7,4 s — T = 110,00 s`), ma li' si perde al
+> primo altro messaggio: nel *Riepilogo* resta finche' resta il ciclogramma. E'
+> il tempo che hai aspettato tu, non quello che dichiara il solutore: comprende
+> tutti i tentativi con numeri di carroponti diversi e la verifica finale.
+> Serve a due domande — conviene allungare `tempo_limite_per_tentativo_s`? e
+> questa linea e' pesante da risolvere? Se non trova niente il tempo si legge
+> lo stesso, e li' e' quello che dice se il limite e' stato consumato tutto.
 
 **Ciclogramma** — dove si modifica. Vedi sotto.
 

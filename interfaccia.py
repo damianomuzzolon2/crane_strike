@@ -23,6 +23,7 @@ import os
 import queue
 import sys
 import threading
+import time
 import traceback
 
 import matplotlib
@@ -65,6 +66,20 @@ _ETICHETTE_GRAVITA = {"error": "ERRORE", "warning": "avviso", "info": "nota"}
 _GRIGIO = "#9a9a9a"
 _SOTTILE = 1.2
 _SPESSO = 2.6
+
+
+def _durata_leggibile(secondi: float) -> str:
+    """Una durata scritta come la direbbe una persona.
+
+    Sotto il minuto si danno i decimi, perche' fra 2 e 12 secondi la
+    differenza si sente; sopra, i decimi non dicono piu' niente e i minuti
+    si leggono a colpo d'occhio. Il secondo si scrive sempre, anche a zero:
+    "2 min" e "2 min 0 s" sembrano due precisioni diverse, e chi confronta
+    due calcoli vuole leggere lo stesso formato tutte le volte."""
+    if secondi < 60.0:
+        return f"{secondi:.1f} s".replace(".", ",")
+    minuti, resto = divmod(int(round(secondi)), 60)
+    return f"{minuti} min {resto} s"
 
 
 class _BarraGrafico(NavigationToolbar2Tk):
@@ -133,6 +148,14 @@ class Applicazione(tk.Tk):
         self.report = None
         self._coda: queue.Queue = queue.Queue()
         self._lavoro_in_corso = False
+        self._inizio_lavoro = 0.0
+        # Quanto e' durato il calcolo che ha prodotto il ciclogramma che si sta
+        # guardando, in secondi. None quando non viene da un calcolo -- una
+        # linea riletta da file, o un ciclogramma composto da zero. Serve a
+        # sapere se conviene allargare il tempo limite, e a capire se una linea
+        # e' pesante da risolvere: sono le due domande che ci si pone davanti a
+        # un risultato che non piace.
+        self.durata_calcolo: float | None = None
 
         # -- il ciclogramma, nei termini in cui si modifica -------------------
         # Un ciclogramma ha pochissimi gradi di liberta' reali, e sono gli
@@ -532,6 +555,7 @@ class Applicazione(tk.Tk):
         self.assegnazione = {}
         self.incoerenze = []
         self.origine = ""
+        self.durata_calcolo = None
         self.modificato = False
         self.modifica_aperta = False
         self.verifica_viva = False
@@ -789,6 +813,13 @@ class Applicazione(tk.Tk):
 
     def _avvia_lavoro(self, messaggio: str, funzione):
         self._lavoro_in_corso = True
+        # Si cronometra QUI, e non dentro il solutore: quello che interessa e'
+        # quanto ha aspettato chi guarda lo schermo, che comprende tutti i
+        # tentativi di solve_auto_hoists e la verifica finale. Il tempo che
+        # OR-Tools riporta in solution.raw e' solo l'ultima chiamata, e su una
+        # linea che prova quattro numeri di carroponti direbbe una frazione del
+        # vero. Orologio monotono: non salta se cambia l'ora di sistema.
+        self._inizio_lavoro = time.monotonic()
         self._aggiorna_stato_pulsanti()
         self._stato(messaggio)
         self.avanzamento.start(12)
@@ -811,6 +842,7 @@ class Applicazione(tk.Tk):
 
         self.avanzamento.stop()
         self._lavoro_in_corso = False
+        durata = time.monotonic() - self._inizio_lavoro
 
         if tipo == "eccezione":
             self._stato("Calcolo fallito")
@@ -821,8 +853,17 @@ class Applicazione(tk.Tk):
         esito, sol, dati, report = carico
         if esito == "nessuna":
             self.soluzione = None
+            self.durata_calcolo = None
             self._aggiorna_stato_pulsanti()
-            self._stato("Nessuna soluzione trovata")
+            # Il tempo si dice anche qui, ed e' il caso in cui serve di piu':
+            # se il calcolo ha consumato tutto il limite senza trovare niente,
+            # allungarlo e' la prima cosa da provare -- e senza il numero non
+            # si sa se il limite e' stato raggiunto o se la linea e' davvero
+            # infattibile.
+            self._stato(
+                f"Nessuna soluzione trovata - "
+                f"calcolo durato {_durata_leggibile(durata)}"
+            )
             self._grafico_vuoto("Nessuna soluzione")
             self.tela.draw()
             self._scrivi_riepilogo(
@@ -845,6 +886,7 @@ class Applicazione(tk.Tk):
 
         self.soluzione, self.dati, self.report = sol, dati, report
         self.incoerenze = []
+        self.durata_calcolo = durata
         self.origine = (
             "calcolo automatico (ottimo)"
             if sol.status == "OPTIMAL"
@@ -869,7 +911,10 @@ class Applicazione(tk.Tk):
         self._popola_verifica()
         self._mostra_ciclogramma()
         self._aggiorna_stato_pulsanti()
-        self._stato(f"Ciclogramma pronto - T = {sol.T:.2f} s" + self._esito_breve())
+        self._stato(
+            f"Ciclogramma pronto in {_durata_leggibile(durata)} - "
+            f"T = {sol.T:.2f} s" + self._esito_breve()
+        )
 
     # ------------------------------------------------------------------
     # Il ciclogramma: comporlo, modificarlo, mostrarlo
@@ -968,6 +1013,8 @@ class Applicazione(tk.Tk):
         self.assegnazione = {}
         self.carroponte_attivo = 0
         self.origine = "composto da zero"
+        # non viene da un calcolo: il tempo di quello precedente non c'entra
+        self.durata_calcolo = None
         self.modificato = False
         # Si riparte da uno stato dichiaratamente provvisorio: il verdetto
         # arriva quando lo chiedi, non prima.
@@ -1483,8 +1530,16 @@ class Applicazione(tk.Tk):
             )
 
         origine = self.origine + (", poi modificato a mano" if self.modificato else "")
-        righe = [
-            f"Origine: {origine}",
+        righe = [f"Origine: {origine}"]
+        # La barra di stato lo dice appena finito, ma si perde al primo altro
+        # messaggio. Qui resta finche' resta il ciclogramma, ed e' il posto in
+        # cui lo si va a cercare dopo -- accanto a da dove viene, che e'
+        # l'altra meta' della stessa informazione.
+        if self.durata_calcolo is not None:
+            righe.append(
+                f"Tempo di calcolo: {_durata_leggibile(self.durata_calcolo)}"
+            )
+        righe += [
             "",
             f"Takt time:      {T:.2f} s",
             f"Produttivita':  {3600.0 / T:.1f} pezzi/ora",

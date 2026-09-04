@@ -6,7 +6,7 @@ invarianti regge, e dove sono le trappole — comprese quelle in cui siamo gia'
 caduti, che sono la parte piu' utile.
 
 Stato al momento della scrittura: 16 file Python, 15.223 righe, cinque suite di
-test per **386 asserzioni** complessive.
+test per **389 asserzioni** complessive.
 
 ---
 
@@ -585,7 +585,7 @@ esterna avvia una seconda catena e le catene si moltiplicano.
 
 ---
 
-## 11. I test — 386 asserzioni, cinque suite
+## 11. I test — 389 asserzioni, cinque suite
 
 Nessun pytest: ogni file si lancia da solo, stampa cosa ha provato e restituisce
 un codice d'uscita.
@@ -596,7 +596,7 @@ un codice d'uscita.
 | `test_excel_io.py` | 89 | — | un file compilato male viene respinto con un messaggio utile? |
 | `test_simulazione.py` | 64 | — | la simulazione mostra il ciclogramma che c'e'? |
 | `test_model.py` | 40 | OR-Tools | il modello produce soluzioni fisicamente valide? |
-| `test_interfaccia.py` | 95 | OR-Tools + grafica | l'interfaccia si comporta come deve? |
+| `test_interfaccia.py` | 98 | OR-Tools + grafica | l'interfaccia si comporta come deve? |
 
 > `test_model.py` risolve davvero, con limiti di tempo dell'ordine del minuto.
 > Su una macchina occupata un caso puo' scadere e restituire `UNKNOWN`: e'

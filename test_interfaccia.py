@@ -184,6 +184,25 @@ def test_calcolo_automatico(percorso_linea):
             f"soluzione trovata (stato {app.soluzione.status if app.soluzione else '-'})",
         )
         check(app.report.ok, "la soluzione supera la verifica indipendente")
+        # Quanto e' durato il calcolo va scritto a schermo: in barra di stato
+        # appena finito, e nel Riepilogo dove resta. E' quello che dice se
+        # conviene allungare il tempo limite, e non e' ricavabile altrimenti.
+        stato = app.etichetta_stato["text"]
+        check(
+            app.durata_calcolo is not None and app.durata_calcolo > 0.0,
+            f"il tempo di calcolo viene misurato ({app.durata_calcolo:.2f} s)"
+            if app.durata_calcolo is not None
+            else "il tempo di calcolo NON viene misurato",
+        )
+        check(
+            "pronto in" in stato and " s" in stato,
+            f"e finisce nella barra di stato: \"{stato[:60]}\"",
+        )
+        riepilogo = app.testo_riepilogo.get("1.0", "end")
+        check(
+            "Tempo di calcolo:" in riepilogo,
+            "e nel Riepilogo, dove resta anche cambiando scheda",
+        )
         # Un risultato del solutore si LEGGE: la scheda di modifica resta
         # chiusa finche' non si preme "Modifica". Cosi' non lo si altera per
         # sbaglio, e quel pulsante diventa il punto in cui si dichiara di
