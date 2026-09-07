@@ -118,11 +118,11 @@ class Tank:
     lift_height: float = field(kw_only=True)
     drain_time: float = field(kw_only=True)
     # Posizioni di SVINCOLO [mm]: i due punti, uno per lato, in cui il gancio
-    # SCARICO puo' salire e scendere. Servono solo agli impianti in cui il
-    # gancio calato non passa fra le vasche
-    # (`ProblemData.empty_hook_travels_low = False`): li' il carroponte, dopo
-    # aver deposto il telaio, non puo' tirare su il gancio dov'e' -- deve
-    # prima portarsi su uno svincolo.
+    # SCARICO puo' salire e scendere. Le corse verticali a vuoto avvengono
+    # SEMPRE E SOLO li', mai sopra il centro di una vasca: il carroponte che ha
+    # appena deposto un telaio non tira su il gancio dov'e', si porta prima su
+    # uno svincolo. (Il sollevamento COL PEZZO invece e' sempre al centro: e'
+    # li' che sta il telaio.)
     #
     # Sono quote assolute sulla rotaia, non scostamenti, come tutte le altre
     # posizioni del progetto. Ciascuna deve cadere fra questa vasca e quella
@@ -134,6 +134,16 @@ class Tank:
     # dov'e', e ci trasla sotto liberamente: quella vasca non e' un ostacolo.
     svincolo_pos: Optional[float] = field(default=None, kw_only=True)
     svincolo_neg: Optional[float] = field(default=None, kw_only=True)
+    # Se il gancio SCARICO puo' passare basso sopra questa vasca. E' come sono
+    # fatte quasi tutte -- da qui il valore predefinito -- e una vasca a `False`
+    # e' un OSTACOLO: sopra di lei il gancio calato non passa, e nemmeno cambia
+    # quota. Per uscire dalla sua campata bisogna portarsi su uno svincolo e
+    # salire; per arrivarci, scendere sullo svincolo e traslare bassi al centro.
+    #
+    # Era un parametro unico per tutta la linea, e obbligava OGNI rientro a
+    # pagare salita e discesa anche dove non serviva. Per vasca, un rientro che
+    # non scavalca nessun ostacolo resta basso e non paga niente.
+    gancio_basso: bool = field(default=True, kw_only=True)
 
 
 @dataclass(frozen=True)
@@ -284,17 +294,11 @@ class ProblemData:
     # Corsa e sgocciolamento no: cambiano da vasca a vasca e si dichiarano li'.
     kin_lift_empty: Optional[Kinematics] = None  # sollevamento a gancio scarico
     kin_lift_loaded: Optional[Kinematics] = None  # sollevamento col telaio
-    # Se il carroponte puo' traslare tenendo il gancio SCARICO in basso, senza
-    # urtare le vasche. E' come sono fatti quasi tutti gli impianti, ed e' il
-    # comportamento predefinito: il gancio scende una volta sola, all'inizio
-    # del giro, e non risale piu' finche' non ha un telaio da tirare su.
-    #
-    # Cambia i tempi, non solo il disegno: senza le due corse a vuoto -- quella
-    # per risalire dopo lo sgancio e quella per ricalare prima dell'aggancio --
-    # ogni presa e ogni rilascio si accorciano, e il pezzo resta in bagno di
-    # meno. Mettere `False` le rimette, per un impianto in cui il gancio calato
-    # non passa fra le vasche.
-    empty_hook_travels_low: bool = True
+    # NOTA: la traslazione a gancio basso NON e' piu' un parametro della linea.
+    # E' una proprieta' di ogni VASCA (`Tank.gancio_basso`), perche' un
+    # impianto ha di solito qualche vasca che il gancio calato non puo'
+    # scavalcare e tutte le altre libere. Un flag unico costringeva ogni
+    # rientro a pagare salita e discesa anche dove non serviva.
     engage_time: float = 0.0  # [s] aggancio del telaio, prima del sollevamento
     disengage_time: float = 0.0  # [s] sgancio, dopo l'immersione
     # Ogni quanti millimetri viene verificata la distanza fra due carroponti
@@ -464,19 +468,54 @@ class ProblemData:
                     f"quanto ci mette."
                 )
 
-        # Il sollevamento a vuoto serve SOLO all'impianto in cui il gancio
-        # calato non passa fra le vasche: se puo' traslare basso -- il caso
-        # normale -- quelle corse non le fa nessuno, e pretendere il dato
-        # sarebbe chiedere un numero per non usarlo.
-        if (
-            serve_cinematica
-            and not self.empty_hook_travels_low
-            and self.kin_lift_empty is None
-        ):
+        # -- svincoli e vasche-ostacolo ---------------------------------------
+        ostacoli = [t for t in self.tanks.values() if not t.gancio_basso]
+        con_svincolo = [
+            t
+            for t in self.tanks.values()
+            if t.svincolo_pos is not None or t.svincolo_neg is not None
+        ]
+        # Una vasca ostacolo agli ESTREMI della linea non ha senso: li' il
+        # carroponte non deve scavalcare niente, deve solo salire e scendere --
+        # ed e' esattamente quello che descrive una zona di cambio quota.
+        for stazione, verso in ((0, "carico"), (len(self.route) - 1, "scarico")):
+            if not self.tanks[self.route[stazione].tank_id].gancio_basso:
+                raise ValueError(
+                    f"la stazione di {verso} "
+                    f"('{self.route[stazione].tank_id}') e' dichiarata come "
+                    f"ostacolo (traslazione_con_gancio_basso = 0), ma sta a un "
+                    f"estremo della linea e non c'e' niente da scavalcarci. Se "
+                    f"il carroponte li' non puo' cambiare quota dov'e', quello "
+                    f"che serve e' una ZONA DI CAMBIO QUOTA (foglio "
+                    f"CambioQuota), non un ostacolo."
+                )
+        # Gli svincoli si dichiarano per tutta la linea o per niente: qualunque
+        # vasca puo' essere il capo di un rientro che deve passare alto, e
+        # quella senza svincoli non saprebbe dove salire.
+        if con_svincolo and len(con_svincolo) != len(self.tanks):
+            mancanti = sorted(
+                t.id for t in self.tanks.values() if t not in con_svincolo
+            )
             raise ValueError(
-                "l'impianto e' dichiarato senza traslazione a gancio basso, "
-                "quindi il gancio scarico deve risalire e ricalare a ogni "
-                "vasca: serve kin_lift_empty per sapere quanto ci mette."
+                f"alcune vasche hanno una posizione di svincolo e altre no: "
+                f"senza, {', '.join(mancanti)} non saprebbero dove far salire "
+                f"il gancio scarico. Dichiara almeno uno svincolo per OGNI "
+                f"vasca, oppure toglili tutti."
+            )
+        senza = sorted(t.id for t in ostacoli if t not in con_svincolo)
+        if senza:
+            raise ValueError(
+                f"le vasche {', '.join(senza)} sono dichiarate come ostacolo "
+                f"(traslazione_con_gancio_basso = 0) ma non hanno nessuna "
+                f"posizione di svincolo: il gancio scarico non avrebbe dove "
+                f"salire per scavalcarle."
+            )
+        if ostacoli and self.kin_lift_empty is None:
+            raise ValueError(
+                f"le vasche {', '.join(sorted(t.id for t in ostacoli))} non si "
+                f"possono scavalcare col gancio calato, quindi il gancio "
+                f"scarico deve salire e riscendere sugli svincoli: serve "
+                f"kin_lift_empty per sapere quanto ci mette."
             )
         if self.clearance_step_mm <= 0:
             raise ValueError(
@@ -924,16 +963,44 @@ class ProblemData:
         data: quella che il gancio fa per risalire dopo lo sgancio, e di nuovo
         per ricalare prima dell'aggancio.
 
-        Zero se l'impianto lascia traslare il gancio calato, che e' il caso
-        normale: quelle corse non le fa nessuno.
+        Non e' detto che qualcuno la faccia: dipende dal rientro, e lo decide
+        `serve_alto`. Qui c'e' solo quanto costerebbe.
 
         Su una stazione servita da una zona di cambio quota la corsa non e'
         quella della vasca ma l'INTERA corsa del carroponte: li' il gancio
         arriva fino in fondo, ed e' da li' che deve ripartire."""
-        if self.empty_hook_travels_low:
-            return 0.0
         return self._lift_seconds(
             self.corsa_verticale(station_idx), self.kin_lift_empty
+        )
+
+    def serve_alto(self, station_a: int, station_b: int) -> bool:
+        """Se il rientro a vuoto da `a` a `b` deve passare ALTO.
+
+        Succede in tre casi, e sono tre facce della stessa cosa -- il gancio
+        calato non puo' stare nella campata di una vasca ostacolo se non per
+        raggiungerne il centro dal proprio svincolo:
+
+        - si PARTE da un ostacolo: il gancio e' calato al suo centro, e per
+          uscire dalla sua campata deve prima salire sullo svincolo;
+        - si ARRIVA a un ostacolo: ci si deve calare sullo svincolo e poi
+          traslare bassi fino al centro;
+        - fra i due punti di approccio ne cade uno: va scavalcato.
+
+        Se non succede nessuno dei tre, il rientro resta basso da capo a fondo
+        e non paga nessuna corsa verticale."""
+        if station_a == station_b:
+            return False
+        for stazione in (station_a, station_b):
+            if not self.tanks[self.route[stazione].tank_id].gancio_basso:
+                return True
+        pos_a = self.approach_position(station_a)
+        pos_b = self.approach_position(station_b)
+        lo, hi = (pos_a, pos_b) if pos_a <= pos_b else (pos_b, pos_a)
+        # tutte le vasche dell'impianto, non solo quelle della ricetta: una
+        # vasca fuori percorso sta comunque sulla rotaia e fa comunque ostacolo
+        return any(
+            not t.gancio_basso and lo < t.position < hi
+            for t in self.tanks.values()
         )
 
     def slot_occupancy_seconds(self, station_idx: int, bath: float) -> float:
@@ -987,8 +1054,6 @@ class ProblemData:
         zona = self.zona_cambio_quota(station_idx)
         if zona is not None:
             return zona.position
-        if self.empty_hook_travels_low:
-            return self.station_position(station_idx)
         t = self.tanks[self.route[station_idx].tank_id]
         avanti = verso_pos >= t.position
         primo, secondo = (
@@ -1051,8 +1116,9 @@ def tratte_rientro(
     una, invece di dedurre tutto dai due estremi."""
     pos_a = data.approach_position(stazione_a)
     pos_b = data.approach_position(stazione_b)
-    if data.empty_hook_travels_low or stazione_a == stazione_b:
-        # stessa stazione, o gancio che trasla basso: il gancio resta dov'e'
+    if not data.serve_alto(stazione_a, stazione_b):
+        # niente da scavalcare: il gancio resta calato da capo a fondo, e non
+        # paga nessuna corsa verticale
         return [(pos_a, pos_b, data.horizontal_empty_seconds(pos_a, pos_b))]
     sv_a = data.svincolo_verso(stazione_a, pos_b)
     sv_b = data.svincolo_verso(stazione_b, pos_a)

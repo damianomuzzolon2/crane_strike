@@ -59,10 +59,30 @@ def check(condition: bool, description: str):
 
 
 def dati_prova(gancio_basso: bool = True) -> ProblemData:
-    tanks = {
-        nome: Tank(nome, pos, 1, lift_height=corsa, drain_time=scolo)
-        for nome, pos, corsa, scolo in VASCHE
-    }
+    """gancio_basso=False: le vasche di mezzo diventano OSTACOLI, con i loro
+    svincoli. Carico e scarico restano liberi -- agli estremi della linea non
+    c'e' niente da scavalcare, e il programma rifiuta di dichiararli ostacoli."""
+    ultima = VASCHE[-1][1]
+    tanks = {}
+    for nome, pos, corsa, scolo in VASCHE:
+        estremo = pos in (0.0, ultima)
+        svincoli = (
+            {}
+            if gancio_basso
+            else dict(
+                svincolo_neg=pos - 900 if pos > 0 else None,
+                svincolo_pos=pos + 900 if pos < ultima else None,
+            )
+        )
+        tanks[nome] = Tank(
+            nome,
+            pos,
+            1,
+            lift_height=corsa,
+            drain_time=scolo,
+            gancio_basso=gancio_basso or estremo,
+            **svincoli,
+        )
     route = [
         StationSpec("CARICO", 0.0, 0.0),
         StationSpec("SGRASSO", 60.0, 400.0),
@@ -83,7 +103,6 @@ def dati_prova(gancio_basso: bool = True) -> ProblemData:
         kin_lift_loaded=KIN_LIFT_LOADED,
         engage_time=3.0,
         disengage_time=2.0,
-        empty_hook_travels_low=gancio_basso,
     )
 
 

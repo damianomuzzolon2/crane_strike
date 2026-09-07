@@ -148,7 +148,6 @@ class _Traiettoria:
     inizi: list[float]  # i loro t_start, per la ricerca binaria
     t0: float  # da dove parte il ciclo di QUESTO carroponte
     inizi_mossa: dict[int, float]  # mossa -> quando la comincia
-    basso: dict[int, bool]  # tratto -> se il gancio scarico ci viaggia calato
     # Gli IMPEGNI: (inizio, fine, mossa) degli intervalli in cui il telaio e'
     # appeso al gancio. Solo li' il carroponte deve stare sul posto del pezzo;
     # fuori e' libero di spostarsi di lato, e lo fa con calma invece di
@@ -224,6 +223,25 @@ def _quote_a_vuoto(
     for i, s in enumerate(segs):
         if s.kind != "empty":
             continue
+        # Che tratta e', lo dicono gli ESTREMI. Un rientro che deve passare
+        # alto e' spezzato in tre traslazioni: una bassa che esce dalla vasca
+        # verso lo svincolo, una alta fra i due svincoli, una bassa che entra
+        # nella vasca d'arrivo. Gli svincoli non sono posizioni di stazione,
+        # quindi si riconoscono per esclusione.
+        parte_da_stazione = stazione_in(s.x_start) is not None
+        arriva_a_stazione = stazione_in(s.x_end) is not None
+        if not parte_da_stazione and not arriva_a_stazione:
+            fisse[i] = (0.0, 0.0, 0.0)  # la tratta alta, fra due svincoli
+            continue
+        if not arriva_a_stazione:  # esce dalla vasca verso lo svincolo
+            f = frazione(s.x_start, "partenza")
+            fisse[i] = (f, f, corsa_in(s.x_start))
+            continue
+        if not parte_da_stazione:  # scende dallo svincolo dentro la vasca
+            f = frazione(s.x_end, "arrivo")
+            fisse[i] = (f, f, corsa_in(s.x_end))
+            continue
+        # da stazione a stazione: il rientro resta basso tutto il tempo
         partenza = frazione(s.x_start, "partenza")
         arrivo = frazione(s.x_end, "arrivo")
         corsa = max(corsa_in(s.x_start), corsa_in(s.x_end))
@@ -254,9 +272,19 @@ def _quote_a_vuoto(
                 return (f1 if verso < 0 else f0), corsa
         return 0.0, 0.0
 
+    # Le corse verticali del gancio scarico: la quota va da quella del tratto
+    # prima a quella del tratto dopo. Non serve sapere se sale o se scende --
+    # lo dicono i due vicini, e dedurlo da una macchina a stati sui tipi di
+    # tratto e' proprio l'errore che sbagliava tutto sulle postazioni senza
+    # corsa.
+    for i, s in enumerate(segs):
+        if s.kind == "lift_empty":
+            (f0, c0), (f1, c1) = vicino(i, -1), vicino(i, +1)
+            fisse[i] = (f0, f1, max(c0, c1, corsa_in(s.x_start)))
+
     fuori: dict[int, tuple[float, float, float]] = {}
     for i, s in enumerate(segs):
-        if s.kind == "empty":
+        if s.kind in ("empty", "lift_empty"):
             fuori[i] = fisse[i]
         elif s.kind == "wait":
             (f0, c0), (f1, c1) = vicino(i, -1), vicino(i, +1)
@@ -305,39 +333,6 @@ def _finche_c_e_il_carico(fasi) -> float:
         if f.loaded:
             ultimo = quanto
     return ultimo
-
-
-def _tratti_col_gancio_basso(data: ProblemData, segs: list) -> dict[int, bool]:
-    """Per ogni tratto, se il gancio SCARICO ci viaggia calato.
-
-    Non serve indovinarlo: lo dice la sequenza. Dopo un rilascio il gancio
-    resta dove ha lasciato il telaio, e ci sta finche' non sale su uno
-    svincolo; da li' viaggia alto finche' non riscende su quello di arrivo.
-    Ogni `lift_empty` inverte lo stato, e la presa lo riporta in alto col
-    telaio.
-
-    DOPO UN RILASCIO IL GANCIO E' CALATO SOLO SE QUELLA STAZIONE HA UNA CORSA.
-    Su una postazione che non ce l'ha -- il carico e lo scarico di quasi tutte
-    le linee -- il gancio non e' mai sceso, e darlo per calato invertiva lo
-    stato per tutto il resto del giro: la discesa successiva veniva disegnata
-    come una salita, e al primo aggancio il gancio saltava di tutta la corsa.
-
-    Il giro si richiude, quindi lo stato iniziale non e' noto: si percorre la
-    sequenza due volte e si tiene il secondo giro, quando si e' assestato."""
-    basso: dict[int, bool] = {}
-    stato = False
-    for giro in (0, 1):
-        for i, s in enumerate(segs):
-            if giro:
-                basso[i] = stato
-            if s.kind == "release" and s.move is not None:
-                # resta dove ha posato il telaio: calato solo se e' sceso
-                stato = data.quota_di_riposo(s.move + 1) < -1e-9
-            elif s.kind == "lift_empty":
-                stato = not stato
-            elif s.kind == "pick":
-                stato = False  # esce dalla vasca col telaio
-    return basso
 
 
 def _valuta(
@@ -405,7 +400,6 @@ class Simulazione:
                 _Traiettoria(
                     numero, ordinati, [s.t_start for s in ordinati],
                     ordinati[0].t_start, inizi_mossa,
-                    _tratti_col_gancio_basso(data, ordinati),
                     sorted(
                         (
                             inizio + _fino_al_carico(data.pick_phases(k)),
@@ -418,9 +412,7 @@ class Simulazione:
                         for k, inizio in inizi_mossa.items()
                     ),
                     *_cumulato_mobile(ordinati),
-                    _quote_a_vuoto(data, ordinati)
-                    if data.empty_hook_travels_low
-                    else {},
+                    _quote_a_vuoto(data, ordinati),
                 )
             )
 
@@ -533,7 +525,7 @@ class Simulazione:
             x = _valuta(tau, s.t_start, s.t_end, s.x_start, s.x_end, s.kin)
             gruppo = self._gruppo_verticale(c, s)
             z, con_pezzo, fase, vasca, corsa = self._fase_verticale(
-                s, tau, c.basso.get(i, False), gruppo, c.quote.get(i)
+                s, tau, gruppo, c.quote.get(i)
             )
             fuori.append(
                 StatoCarro(
@@ -694,9 +686,7 @@ class Simulazione:
             return "release", k + 1, t_rilascio
         return "pick", k, t_presa
 
-    def _fase_verticale(
-        self, s, tau: float, basso_prima: bool = False, gruppo=None, quote=None
-    ):
+    def _fase_verticale(self, s, tau: float, gruppo=None, quote=None):
         """Quota del gancio, se ha il pezzo, cosa sta facendo e sopra cosa.
 
         La stazione NON si indovina dalla posizione: la dice il segmento
@@ -716,59 +706,38 @@ class Simulazione:
         d = self.data
         if s.kind == "loaded":
             return 0.0, True, "trasporto", None, 0.0
-        if s.kind == "lift_empty":
-            # il gancio scarico sale o scende su una posizione di svincolo
-            corsa = self._corsa_vicina(s.x_start)
-            sale = basso_prima
-            z0, z1 = (-corsa, 0.0) if sale else (0.0, -corsa)
-            z = _valuta(tau, s.t_start, s.t_end, z0, z1, d.kin_lift_empty)
-            return (
-                z,
-                False,
-                "risalita del gancio" if sale else "discesa del gancio",
-                None,
-                corsa,
-            )
-        if s.kind in ("empty", "wait") and not d.empty_hook_travels_low:
-            # fra un rilascio e lo svincolo -- o fra lo svincolo e la vasca --
-            # il gancio viaggia basso; nel tratto in mezzo viaggia alto
-            if basso_prima:
-                corsa = self._corsa_vicina(s.x_start)
-                return (
-                    -corsa,
-                    False,
-                    "rientro a vuoto" if s.kind == "empty" else "attesa",
-                    None,
-                    corsa,
-                )
-            return 0.0, False, "rientro a vuoto" if s.kind == "empty" else "attesa", None, 0.0
-        if s.kind in ("empty", "wait") and d.empty_hook_travels_low:
-            # Il gancio scarico non risale: trasla basso, e alla vasca dopo ci
-            # arriva gia' in fondo.
-            #
-            # "In fondo" pero' non e' la stessa quota dappertutto: il fondo di
-            # una postazione senza corsa -- il carico, lo scarico -- E' la
-            # quota di trasporto, e quello di una zona di cambio quota sta a
-            # meta'. Partendo dallo scarico il gancio e' quindi in alto e alla
-            # vasca dopo deve stare in basso: se la traslazione tiene una quota
-            # sola, quel dislivello si scarica tutto sul primo istante della
-            # presa, e il gancio salta di tutta la corsa. Ce lo si porta invece
-            # DURANTE la traslazione, che e' esattamente cosa vuol dire
-            # traslare a gancio basso: la discesa non costa tempo.
-            etichetta = "rientro a vuoto" if s.kind == "empty" else "attesa"
+        if s.kind in ("empty", "wait", "lift_empty"):
+            # Tutto quello che il gancio SCARICO fa: aspettare, traslare, salire
+            # o scendere su uno svincolo. Le quote sono precalcolate una volta
+            # sola (`_quote_a_vuoto`) perche' dipendono dai tratti vicini, e non
+            # dal tipo del tratto: dedurle da una macchina a stati sbagliava
+            # tutto sulle postazioni senza corsa, dove "calato" e "in alto" sono
+            # la stessa quota.
             f0, f1, corsa = quote if quote is not None else (0.0, 0.0, 0.0)
+            if s.kind == "lift_empty":
+                etichetta = (
+                    "risalita del gancio" if f1 < f0 else "discesa del gancio"
+                )
+                kin = d.kin_lift_empty
+            else:
+                etichetta = "rientro a vuoto" if s.kind == "empty" else "attesa"
+                kin = None
             if corsa <= 0:
                 return 0.0, False, etichetta, self._vasca_a(s.x_start), 0.0
-            # Si interpola la FRAZIONE di discesa, non i millimetri: e' quella
-            # che si disegna, e due quote diverse su due corse diverse possono
-            # benissimo essere tutte e due "in fondo". Su un rientro f0 e f1
+            # Le due quote si riportano sulla STESSA corsa di riferimento e poi
+            # si interpola in millimetri: e' cosi' che il profilo cinematico
+            # della corsa verticale viene giusto -- `position_profile` misura
+            # una distanza, e dandogli una frazione fra 0 e 1 esaurirebbe tutta
+            # la corsa nel primo millisecondo.
+            #
+            # La frazione resta il riferimento perche' e' quella che si
+            # disegna: due quote diverse su corse diverse possono benissimo
+            # essere tutte e due "in fondo". Su una traslazione f0 e f1
             # coincidono -- traslando la quota non cambia -- e la rampa sta
-            # tutta nell'attesa prima o dopo.
-            f = _valuta(tau, s.t_start, s.t_end, f0, f1, None)
-            vasca = self._vasca_a(s.x_start) if s.kind == "wait" else None
-            return -f * corsa, False, etichetta, vasca, corsa
-        if s.kind == "empty":
-            return 0.0, False, "rientro a vuoto", None, 0.0
+            # nella sosta o nella corsa verticale accanto.
+            z = _valuta(tau, s.t_start, s.t_end, -f0 * corsa, -f1 * corsa, kin)
+            vasca = self._vasca_a(s.x_start) if s.kind != "empty" else None
+            return z, False, etichetta, vasca, corsa
         if gruppo is not None:
             tipo, stazione, inizio = gruppo
             fasi = (

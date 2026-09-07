@@ -92,6 +92,28 @@ def linea(
     return ProblemData(**params)
 
 
+def con_ostacoli(data, svincolo=1200.0):
+    """La linea con le vasche di MEZZO dichiarate ostacolo e i loro svincoli.
+
+    E' come si dice adesso, col flag per vasca, quello che prima era
+    `empty_hook_travels_low=False`. Carico e scarico restano liberi: agli
+    estremi non c'e' niente da scavalcare, e il programma li rifiuta.
+    """
+    import dataclasses
+
+    quote = sorted(t.position for t in data.tanks.values())
+    tanks = {}
+    for nome, t in data.tanks.items():
+        estremo = t.position in (quote[0], quote[-1])
+        tanks[nome] = dataclasses.replace(
+            t,
+            gancio_basso=estremo,
+            svincolo_pos=t.position + svincolo if t.position < quote[-1] else None,
+            svincolo_neg=t.position - svincolo if t.position > quote[0] else None,
+        )
+    return dataclasses.replace(data, tanks=tanks)
+
+
 def risolvi_e_verifica(data, etichetta, time_limit=60.0):
     """Risolve e restituisce (solution, report). Fallisce il test se la
     soluzione non supera la verifica indipendente.
@@ -294,20 +316,11 @@ def test_svincoli_end_to_end():
         disengage_time=1.0,
         takt_min=25.0,
         takt_max=400.0,
-        empty_hook_travels_low=False,
     )
-    tanks = dict(base.tanks)
-    for i, nome in enumerate(sorted(tanks, key=lambda n: tanks[n].position)):
-        t = tanks[nome]
-        tanks[nome] = dataclasses.replace(
-            t,
-            svincolo_pos=t.position + 1200 if i < len(tanks) - 1 else None,
-            svincolo_neg=t.position - 1200 if i > 0 else None,
-        )
-    con = dataclasses.replace(base, tanks=tanks)
+    con = con_ostacoli(base, svincolo=1200.0)
 
-    senza_sol, senza_r = risolvi_e_verifica(base, "senza svincoli", time_limit=60.0)
-    con_sol, con_r = risolvi_e_verifica(con, "con svincoli", time_limit=60.0)
+    senza_sol, senza_r = risolvi_e_verifica(base, "senza ostacoli", time_limit=60.0)
+    con_sol, con_r = risolvi_e_verifica(con, "con ostacoli", time_limit=60.0)
     check(con_r is not None and con_r.ok, _esito(con_sol, con_r, "soluzione valida"))
     check(
         senza_sol.T is not None and con_sol.T is not None and con_sol.T >= senza_sol.T,
@@ -341,7 +354,7 @@ def test_confine_con_corse_a_vuoto():
     print("\n[5-quater] fascia di esclusione e corse verticali a vuoto")
     import dataclasses
 
-    for etichetta, svincoli in (("senza svincoli", False), ("con svincoli", True)):
+    for etichetta, svincoli in (("senza ostacoli", False), ("con ostacoli", True)):
         data = linea(
             4,
             2000,
@@ -355,19 +368,9 @@ def test_confine_con_corse_a_vuoto():
             disengage_time=1.0,
             takt_min=15.0,
             takt_max=400.0,
-            empty_hook_travels_low=False,
-        )
+            )
         if svincoli:
-            tanks = dict(data.tanks)
-            ordinate = sorted(tanks, key=lambda n: tanks[n].position)
-            for i, nome in enumerate(ordinate):
-                t = tanks[nome]
-                tanks[nome] = dataclasses.replace(
-                    t,
-                    svincolo_pos=t.position + 1800 if i < len(ordinate) - 1 else None,
-                    svincolo_neg=t.position - 1800 if i > 0 else None,
-                )
-            data = dataclasses.replace(data, tanks=tanks)
+            data = con_ostacoli(data, svincolo=1800.0)
         sol, r = risolvi_e_verifica(data, f"confine, {etichetta}", time_limit=30.0)
         check(
             r is not None and r.ok,

@@ -409,16 +409,22 @@ def test_sollevamento_incoerente():
             cfg.data.empty_lift_seconds(1) == 0.0,
             "senza sollevamento a vuoto la linea si legge lo stesso",
         )
-        # ...ma dichiarando un impianto in cui il gancio DEVE risalire, serve
+        # ...ma dichiarando una vasca OSTACOLO il gancio deve salire e
+        # riscendere sugli svincoli, e allora la cinematica serve
         wb = load_workbook(p)
-        ws = wb[FOGLIO_PARAMETRI]
+        ws = wb[FOGLIO_VASCHE]
         for riga in range(2, ws.max_row + 1):
-            if str(ws.cell(riga, 1).value or "") == "traslazione_con_gancio_basso":
-                ws.cell(riga, 2).value = 0
+            nome, pos = ws.cell(riga, 1).value, ws.cell(riga, 2).value
+            if not nome:
+                continue
+            ws.cell(riga, 6).value = pos - 900 if pos > 0 else None
+            ws.cell(riga, 7).value = pos + 900 if pos < 20000 else None
+            if nome == "ZINCATURA":
+                ws.cell(riga, 8).value = 0
         wb.save(p)
         msg = errore_leggendo(p)
         check(
-            "gancio basso" in msg and "kin_lift_empty" in msg,
+            "ZINCATURA" in msg and "kin_lift_empty" in msg,
             f"e li' invece viene chiesto: \"{msg.splitlines()[-1][:70]}...\"",
         )
     finally:
@@ -1006,6 +1012,16 @@ def test_ordine_svincoli():
             intestazioni == ["svincolo_negativo_mm", "svincolo_positivo_mm"],
             f"prima il negativo, poi il positivo ({intestazioni})",
         )
+        # Gli svincoli si dichiarano per tutte le vasche o per nessuna: qui
+        # servono solo a leggere le colonne, ma il file deve stare in piedi.
+        ws = wb[FOGLIO_VASCHE]
+        for riga in range(2, ws.max_row + 1):
+            pos = ws.cell(riga, 2).value
+            if not ws.cell(riga, 1).value:
+                continue
+            ws.cell(riga, 6).value = pos - 900 if pos > 0 else None
+            ws.cell(riga, 7).value = pos + 900 if pos < 20000 else None
+        wb.save(p)
         # SGRASSO sta a 2500: il negativo prima, il positivo dopo
         modifica(p, FOGLIO_VASCHE, "F3", 1800)
         modifica(p, FOGLIO_VASCHE, "G3", 3200)

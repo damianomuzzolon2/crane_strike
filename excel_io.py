@@ -105,14 +105,6 @@ _PARAMETRI = {
         0.0,
         "sgancio, dopo l'immersione (si somma al rilascio)",
     ),
-    "traslazione_con_gancio_basso": (
-        "1=si", 
-        False,
-        1,
-        "1 se il carroponte trasla anche col gancio scarico calato, senza "
-        "urtare le vasche (normale). 0 se il gancio deve risalire prima di "
-        "muoversi: allora ogni presa e ogni rilascio pagano una corsa a vuoto",
-    ),
     "risoluzione_tick_per_s": (
         "tick/s",
         False,
@@ -163,6 +155,15 @@ _NOMI_SOSTITUITI = {
         "cioe' ogni quanti mm viene verificata la distanza fra i carroponti. "
         "Si converte con (ingombro + distanza_sicurezza) / passi: con i valori "
         "d'esempio 6 passi -> 300 mm. Il predefinito e' 200"
+    ),
+    "traslazione_con_gancio_basso": (
+        "'traslazione_con_gancio_basso' non sta piu' fra i Parametri: non e' "
+        "una proprieta' della linea ma della singola VASCA -- di solito un "
+        "impianto ne ha una o due che il gancio calato non puo' scavalcare, e "
+        "tutte le altre libere. Va scritta nell'omonima colonna del foglio "
+        "Vasche, una riga per vasca; vuoto vale 1. Se prima avevi 0, mettilo "
+        "sulle vasche che sono davvero un ostacolo -- e solo su quelle: i "
+        "rientri che non le scavalcano non pagheranno piu' salita e discesa"
     ),
     "altezza_sollevamento_mm": (
         "'altezza_sollevamento_mm' non sta piu' fra i Parametri: la corsa "
@@ -336,7 +337,6 @@ def leggi_problema(percorso_file: str) -> Configurazione:
             kin_lift_loaded=_kin_sollevamento("carico"),
             engage_time=par["tempo_aggancio_s"],
             disengage_time=par["tempo_sgancio_s"],
-            empty_hook_travels_low=bool(par["traslazione_con_gancio_basso"]),
 
             clearance_step_mm=par["passo_controllo_distanza_mm"],
             cambio_quota_carico=cambio_quota["carico"],
@@ -450,7 +450,24 @@ def _leggi_vasche(ws, errori: _Errori) -> dict[str, Tank]:
             # Percorso non la troverebbe piu' e aggiungerebbe un "vasca non
             # definita" che non c'entra niente e che coprirebbe proprio il
             # messaggio utile.
+        # Se il gancio SCARICO puo' passare basso sopra questa vasca. Vuoto = 1,
+        # che e' come sono fatte quasi tutte: la colonna si compila solo dove
+        # c'e' davvero un ostacolo.
+        cella = ws.cell(riga, 8).value
+        if cella is None or (isinstance(cella, str) and not cella.strip()):
+            basso = 1
+        else:
+            basso = _numero(
+                cella,
+                FOGLIO_VASCHE,
+                f"H{riga}",
+                "traslazione con gancio basso",
+                errori,
+                intero=True,
+            )
         if pos is None or posti is None or corsa is None or sgocciolamento is None:
+            continue
+        if basso is None:
             continue
         tanks[tid] = Tank(
             id=tid,
@@ -460,6 +477,7 @@ def _leggi_vasche(ws, errori: _Errori) -> dict[str, Tank]:
             drain_time=sgocciolamento,
             svincolo_pos=svincoli["positivo"],
             svincolo_neg=svincoli["negativo"],
+            gancio_basso=bool(basso),
         )
     if not tanks:
         errori.aggiungi(FOGLIO_VASCHE, "A2", "nessuna vasca definita")
@@ -819,7 +837,6 @@ def _righe_esempio():
         "a_max_sollevamento_carico_mm_s2": 500,
         "tempo_aggancio_s": 2,
         "tempo_sgancio_s": 1,
-        "traslazione_con_gancio_basso": 1,
         "risoluzione_tick_per_s": 100,
         "passo_controllo_distanza_mm": 200,
         "max_carroponti": 4,
@@ -849,6 +866,7 @@ def _righe_da_configurazione(cfg: Configurazione):
             # nell'ordine della rotaia: prima quello a sinistra della vasca
             t.svincolo_neg,
             t.svincolo_pos,
+            1 if t.gancio_basso else 0,
         )
         for t in d.tanks.values()
     ]
@@ -869,7 +887,6 @@ def _righe_da_configurazione(cfg: Configurazione):
         "a_max_sollevamento_carico_mm_s2": cinematica(d.kin_lift_loaded, "a_max"),
         "tempo_aggancio_s": d.engage_time,
         "tempo_sgancio_s": d.disengage_time,
-        "traslazione_con_gancio_basso": 1 if d.empty_hook_travels_low else 0,
         "risoluzione_tick_per_s": d.time_scale,
         "passo_controllo_distanza_mm": d.clearance_step_mm,
         "max_carroponti": cfg.max_carroponti,
@@ -993,13 +1010,38 @@ def _aggiungi_fogli_linea(
             None,
         ),
         (
-            "  svincolo_*_mm       SOLO se traslazione_con_gancio_basso=0: le "
-            "due posizioni, una per lato,",
+            "  traslazione_con_gancio_basso   1 (o vuoto) se il gancio SCARICO "
+            "puo' passare basso sopra",
             None,
         ),
         (
-            "                      in cui il gancio SCARICO puo' salire e "
-            "scendere. Sono quote assolute",
+            "                      questa vasca, che e' il caso normale. 0 se "
+            "e' un OSTACOLO: li' il gancio",
+            None,
+        ),
+        (
+            "                      calato non passa e non cambia quota, e chi "
+            "deve scavalcarla sale su",
+            None,
+        ),
+        (
+            "                      uno svincolo, viaggia alto e riscende. Un "
+            "rientro che non scavalca",
+            None,
+        ),
+        (
+            "                      nessun ostacolo resta basso e non paga "
+            "nessuna corsa verticale.",
+            None,
+        ),
+        (
+            "  svincolo_*_mm       le due posizioni, una per lato, in cui il "
+            "gancio SCARICO puo' salire",
+            None,
+        ),
+        (
+            "                      e scendere -- MAI sopra il centro di una "
+            "vasca. Sono quote assolute",
             None,
         ),
         (
@@ -1018,8 +1060,13 @@ def _aggiungi_fogli_linea(
             None,
         ),
         (
-            "                      Lasciarle vuote vuol dire che li' il gancio "
-            "sale e scende dov'e'.",
+            "                      Se una vasca ne ha uno devono averlo TUTTE "
+            "(almeno uno per vasca):",
+            None,
+        ),
+        (
+            "                      qualunque vasca puo' essere il capo di un "
+            "rientro che deve passare alto.",
             None,
         ),
         (
@@ -1217,8 +1264,9 @@ def _aggiungi_fogli_linea(
             "sgocciolamento_s",
             "svincolo_negativo_mm",
             "svincolo_positivo_mm",
+            "traslazione_con_gancio_basso",
         ],
-        [22, 14, 8, 20, 20, 22, 22],
+        [22, 14, 8, 20, 20, 22, 22, 28],
     )
     for riga in vasche:
         ws.append(list(riga))

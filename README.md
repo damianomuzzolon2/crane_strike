@@ -285,10 +285,11 @@ Cosa c'e' da guardare:
   vederlo sembra un difetto. **Non e' un tempo che si guadagna**: il telaio
   viene agganciato nello stesso identico istante, e il ciclogramma resta quello
   — cambia solo dove il gancio passa l'attesa.
-- **il gancio scarico non risale**: trasla basso e alla vasca dopo ci arriva
-  gia' in fondo. E' come lavorano quasi tutti gli impianti, e non e' solo
-  disegno — sono secondi in meno su ogni presa e ogni rilascio (vedi
-  `traslazione_con_gancio_basso`).
+- **il gancio scarico non risale** dove non serve: trasla basso e alla vasca
+  dopo ci arriva gia' in fondo. Risale solo per scavalcare una vasca dichiarata
+  ostacolo, e lo fa sugli svincoli (vedi `traslazione_con_gancio_basso`, colonna
+  del foglio `Vasche`). Non e' solo disegno: sono secondi in meno su ogni
+  rientro che non deve scavalcare niente.
 - **le tappe senza corsa verticale** (tipicamente carico e scarico) sono
   disegnate come piattaforme e non come vasche col bagno: il telaio li' non
   scende, e mostrarle piene direbbe una cosa falsa proprio sulle due tappe che
@@ -993,21 +994,27 @@ Ci stanno dentro i tempi morti di sgancio e aggancio — il telaio e' gia' (o
 ancora) in fondo alla vasca mentre si fanno — e, sugli impianti che le
 richiedono, **le due corse a vuoto del gancio**.
 
-Il caso normale e' che non le richiedano: `traslazione_con_gancio_basso = 1`,
-il valore predefinito, dice che il carroponte trasla anche col gancio scarico
-calato, senza urtare le vasche. Allora **il gancio scarico non si muove mai in
-verticale**: scende con il telaio, lo sgancia, riparte basso e alla vasca dopo
-ci arriva gia' in fondo. Non c'e' nessuna corsa a vuoto da pagare, ne' nel
-tempo di presa ne' in quello di rilascio.
+`traslazione_con_gancio_basso` e' una colonna del foglio **Vasche**, una per
+vasca, e vale `1` (o vuoto) sulle vasche che il gancio calato puo' scavalcare —
+che sono quasi tutte. Li' **il gancio scarico non si muove mai in verticale**:
+scende con il telaio, lo sgancia, riparte basso e alla vasca dopo ci arriva
+gia' in fondo.
 
-Mettendo `0` si dichiara un impianto in cui il gancio calato non passa fra le
-vasche: allora deve risalire dopo lo sgancio e ricalare prima dell'aggancio.
-Quelle due corse **non entrano ne' nella presa ne' nel rilascio ne' nel bagno**:
-avvengono *fra* due mosse, e le paga lo **spostamento a vuoto**, che e' quando
-avvengono davvero. E' l'unico caso in cui servono
-`v_max_sollevamento_vuoto_mm_s` e `a_max_sollevamento_vuoto_mm_s2`: col valore
-predefinito quelle corse non le fa nessuno, e i due parametri si possono
-lasciare in bianco.
+Mettendo `0` si dichiara che quella vasca e' un **ostacolo**: sopra di lei il
+gancio calato non passa e non cambia quota. Chi deve scavalcarla sale su uno
+svincolo, viaggia alto e riscende su un altro. Quelle due corse **non entrano
+ne' nella presa ne' nel rilascio ne' nel bagno**: avvengono *fra* due mosse, e
+le paga lo **spostamento a vuoto**, che e' quando avvengono davvero.
+
+> **E' per vasca, non per linea.** Un rientro che non scavalca nessun ostacolo
+> resta basso e non paga niente: pagano solo quelli che passano davvero da una
+> parte all'altra di un ostacolo, o che partono o arrivano su uno. Quando era
+> un unico parametro della linea, dichiarare un solo passaggio difficile
+> costringeva *ogni* rientro dell'impianto a salire e riscendere.
+
+`v_max_sollevamento_vuoto_mm_s` e `a_max_sollevamento_vuoto_mm_s2` servono solo
+se c'e' almeno una vasca ostacolo: senza ostacoli quelle corse non le fa
+nessuno, e i due parametri si possono lasciare in bianco.
 
 #### Le posizioni di svincolo
 
@@ -1032,7 +1039,11 @@ prima. Il programma lo controlla e respinge il file spiegando perche': e' quel
 vincolo a garantire che il tratto percorso col gancio basso non scavalchi mai
 un'altra vasca, e quindi che non serva nessun controllo di percorso.
 
-Lo spostamento a vuoto da una vasca all'altra diventa cosi' di cinque tratti:
+**Le corse verticali a vuoto avvengono sempre e solo sugli svincoli**, mai
+sopra il centro di una vasca. Il sollevamento *col pezzo* invece e' sempre al
+centro: e' li' che sta il telaio.
+
+Uno spostamento a vuoto che deve passare alto e' quindi di cinque tratti:
 
 ```text
   traslata bassa fino allo svincolo -> salita -> traslata alta ->
@@ -1045,9 +1056,13 @@ non fa tornare indietro il carroponte. La scelta e' quindi determinata dalla
 geometria, non e' una decisione lasciata al solutore — e questo e' cio' che
 tiene le durate costanti e note prima di risolvere.
 
-Se una vasca **non dichiara nessuno svincolo**, li' il gancio sale e scende
-dov'e' e ci trasla sotto liberamente: quella vasca non e' un ostacolo. Si
-dichiarano quindi solo dove servono davvero.
+**Quando serve passare alto** lo decidono i flag: se si parte da un ostacolo,
+se si arriva su un ostacolo, o se ne cade uno fra i due punti. Altrimenti il
+rientro e' un tratto basso solo, e non paga nessuna corsa verticale.
+
+Se **una** vasca dichiara uno svincolo devono dichiararne almeno uno **tutte**:
+qualunque vasca puo' essere il capo di un rientro che deve passare alto, e
+quella senza non saprebbe dove far salire il gancio. Il programma lo controlla.
 
 I cinque tratti finiscono nel ciclogramma **uno per uno**, non riassunti in un
 tratto solo da vasca a vasca: durante il giro il carroponte si spinge fino allo

@@ -66,6 +66,26 @@ def kinds(report, kind: str, severity: str | None = None) -> list:
 # --------------------------------------------------------------------------
 
 
+def _con_ostacoli(data, nomi=None):
+    """La stessa linea con le vasche di mezzo dichiarate OSTACOLO e i loro
+    svincoli: e' il modo di dire, adesso che il flag e' per vasca, quello che
+    prima diceva `empty_hook_travels_low=False`.
+
+    Carico e scarico restano liberi: agli estremi della linea non c'e' niente
+    da scavalcare, e il programma rifiuta di dichiararli ostacoli."""
+    quote = sorted(t.position for t in data.tanks.values())
+    tanks = {}
+    for nome, t in data.tanks.items():
+        estremo = t.position in (quote[0], quote[-1])
+        tanks[nome] = dataclasses.replace(
+            t,
+            gancio_basso=estremo or (nomi is not None and nome not in nomi),
+            svincolo_pos=t.position + 900 if t.position < quote[-1] else None,
+            svincolo_neg=t.position - 900 if t.position > quote[0] else None,
+        )
+    return dataclasses.replace(data, tanks=tanks)
+
+
 def make_data(positions, dwells, zones, **kw) -> ProblemData:
     """dwells: lista di (dwell_min, dwell_max) oppure (dwell_min, dwell_max,
     capacity) per stazione. Qui ogni vasca compare una volta sola nel
@@ -516,7 +536,7 @@ def test_capienza_vasca():
     # ...e resta cosi' anche sull'impianto che obbliga il gancio a risalire:
     # li' le corse a vuoto ci sono, ma cadono nel RIENTRO fra due mosse, e il
     # rientro sta gia' tutto dentro l'intervallo fra i movimenti.
-    alto = dataclasses.replace(data_v, empty_hook_travels_low=False)
+    alto = _con_ostacoli(data_v)
     check(
         abs(alto.bath_extra_seconds(2) - 3.0) < 1e-9
         and alto.empty_leg_seconds(1, 2) > data_v.empty_leg_seconds(1, 2),
@@ -662,16 +682,16 @@ def test_fasi_verticali():
     # Presa e rilascio non cambiano nemmeno sull'impianto in cui il gancio
     # calato non passa fra le vasche: li' le corse a vuoto ci sono, ma le paga
     # il RIENTRO, che e' quando avvengono davvero.
-    alto = dataclasses.replace(data, empty_hook_travels_low=False)
+    alto = _con_ostacoli(data)
     check(
         alto.pick_time_at(0) == data.pick_time_at(0)
         and alto.release_time_at(1) == data.release_time_at(1)
-        and abs(
-            alto.empty_leg_seconds(1, 2)
-            - (data.empty_leg_seconds(1, 2) + 2 * t_vuoto)
-        )
-        < 1e-9,
-        f"senza traslazione bassa le corse a vuoto le paga il rientro "
+        # almeno le due corse verticali, piu' quello che costa il giro dagli
+        # svincoli: il tratto orizzontale viene spezzato in tre, e tre
+        # accelerazioni costano piu' di una
+        and alto.empty_leg_seconds(1, 2)
+        >= data.empty_leg_seconds(1, 2) + 2 * t_vuoto - 1e-9,
+        f"con le vasche ostacolo le corse a vuoto le paga il rientro "
         f"(+{2 * t_vuoto:.2f} s)",
     )
     check(
@@ -884,19 +904,10 @@ def test_svincoli():
             engage_time=2.0,
             disengage_time=1.0,
             takt_max=400.0,
-            empty_hook_travels_low=False,
         )
         if not sv:
-            return d
-        tanks = dict(d.tanks)
-        for i, nome in enumerate(("V0", "V1", "V2", "V3")):
-            t = tanks[nome]
-            tanks[nome] = dataclasses.replace(
-                t,
-                svincolo_pos=t.position + 900 if i < 3 else None,
-                svincolo_neg=t.position - 900 if i > 0 else None,
-            )
-        return dataclasses.replace(d, tanks=tanks)
+            return _con_ostacoli(d, nomi=())  # ostacoli senza svincoli: non si puo'
+        return _con_ostacoli(d)
 
     senza, con = linea(sv=False), linea(sv=True)
     # Si esce dallo svincolo dalla parte in cui si deve andare: e' il tratto

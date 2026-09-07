@@ -99,7 +99,7 @@ Due dettagli che il resto del progetto sfrutta:
 
 ```text
 Tank            id, position, capacity, lift_height, drain_time,
-                svincolo_pos, svincolo_neg
+                svincolo_pos, svincolo_neg, gancio_basso
 StationSpec     tank_id, dwell_min, dwell_max       (una tappa del percorso)
 HoistZone       lo, hi                               (intervallo di MOSSE)
 ZonaCambioQuota position, intermediate1, intermediate2, corsa_totale
@@ -142,6 +142,7 @@ horizontal_loaded_seconds(k)
 loaded_leg_seconds(k)       # presa(k) + traslazione + rilascio(k+1)
 tratte_rientro(data, a, b)  # il rientro a vuoto: DA DOVE A DOVE, e quanto dura
 empty_leg_seconds(a, b)     # = somma delle durate delle sue tratte
+serve_alto(a, b)            # se quel rientro deve passare alto
 horizontal_empty_seconds(x, y)  # la singola tratta orizzontale
 bath_extra_seconds(station)
 slot_occupancy_seconds(station, bath)
@@ -199,13 +200,17 @@ dwell_max = T_(spec.dwell_max) - extra
 
 ### 4.4 Movimentazione verticale, e le posizioni di svincolo
 
-Presa e rilascio **non contengono mai** corse a vuoto del gancio:
+Presa e rilascio **non contengono mai** corse a vuoto del gancio: quelle
+avvengono fra due mosse, e le paga il rientro.
 
-- `empty_hook_travels_low = True` (predefinito): il gancio scarico non sale
-  affatto. Scende una volta e resta giu' finche' non ha un telaio da tirare su.
-- `empty_hook_travels_low = False`: il gancio deve risalire, ma lo fa **dentro
-  il rientro a vuoto**, non dentro presa e rilascio — perche' e' li' che avviene,
-  fra due mosse. `empty_leg_seconds(a, b)` diventa cinque tratte:
+**Il gancio basso e' una proprieta' della VASCA** (`Tank.gancio_basso`, default
+`True`), non della linea. Una vasca a `False` e' un OSTACOLO: sopra di lei il
+gancio calato non passa e non cambia quota. `serve_alto(a, b)` decide se un
+rientro deve passare alto, e risponde di si' in tre casi — si parte da un
+ostacolo, si arriva su un ostacolo, o ne cade uno fra i due punti di approccio.
+
+- Se **no**: il rientro e' una sola tratta bassa e non paga niente.
+- Se **si'**: `empty_leg_seconds(a, b)` diventa cinque tratte:
 
 ```text
 bassa(vasca_a → svincolo_a) → salita → alta(svincolo_a → svincolo_b)
@@ -226,6 +231,18 @@ Se una vasca non dichiara svincoli, li' il gancio sale e scende dov'e'.
 > torna indietro prima di ripartire**. Il percorso non e' monotono, e dedurre da
 > dove passa guardando solo i due estremi e' sbagliato: e' per questo che
 > `tratte_rientro` restituisce le tratte una per una.
+
+**La trappola del flag per vasca.** Quando era un parametro della linea, o
+*tutti* i rientri avevano le corse verticali o *nessuno*. Adesso convivono: due
+rientri fra le stesse due zone possono avere forme diverse. Il vincolo di non
+collisione legge le tratte da `tratte_rientro` e si adegua da solo — **purche'
+nessuno ricalcoli la forma del rientro da un'altra parte**. Se ti trovi a
+scrivere un secondo posto che decide se un rientro passa alto, fermati.
+
+Gli svincoli si dichiarano **per tutte le vasche o per nessuna** (almeno uno
+per vasca): qualunque vasca puo' essere il capo di un rientro che deve passare
+alto. Un ostacolo **agli estremi** della linea viene rifiutato: li' non c'e'
+niente da scavalcare, e quello che serve e' una zona di cambio quota (§4.5).
 
 ### 4.5 Le zone di cambio quota
 
