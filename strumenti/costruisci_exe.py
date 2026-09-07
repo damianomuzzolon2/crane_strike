@@ -3,7 +3,7 @@ costruisci_exe.py
 -----------------
 Produce l'eseguibile autonomo, da usare su PC dove Python non c'e'.
 
-    python costruisci_exe.py
+    python strumenti/costruisci_exe.py
 
 Al termine si trova tutto in `dist/Ciclogrammi/`: la cartella va copiata
 intera sul PC di destinazione, e si lancia `Ciclogrammi.exe`.
@@ -19,15 +19,18 @@ import subprocess
 import sys
 from pathlib import Path
 
-RADICE = Path(__file__).resolve().parent
+# Questo file sta in `strumenti/`: la radice del progetto e' la cartella sopra.
+ATTREZZI = Path(__file__).resolve().parent
+RADICE = ATTREZZI.parent
 USCITA = RADICE / "dist" / "Ciclogrammi"
 
 TEST = [
-    "kinematics.py",
-    "test_verify.py",
-    "test_excel_io.py",
-    "test_model.py",
-    "test_interfaccia.py",
+    "kinematics.py",  # l'autoverifica della cinematica sta nel modulo stesso
+    "test/test_verify.py",
+    "test/test_excel_io.py",
+    "test/test_model.py",
+    "test/test_simulazione.py",
+    "test/test_interfaccia.py",
 ]
 
 
@@ -62,7 +65,7 @@ def esegui_test() -> bool:
         ultima = [
             r for r in esito.stdout.splitlines() if r.startswith(("RISULTATO", "OK:"))
         ]
-        print(f"  {nome:22s} {ultima[-1] if ultima else 'nessun esito'}")
+        print(f"  {nome:27s} {ultima[-1] if ultima else 'nessun esito'}")
         if esito.returncode != 0:
             print("\nI test non passano: correggi prima di impacchettare.")
             print(esito.stdout[-3000:])
@@ -90,7 +93,7 @@ def main() -> int:
             "PyInstaller",
             "--noconfirm",
             "--clean",
-            str(RADICE / "ciclogrammi.spec"),
+            str(ATTREZZI / "ciclogrammi.spec"),
         ],
         cwd=RADICE,
     )

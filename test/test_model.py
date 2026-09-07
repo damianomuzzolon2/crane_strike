@@ -9,12 +9,18 @@ soluzioni costruite a mano e non richiede OR-Tools. Qui la domanda e'
 l'opposta: il modello produce soluzioni fisicamente valide?
 
 Per eseguirlo:
-    python test_model.py
+    python test/test_model.py
 """
 
 from __future__ import annotations
 
+import os
+import sys
 import time
+
+# I moduli del programma stanno nella cartella sopra questa: senza aggiungerla
+# fra i percorsi di ricerca, lanciare il test da qui non li troverebbe.
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from kinematics import Kinematics
 from model import (

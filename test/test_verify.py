@@ -9,12 +9,18 @@ verificatore?": un controllore che non segnala mai nulla e' inutile, quindi
 per ogni controllo c'e' un caso che DEVE farlo scattare.
 
 Per eseguirlo:
-    python test_verify.py
+    python test/test_verify.py
 """
 
 from __future__ import annotations
 
 import dataclasses
+import os
+import sys
+
+# I moduli del programma stanno nella cartella sopra questa: senza aggiungerla
+# fra i percorsi di ricerca, lanciare il test da qui non li troverebbe.
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from kinematics import Kinematics
 from kinematics import travel_time as kinematics_travel_time

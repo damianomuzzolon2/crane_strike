@@ -25,14 +25,37 @@ periodici. È una scelta valida: il codice qui sotto la usa.
 
 ## I file del progetto
 
-Sedici file Python, divisi per ruolo. Le dipendenze vanno in una
-direzione sola — interfaccia -> motore -> cinematica — e mai al contrario:
-`model.py` non sa che esiste un'interfaccia, e `kinematics.py` non sa che
-esiste un ciclogramma. E' quello che permette di provare il motore senza
-aprire una finestra, e la cinematica senza avere OR-Tools installato.
+In radice ci sta **solo il programma**: i nove moduli che lo compongono, i due
+documenti e il file da doppio clic. Tutto il resto e' in una sottocartella.
 
 ```text
-  interfaccia.py      ciclogramma.py      esempio.py        <- si lanciano
+create_cyclograms/
+  interfaccia.py  simulazione.py  ciclogramma.py       <- i moduli: nessuna
+  model.py  verify.py  excel_io.py                        sottocartella, cosi'
+  kinematics.py  plotting.py  manuale.py                  si importano per nome
+  Ciclogrammi.bat  README.md  ARCHITETTURA.md
+  requirements.txt
+
+  test/        i test e l'esempio d'uso in codice
+  strumenti/   costruisci_exe.py e la ricetta PyInstaller
+  doc/         immagini del manuale, SOLVE_riga_per_riga.docx
+  dati/        file Excel di esempio e di prova
+```
+
+I moduli restano tutti in radice di proposito. Sono nove, quindi non e' un
+disordine: metterli in un package obbligherebbe a scrivere
+`from ciclogrammi.model import ...` ovunque e ad avviare con `python -m`,
+mentre questo programma non si installa mai con `pip` — gira dalla cartella o
+dall'eseguibile.
+
+Le dipendenze vanno in una direzione sola — interfaccia -> motore ->
+cinematica — e mai al contrario: `model.py` non sa che esiste un'interfaccia, e
+`kinematics.py` non sa che esiste un ciclogramma. E' quello che permette di
+provare il motore senza aprire una finestra, e la cinematica senza avere
+OR-Tools installato.
+
+```text
+  interfaccia.py      ciclogramma.py   test/esempio.py      <- si lanciano
         |                   |                  |
         +-------------------+------------------+
         |          |          |         |          |
@@ -68,24 +91,26 @@ aprire una finestra, e la cinematica senza avere OR-Tools installato.
 | --- | ---: | --- |
 | `interfaccia.py` | 2053 | L'**interfaccia grafica** (tkinter). La classe `Applicazione` e' tutta la finestra: caricamento, calcolo in background, grafico incorporato (ciclogramma o pettine, secondo come ci si e' arrivati), la pagina unica in cui il ciclogramma si modifica -- calcolato o composto da zero che sia -- simulazione, verifica e salvataggio. `autotest()` prova l'installazione da sola. E' il programma che usa un utente normale. |
 | `ciclogramma.py` | 191 | Lo stesso lavoro da **riga di comando**, per chi preferisce il terminale o vuole automatizzare. |
-| `esempio.py` | 198 | La linea di esempio definita **in codice** invece che in Excel, per chi vuole integrare il solutore in qualcos'altro. |
-| `costruisci_exe.py` | 119 | Costruisce l'**eseguibile autonomo** con PyInstaller. Vedi sotto. |
-| `ciclogrammi.spec` | — | La ricetta per PyInstaller: cosa includere, cosa escludere, come impacchettare. Non si lancia a mano, la usa `costruisci_exe.py`. |
+| `test/esempio.py` | 198 | La linea di esempio definita **in codice** invece che in Excel, per chi vuole integrare il solutore in qualcos'altro. |
+| `strumenti/costruisci_exe.py` | 119 | Costruisce l'**eseguibile autonomo** con PyInstaller. Vedi sotto. |
+| `strumenti/ciclogrammi.spec` | — | La ricetta per PyInstaller: cosa includere, cosa escludere, come impacchettare. Non si lancia a mano, la usa `costruisci_exe.py`. |
 | `Ciclogrammi.bat` | — | Avvia l'interfaccia con un doppio clic, senza aprire il terminale. |
 
 ### Test
 
-Ogni file di test si lancia da solo (`python test_xxx.py`), stampa cosa ha
-provato e restituisce un codice d'uscita diverso da zero se qualcosa non va.
-Non serve pytest.
+Ogni file di test si lancia da solo dalla radice del progetto
+(`python test/test_xxx.py`), stampa cosa ha provato e restituisce un codice
+d'uscita diverso da zero se qualcosa non va. Non serve pytest. Le prime righe
+di ogni test aggiungono la cartella sopra ai percorsi di ricerca, cosi' i
+moduli si trovano comunque.
 
 | file | righe | cosa verifica |
 | --- | ---: | --- |
-| `test_verify.py` | 999 | **Il verificatore.** Risponde a "chi verifica il verificatore?": venti casi, di cui uno solo corretto e tutti gli altri rotti di proposito (collisioni, permanenze fuori tolleranza, periodicita' incoerente, geometrie patologiche, capienze). Un controllore che non segnala mai nulla e' inutile, quindi ogni controllo ha un caso che DEVE farlo scattare. Non richiede OR-Tools: le soluzioni sono costruite a mano. |
-| `test_model.py` | 586 | **Il modello CP-SAT.** Risolve davvero e passa ogni soluzione al verificatore: vasche ravvicinate, tre carroponti, capienza, tempi verticali, e la fedelta' della ricostruzione di una soluzione dai suoi gradi di liberta'. Richiede OR-Tools. |
-| `test_excel_io.py` | 954 | **La lettura e la scrittura Excel.** Quasi tutti i casi sono file compilati male: valori mancanti o non numerici, vasche inesistenti o duplicate, righe riordinate, parametri sbagliati, o un file scritto per la vecchia versione in metri. Piu' l'andata e ritorno del ciclogramma salvato nel file, e la struttura del file dei risultati: l'ordine dei fogli, i due cartelli colorati, e che l'elenco dentro un cartello dica davvero i fogli che seguono. Non richiede OR-Tools. |
-| `test_simulazione.py` | 755 | **La simulazione.** Il controllo che conta e' incrociato: ogni pezzo appeso deve stare *esattamente* dove sta il gancio di un carroponte che lo tiene, e ogni carroponte che tiene qualcosa deve avere un pezzo li'. Se simulazione e ciclogramma raccontassero due storie diverse, una delle due sarebbe sbagliata. Lo stesso controllo viene rifatto sulle quote **disegnate**, che non sono quelle vere: il telaio deve restare appeso al bilancino anche dopo il rimappaggio delle profondita'. Le vasche di prova hanno corse verticali **diverse fra loro** apposta: con corse tutte uguali, prendere la corsa della vasca sbagliata darebbe comunque il risultato giusto. In fondo, i casi in cui la geometria del disegno degenera: corse e ingombri tutti a zero, tutte le tappe nella stessa vasca. Non richiede OR-Tools. |
-| `test_interfaccia.py` | 1085 | **Le funzioni dell'interfaccia grafica.** La finestra viene costruita davvero e pilotata da codice — si "premono" i pulsanti chiamando i metodi e si fa girare il ciclo degli eventi con `update()` invece di `mainloop()`. Verifica che i pulsanti si abilitino al momento giusto, che il calcolo in background consegni il risultato, che una soluzione calcolata riletta come tempi in vasca e ricomposta dia esattamente lo stesso ciclogramma, che le modifiche vengano riverificate, che l'immagine salvata sia il ciclogramma anche componendo dal pettine, che la scheda di modifica si apra solo dopo 'Calcola man' o 'Modifica' e mai mentre il solutore lavora, che un ciclogramma salvato si riapra identico anche se lasciato a meta', che la composizione da zero produca il pettine giusto, che un trasporto assegnato si possa togliere con lo stesso gesto con cui lo si e' assegnato, e che la simulazione si apra solo quando un ciclogramma c'e' davvero e segua le modifiche mentre e' aperta. Richiede OR-Tools e un ambiente grafico. |
+| `test/test_verify.py` | 999 | **Il verificatore.** Risponde a "chi verifica il verificatore?": venti casi, di cui uno solo corretto e tutti gli altri rotti di proposito (collisioni, permanenze fuori tolleranza, periodicita' incoerente, geometrie patologiche, capienze). Un controllore che non segnala mai nulla e' inutile, quindi ogni controllo ha un caso che DEVE farlo scattare. Non richiede OR-Tools: le soluzioni sono costruite a mano. |
+| `test/test_model.py` | 586 | **Il modello CP-SAT.** Risolve davvero e passa ogni soluzione al verificatore: vasche ravvicinate, tre carroponti, capienza, tempi verticali, e la fedelta' della ricostruzione di una soluzione dai suoi gradi di liberta'. Richiede OR-Tools. |
+| `test/test_excel_io.py` | 954 | **La lettura e la scrittura Excel.** Quasi tutti i casi sono file compilati male: valori mancanti o non numerici, vasche inesistenti o duplicate, righe riordinate, parametri sbagliati, o un file scritto per la vecchia versione in metri. Piu' l'andata e ritorno del ciclogramma salvato nel file, e la struttura del file dei risultati: l'ordine dei fogli, i due cartelli colorati, e che l'elenco dentro un cartello dica davvero i fogli che seguono. Non richiede OR-Tools. |
+| `test/test_simulazione.py` | 755 | **La simulazione.** Il controllo che conta e' incrociato: ogni pezzo appeso deve stare *esattamente* dove sta il gancio di un carroponte che lo tiene, e ogni carroponte che tiene qualcosa deve avere un pezzo li'. Se simulazione e ciclogramma raccontassero due storie diverse, una delle due sarebbe sbagliata. Lo stesso controllo viene rifatto sulle quote **disegnate**, che non sono quelle vere: il telaio deve restare appeso al bilancino anche dopo il rimappaggio delle profondita'. Le vasche di prova hanno corse verticali **diverse fra loro** apposta: con corse tutte uguali, prendere la corsa della vasca sbagliata darebbe comunque il risultato giusto. In fondo, i casi in cui la geometria del disegno degenera: corse e ingombri tutti a zero, tutte le tappe nella stessa vasca. Non richiede OR-Tools. |
+| `test/test_interfaccia.py` | 1085 | **Le funzioni dell'interfaccia grafica.** La finestra viene costruita davvero e pilotata da codice — si "premono" i pulsanti chiamando i metodi e si fa girare il ciclo degli eventi con `update()` invece di `mainloop()`. Verifica che i pulsanti si abilitino al momento giusto, che il calcolo in background consegni il risultato, che una soluzione calcolata riletta come tempi in vasca e ricomposta dia esattamente lo stesso ciclogramma, che le modifiche vengano riverificate, che l'immagine salvata sia il ciclogramma anche componendo dal pettine, che la scheda di modifica si apra solo dopo 'Calcola man' o 'Modifica' e mai mentre il solutore lavora, che un ciclogramma salvato si riapra identico anche se lasciato a meta', che la composizione da zero produca il pettine giusto, che un trasporto assegnato si possa togliere con lo stesso gesto con cui lo si e' assegnato, e che la simulazione si apra solo quando un ciclogramma c'e' davvero e segua le modifiche mentre e' aperta. Richiede OR-Tools e un ambiente grafico. |
 
 `kinematics.py` ha in fondo un autotest che si lancia allo stesso modo
 (`python kinematics.py`).
@@ -725,11 +750,11 @@ fogli (sei se ci si salva dentro un ciclogramma):
 
 ### Uso da Python
 
-`esempio.py` mostra come definire la stessa linea direttamente in codice e
+`test/esempio.py` mostra come definire la stessa linea direttamente in codice e
 richiamare il solutore, se serve integrarlo in qualcos'altro:
 
 ```bash
-python esempio.py
+python test/esempio.py
 ```
 
 ## Creare l'eseguibile per PC senza Python
@@ -743,11 +768,11 @@ pip install pyinstaller
 Poi, dalla cartella del progetto, **un comando**:
 
 ```bash
-python costruisci_exe.py
+python strumenti/costruisci_exe.py
 ```
 
 Ci vogliono un paio di minuti. Al termine si trova tutto in
-`dist/Ciclogrammi/`, circa 290 MB: si copia **la cartella intera** sul PC di
+`dist/Ciclogrammi/`, circa 390 MB: si copia **la cartella intera** sul PC di
 destinazione e si lancia `Ciclogrammi.exe`. Non serve installare ne' Python
 ne' altro.
 
@@ -1228,7 +1253,7 @@ if not report.ok:
     ...
 ```
 
-`esempio.py` la esegue automaticamente dopo ogni risoluzione.
+`test/esempio.py` la esegue automaticamente dopo ogni risoluzione.
 
 Il verificatore **non usa CP-SAT**: riparte dalla soluzione e ricontrolla ogni
 vincolo in Python puro. Serve a rispondere alla domanda "e se fosse sbagliata
@@ -1465,13 +1490,13 @@ contigua fra zone, piu' ricette, collisione meno conservativa).
 ## Nota sui test effettuati
 
 ```bash
-python kinematics.py        # autotest della cinematica
-python test_verify.py       # il verificatore              (no OR-Tools)
-python test_excel_io.py     # lettura e scrittura Excel    (no OR-Tools)
-python test_simulazione.py  # la simulazione               (no OR-Tools)
-python test_model.py        # il modello CP-SAT            (serve OR-Tools)
-python test_interfaccia.py  # l'interfaccia grafica        (serve OR-Tools)
-python esempio.py           # risoluzione reale + verifica + grafico
+python kinematics.py             # autotest della cinematica
+python test/test_verify.py       # il verificatore              (no OR-Tools)
+python test/test_excel_io.py     # lettura e scrittura Excel    (no OR-Tools)
+python test/test_simulazione.py  # la simulazione               (no OR-Tools)
+python test/test_model.py        # il modello CP-SAT            (serve OR-Tools)
+python test/test_interfaccia.py  # l'interfaccia grafica        (serve OR-Tools)
+python test/esempio.py           # risoluzione reale + verifica + grafico
 ```
 
 Ognuno stampa cosa ha provato e finisce con `RISULTATO: n ok, m falliti`.

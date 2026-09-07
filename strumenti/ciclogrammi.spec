@@ -2,8 +2,8 @@
 """
 Ricetta PyInstaller per produrre l'eseguibile autonomo.
 
-Non si lancia a mano: usare `python costruisci_exe.py`, che controlla le
-premesse e spiega cosa fare se qualcosa manca.
+Non si lancia a mano: usare `python strumenti/costruisci_exe.py`, che controlla
+le premesse e spiega cosa fare se qualcosa manca.
 
 Scelta della forma: UNA CARTELLA (onedir), non un singolo file. Con OR-Tools e
 matplotlib dentro, un onefile pesa oltre 200 MB e a ogni avvio deve scompattarsi
@@ -12,7 +12,14 @@ PC di stabilimento anche di piu'. La cartella si copia tale e quale e parte
 subito.
 """
 
+import os
+
 from PyInstaller.utils.hooks import collect_all, collect_submodules
+
+# SPECPATH lo definisce PyInstaller: e' la cartella di questo file, cioe'
+# `strumenti/`. I moduli del progetto stanno nella cartella sopra. Passare
+# percorsi assoluti evita di dipendere da dove viene lanciato il comando.
+RADICE = os.path.dirname(SPECPATH)  # noqa: F821 -- SPECPATH lo inietta PyInstaller
 
 nascosti = []
 dati = []
@@ -48,8 +55,8 @@ nascosti += [
 ]
 
 analisi = Analysis(
-    ["interfaccia.py"],
-    pathex=["."],
+    [os.path.join(RADICE, "interfaccia.py")],
+    pathex=[RADICE],
     binaries=binari,
     datas=dati,
     hiddenimports=nascosti,

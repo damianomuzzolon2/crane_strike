@@ -6,14 +6,30 @@ invarianti regge, e dove sono le trappole — comprese quelle in cui siamo gia'
 caduti, che sono la parte piu' utile.
 
 Stato al momento della scrittura: 16 file Python, 15.223 righe, cinque suite di
-test per **406 asserzioni** complessive.
+test per **408 asserzioni** complessive.
 
 ---
 
 ## 1. La mappa, e la direzione delle dipendenze
 
+### Dove stanno i file
+
+In radice ci sono **solo i nove moduli** del programma, i due documenti, il
+`.bat` e `requirements.txt`. Il resto sta in `test/`, `strumenti/`, `doc/`,
+`dati/`.
+
+I moduli non sono in un package di proposito: si importano per nome
+(`from model import solve`) e i programmi si avviano direttamente
+(`python interfaccia.py`). Un package obbligherebbe a `python -m` e a
+qualificare ogni import, e questo programma non si installa mai con `pip` —
+gira dalla cartella o dall'eseguibile PyInstaller. Il prezzo e' che chi sta in
+una sottocartella deve rimettersi la radice fra i percorsi di ricerca: i test
+lo fanno con tre righe in testa al file, il `.spec` con `SPECPATH`.
+
+### La direzione delle dipendenze
+
 ```text
-  interfaccia.py      ciclogramma.py      esempio.py        <- si lanciano
+  interfaccia.py      ciclogramma.py   test/esempio.py      <- si lanciano
         |                   |                  |
         +-------------------+------------------+
         |          |          |         |          |
@@ -701,11 +717,11 @@ un codice d'uscita.
 
 | file | asserzioni | richiede | domanda a cui risponde |
 | --- | ---: | --- | --- |
-| `test_verify.py` | 98 | — | il verificatore trova davvero quello che deve? |
-| `test_excel_io.py` | 94 | — | un file compilato male viene respinto con un messaggio utile? |
-| `test_simulazione.py` | 76 | — | la simulazione mostra il ciclogramma che c'e'? |
-| `test_model.py` | 40 | OR-Tools | il modello produce soluzioni fisicamente valide? |
-| `test_interfaccia.py` | 98 | OR-Tools + grafica | l'interfaccia si comporta come deve? |
+| `test/test_verify.py` | 98 | — | il verificatore trova davvero quello che deve? |
+| `test/test_excel_io.py` | 94 | — | un file compilato male viene respinto con un messaggio utile? |
+| `test/test_simulazione.py` | 78 | — | la simulazione mostra il ciclogramma che c'e'? |
+| `test/test_model.py` | 40 | OR-Tools | il modello produce soluzioni fisicamente valide? |
+| `test/test_interfaccia.py` | 98 | OR-Tools + grafica | l'interfaccia si comporta come deve? |
 
 > `test_model.py` risolve davvero, con limiti di tempo dell'ordine del minuto.
 > Su una macchina occupata un caso puo' scadere e restituire `UNKNOWN`: e'
@@ -808,11 +824,11 @@ Prima di considerare finito qualunque cambiamento:
 
 ```bash
 python kinematics.py
-python test_verify.py        python test_excel_io.py     python test_simulazione.py
-python test_model.py         python test_interfaccia.py
-python esempio.py            python interfaccia.py --autotest
+python test/test_verify.py   python test/test_excel_io.py  python test/test_simulazione.py
+python test/test_model.py    python test/test_interfaccia.py
+python test/esempio.py       python interfaccia.py --autotest
 ```
 
-Sull'esempio, `esempio.py` deve restare a **T = 110,00 s** con separazione
+Sull'esempio, `test/esempio.py` deve restare a **T = 110,00 s** con separazione
 minima 3500 mm contro 1800 richiesti. Se cambia, o hai migliorato qualcosa e lo
 sai, oppure hai rotto qualcosa e non lo sai ancora.

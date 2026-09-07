@@ -12,15 +12,20 @@ background non consegna mai il risultato, o che il salvataggio non produce
 nulla -- cose che un test sulle sole funzioni di calcolo non vedrebbe.
 
 Per eseguirlo:
-    python test_interfaccia.py
+    python test/test_interfaccia.py
 """
 
 from __future__ import annotations
 
 import os
+import sys
 import tempfile
 import time
 import tkinter as tk
+
+# I moduli del programma stanno nella cartella sopra questa: senza aggiungerla
+# fra i percorsi di ricerca, lanciare il test da qui non li troverebbe.
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from excel_io import scrivi_modello
 

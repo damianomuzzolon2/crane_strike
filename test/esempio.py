@@ -8,10 +8,16 @@ time dato), poi si risolve il ciclogramma con CP-SAT e lo si visualizza.
 
 Per eseguirlo:
     pip install ortools matplotlib
-    python esempio.py
+    python test/esempio.py
 """
 
 import dataclasses
+import os
+import sys
+
+# I moduli del programma stanno nella cartella sopra questa: senza aggiungerla
+# fra i percorsi di ricerca, lanciare l'esempio da qui non li troverebbe.
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import matplotlib
 
