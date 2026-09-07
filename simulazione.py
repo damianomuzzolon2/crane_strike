@@ -1336,46 +1336,44 @@ class FinestraSimulazione(tk.Toplevel):
         pelo_x, pelo_y = [], []
         bordo_x, bordo_y = 0.045 * larghezza, 0.02 * h_max
         livello = self.bordo_vasca - 0.06 * h_max  # pelo libero, sotto il bordo
+        estremi = {0, d.n_stations - 1}
         for y in quote:
-            corsa = max(
-                (
-                    d.lift_height_at(i)
-                    for i in range(d.n_stations)
-                    if abs(d.station_position(i) - y) < 1e-6
-                ),
-                default=0.0,
+            qui = [
+                i
+                for i in range(d.n_stations)
+                if abs(d.station_position(i) - y) < 1e-6
+            ]
+            corsa = max((d.lift_height_at(i) for i in qui), default=0.0)
+            # E' UNA VASCA solo se ci si immerge il telaio in una tappa di
+            # mezzo. Il CARICO e lo SCARICO non sono bagni nemmeno quando hanno
+            # una corsa verticale -- e ce l'hanno, su parecchi impianti: il
+            # telaio scende su una rulliera, su un cavalletto, dentro una fossa.
+            # Il discriminante era la sola corsa, e li' disegnava una vasca
+            # piena di bagno, cosa falsa e proprio sulle due tappe che si
+            # guardano per prime.
+            e_vasca = any(
+                i not in estremi and d.lift_height_at(i) > 0 for i in qui
             )
-            if corsa <= 0:
-                # Corsa nulla vuol dire che il telaio non scende: non e' una
-                # vasca ma una postazione, tipicamente il carico e lo scarico.
-                # Disegnarla come una vasca piena di bagno direbbe una cosa
-                # falsa, e proprio sulle due tappe che si guardano per prime.
+            if not e_vasca:
                 #
-                # A CHE ALTEZZA. Di norma il telaio ci arriva alla quota di
-                # trasporto, e il piano sta li'. Con una ZONA DI CAMBIO QUOTA
-                # no: li' il telaio viene posato a `intermediate1`, che sta
-                # parecchio piu' in basso, e un piano lasciato in alto lo
-                # faceva sembrare infilato dentro alla postazione -- col
-                # carroponte che ci calava le funi attraverso. Il piano segue
-                # quindi la quota a cui il telaio riposa davvero, abbassato di
-                # quanto il telaio e' alto perche' ci si appoggi sopra invece
-                # di attraversarlo.
-                zona = next(
-                    (
-                        d.zona_cambio_quota(i)
-                        for i in range(d.n_stations)
-                        if abs(d.station_position(i) - y) < 1e-6
-                        and d.zona_cambio_quota(i) is not None
-                    ),
-                    None,
-                )
-                if zona is None:
-                    cima = 0.0
-                else:
-                    cima = (
-                        self._quota_disegnata(zona.z_int1, zona.corsa_totale)
-                        - self.altezza_telaio
+                # A CHE ALTEZZA. Il piano segue la quota a cui il telaio ci
+                # viene POSATO, abbassato di quanto il telaio e' alto perche'
+                # ci si appoggi sopra invece di attraversarlo. Un piano lasciato
+                # alla quota di trasporto faceva sembrare il telaio infilato
+                # dentro alla postazione -- col carroponte che ci calava le funi
+                # attraverso -- e si vedeva su ogni postazione con una corsa:
+                # quelle di una zona di cambio quota, dove il telaio si posa a
+                # meta' corsa, e quelle che semplicemente hanno una rulliera
+                # piu' in basso.
+                cima = (
+                    min(
+                        self._quota_disegnata(
+                            d.quota_di_riposo(i), d.corsa_verticale(i)
+                        )
+                        for i in qui
                     )
+                    - self.altezza_telaio
+                )
                 # a che quota e' finito il piano: e' l'unico numero del disegno
                 # che deve tornare con quello dei telai posati, e tenerlo qui
                 # permette di controllarlo senza andare a frugare fra le patch

@@ -1054,17 +1054,50 @@ def test_cambio_quota():
             )
         f.destroy()
 
-        # Senza zone di cambio quota nulla si muove: il piano resta dov'era.
+        # Senza zone di cambio quota il telaio si posa alla quota di trasporto,
+        # e il piano gli sta giusto sotto: la regola e' la stessa, cambia solo
+        # dove il telaio viene posato.
         sol_n, dati_n = proposta_semplice(dati_prova())
         g = FinestraSimulazione(radice, dati_n, sol_n)
         g.update()
         y0 = dati_n.station_position(0)
         check(
-            abs(g.quote_postazioni.get(y0, 9e9)) < 1e-9,
-            f"senza cambio quota il piano resta alla quota di trasporto "
-            f"({g.quote_postazioni.get(y0)})",
+            abs(g.quote_postazioni.get(y0, 9e9) + g.altezza_telaio) < 1e-9,
+            f"senza cambio quota il piano sta sotto al telaio posato alla "
+            f"quota di trasporto ({g.quote_postazioni.get(y0)})",
         )
         g.destroy()
+
+        # CARICO e SCARICO non sono bagni nemmeno quando hanno una corsa
+        # verticale -- e ce l'hanno, su parecchi impianti: il telaio scende su
+        # una rulliera, su un cavalletto, dentro una fossa. Il discriminante
+        # era la sola corsa, e li' disegnava una vasca piena di bagno.
+        import dataclasses as _dc
+
+        tanks = dict(dati_n.tanks)
+        for nome in ("CARICO", "SCARICO"):
+            tanks[nome] = _dc.replace(tanks[nome], lift_height=600.0)
+        con_corsa = _dc.replace(dati_n, tanks=tanks)
+        sol_c, dati_c = proposta_semplice(con_corsa)
+        h = FinestraSimulazione(radice, dati_c, sol_c)
+        h.update()
+        estremi = [dati_c.station_position(0), dati_c.station_position(-1)]
+        check(
+            all(y in h.quote_postazioni for y in estremi),
+            f"carico e scarico con una corsa restano POSTAZIONI, non vasche "
+            f"({sorted(h.quote_postazioni)})",
+        )
+        # e il loro piano scende dove il telaio viene posato davvero
+        atteso = h._quota_disegnata(
+            dati_c.quota_di_riposo(0), dati_c.corsa_verticale(0)
+        )
+        check(
+            abs(h.quote_postazioni[estremi[0]] - (atteso - h.altezza_telaio)) < 1e-9
+            and h.quote_postazioni[estremi[0]] < -h.altezza_telaio,
+            f"e il piano li segue in basso ({h.quote_postazioni[estremi[0]]:.0f} "
+            f"su telaio {atteso:.0f})",
+        )
+        h.destroy()
     except tk.TclError as e:
         print(f"  --   ambiente grafico non disponibile, salto il disegno ({e})")
     finally:
