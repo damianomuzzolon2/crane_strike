@@ -94,6 +94,7 @@ OR-Tools installato.
 | `test/esempio.py` | 198 | La linea di esempio definita **in codice** invece che in Excel, per chi vuole integrare il solutore in qualcos'altro. |
 | `strumenti/costruisci_exe.py` | 119 | Costruisce l'**eseguibile autonomo** con PyInstaller. Vedi sotto. |
 | `strumenti/ciclogrammi.spec` | — | La ricetta per PyInstaller: cosa includere, cosa escludere, come impacchettare. Non si lancia a mano, la usa `costruisci_exe.py`. |
+| `strumenti/genera_doc.py` | 470 | Produce i documenti Word in `doc/`: la spiegazione riga per riga di ogni modulo e l'albero delle chiamate. Il codice citato **non e' ricopiato**, viene estratto dal sorgente per nome a ogni generazione. Vedi *La documentazione in `doc/`*. |
 | `Ciclogrammi.bat` | — | Avvia l'interfaccia con un doppio clic, senza aprire il terminale. |
 
 ### Test
@@ -756,6 +757,36 @@ richiamare il solutore, se serve integrarlo in qualcos'altro:
 ```bash
 python test/esempio.py
 ```
+
+## La documentazione in `doc/`
+
+Oltre a questo file e ad `ARCHITETTURA.md`, in `doc/` c'e' una sottocartella
+per ogni modulo con i documenti Word che lo spiegano **riga per riga**, nello
+stile di `doc/model/solve_riga_per_riga.docx`. Piu' `ALBERO_DELLE_CHIAMATE.docx`,
+che dice quale funzione ne chiama quale altra.
+
+```bash
+python strumenti/genera_doc.py              # rigenera tutto
+python strumenti/genera_doc.py kinematics   # solo doc/kinematics/
+python strumenti/genera_doc.py --albero     # solo l'albero delle chiamate
+python strumenti/genera_doc.py --copertura  # quali funzioni non sono ancora spiegate
+```
+
+Due proprieta' di questi documenti vale la pena conoscerle, perche' cambiano
+il modo di mantenerli:
+
+- **Il codice citato non e' trascritto.** Viene ritagliato dal sorgente al
+  momento della generazione, cercando la funzione per nome nell'albero
+  sintattico e delimitando i tratti con pezzi di righe vere. Un documento non
+  puo' quindi descrivere un codice diverso da quello che c'e'. Se una riga
+  citata sparisce, la generazione **fallisce** dicendo quale documento e quale
+  ancora: e' il segnale che quel paragrafo va riscritto, e arriva subito invece
+  che rileggendo il documento fra sei mesi.
+- **L'albero delle chiamate non e' scritto a mano.** Lo ricava l'AST a ogni
+  generazione, e con lui verifica da solo la regola dell'architettura: nessun
+  modulo deve chiamare quelli che gli stanno sopra.
+
+Il testo sta in `strumenti/doc_contenuti/<modulo>.py`, uno per modulo.
 
 ## Creare l'eseguibile per PC senza Python
 
