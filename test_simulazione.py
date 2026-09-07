@@ -637,6 +637,109 @@ def test_vasca_a_piu_posti():
     )
 
 
+def test_quota_continua():
+    """La QUOTA DISEGNATA del gancio non salta mai.
+
+    E' la proprieta' che mancava, e il difetto che nascondeva era grosso: il
+    gancio compariva di colpo a fondo corsa all'inizio di un aggancio, dopo
+    essere arrivato li' disegnato in alto. Nasce dalle postazioni SENZA CORSA
+    -- il carico e lo scarico di quasi tutte le linee -- dove "il gancio e'
+    calato" e "il gancio e' in alto" sono la stessa quota: chi teneva il conto
+    a stati (dopo un rilascio e' giu', dopo una salita e' su) da li' in poi
+    diceva il contrario del vero.
+
+    Si guarda la FRAZIONE di discesa, cioe' quello che finisce sullo schermo, e
+    non i millimetri: due quote diverse su corse diverse possono essere tutte e
+    due "in fondo", e sono i millimetri a saltare senza che si veda niente."""
+    print("\n[12] la quota del gancio non salta")
+    for etichetta, linea in (
+        ("gancio basso", dati_prova()),
+        ("gancio alto", dati_prova(gancio_basso=False)),
+    ):
+        sol, dati = proposta_semplice(linea)
+        sim = Simulazione(dati, sol)
+        N = 5000
+        passo = sim.durata / N
+        peggio, quando, fasi = 0.0, 0.0, ("", "")
+        prec: dict[int, tuple[float, str]] = {}
+        for i in range(N + 1):
+            istante = sim.durata * i / N
+            for c in sim.istantanea(istante).carri:
+                frazione = (
+                    0.0
+                    if c.corsa <= 0 or c.z >= 0
+                    else min(1.0, -c.z / c.corsa)
+                )
+                prima = prec.get(c.carro)
+                if prima is not None and abs(frazione - prima[0]) > peggio:
+                    peggio = abs(frazione - prima[0])
+                    quando, fasi = istante, (prima[1], c.fase)
+                prec[c.carro] = (frazione, c.fase)
+        # in un fotogramma il gancio non puo' fare tutta la corsa: un salto
+        # vicino a 1 e' il difetto, il moto normale sta molto sotto
+        check(
+            peggio < 0.15,
+            f"{etichetta}: al massimo {peggio:.3f} di corsa in "
+            f"{passo * 1000:.0f} ms (a t={quando:.1f} s, {fasi[0]!r} -> "
+            f"{fasi[1]!r})",
+        )
+
+
+def test_quota_solo_da_fermi():
+    """Mentre il carroponte TRASLA la quota del gancio non cambia.
+
+    E' la regola che tiene insieme la simulazione e il ciclogramma. Nel
+    ciclogramma un tratto obliquo e' uno spostamento e un tratto piatto e'
+    tutto il resto: se la simulazione facesse scendere il gancio in mezzo a una
+    traslazione, chi guarda le due viste vedrebbe due macchine diverse.
+
+    Il caso che lo mette alla prova e' una postazione SENZA CORSA -- il carico,
+    lo scarico -- da cui si riparte verso una vasca che la corsa ce l'ha: il
+    gancio deve scendere, e il modello non gli da' nemmeno un secondo perche'
+    con la traslazione a gancio basso quelle corse sono gratis. Va messo in una
+    SOSTA, che e' dove il ciclogramma mostra un tratto piatto."""
+    print("\n[13] la quota cambia solo da fermi")
+    from model import Segment
+    from simulazione import _quote_a_vuoto
+
+    d = dati_prova()  # CARICO a 0 senza corsa, RISCIACQUO a 9000 con 800 mm
+
+    def giro(con_attesa: bool):
+        segs = [Segment("release", 0.0, 2.0, 0.0, 0.0, None, move=0)]
+        if con_attesa:
+            segs.append(Segment("wait", 2.0, 3.0, 0.0, 0.0, None))
+        t = segs[-1].t_end
+        segs.append(Segment("empty", t, t + 7.0, 0.0, 9000.0, d.kin_empty))
+        segs.append(
+            Segment("pick", t + 7.0, t + 10.0, 9000.0, 9000.0, None, move=2)
+        )
+        quote = _quote_a_vuoto(d, segs)
+        i_empty = next(i for i, s in enumerate(segs) if s.kind == "empty")
+        return segs, quote, quote[i_empty]
+
+    segs, quote, rientro = giro(con_attesa=True)
+    check(
+        abs(rientro[0] - rientro[1]) < 1e-9 and abs(rientro[0] - 1.0) < 1e-9,
+        f"col tempo per farlo, il rientro trasla a quota costante "
+        f"({rientro[0]:.3f} -> {rientro[1]:.3f})",
+    )
+    attesa = quote[1]
+    check(
+        abs(attesa[0]) < 1e-9 and abs(attesa[1] - 1.0) < 1e-9 and attesa[2] > 0,
+        f"e la discesa sta tutta nella sosta ({attesa[0]:.3f} -> "
+        f"{attesa[1]:.3f} su corsa {attesa[2]:.0f})",
+    )
+
+    # Senza nessuna sosta il dislivello non ha dove stare, e allora si fa
+    # durante la traslazione: e' un ripiego, e va saputo.
+    _, _, rientro = giro(con_attesa=False)
+    check(
+        abs(rientro[0]) < 1e-9 and abs(rientro[1] - 1.0) < 1e-9,
+        f"senza nessuna sosta non resta che farlo traslando "
+        f"({rientro[0]:.3f} -> {rientro[1]:.3f})",
+    )
+
+
 def test_gancio_resta_giu(d: ProblemData):
     """Il gancio scarico non risale: trasla basso e alla vasca dopo ci arriva
     gia' in fondo. E' lo standard, e cambia i tempi -- non solo il disegno."""
@@ -644,30 +747,72 @@ def test_gancio_resta_giu(d: ProblemData):
     sol, dati = proposta_semplice(d)
     sim = Simulazione(dati, sol)
 
-    risalite, alto = 0, 0
-    for _, ist in campioni(sim):
-        for c in ist.carri:
-            if c.con_pezzo or c.corsa <= 0:
-                continue  # col telaio in mano il gancio sta in alto, e deve
-            alto += 1
-            if c.z > -0.5 * c.corsa:
-                risalite += 1
-    check(alto > 0, f"il gancio passa {alto} istanti scarico sopra una vasca")
+    # Col gancio che trasla basso non esiste NESSUNA corsa verticale a vuoto:
+    # non e' una questione di disegno, e' che quei tratti il modello non li
+    # emette proprio.
+    tratti = [s for lista in sol.segments_per_hoist for s in lista]
     check(
-        risalite == 0,
-        f"e non lo si vede mai tornare in alto a vuoto ({risalite} istanti)",
+        not [s for s in tratti if s.kind == "lift_empty"],
+        f"nessuna corsa verticale a vuoto nel giro ({len(tratti)} tratti in "
+        f"tutto)",
     )
 
-    # Anche traslando: e' li' che si vedeva risalire per niente.
-    in_viaggio = [
-        c
-        for _, ist in campioni(sim, 400)
-        for c in ist.carri
-        if c.fase == "rientro a vuoto"
-    ]
+    # E nel disegno il gancio non si alza MAI piu' di quanto serva.
+    #
+    # Attenzione al criterio: "mai in alto" sarebbe sbagliato. Andando verso
+    # una postazione SENZA CORSA -- il carico, lo scarico -- il telaio si
+    # prende alla quota di trasporto, e li' il gancio deve stare in alto per
+    # forza. Il criterio giusto e' che durante un rientro la quota resti
+    # compresa fra quelle dei due capi: ne' piu' in alto di quanto chieda
+    # l'arrivo, ne' piu' in basso di quanto dia la partenza.
+    def frazione_a_riposo(stazione: int) -> float:
+        corsa = dati.corsa_verticale(stazione)
+        if corsa <= 0:
+            return 0.0
+        return min(1.0, -dati.quota_di_riposo(stazione) / corsa)
+
+    def stazione_in(x: float):
+        for i in range(dati.n_stations):
+            if abs(dati.approach_position(i) - x) < 1e-6:
+                return i
+        return None
+
+    import bisect
+
+    traiettoria = sim._carri[0]
+    guardati, fuori, peggiore = 0, 0, ""
+    for istante, ist in campioni(sim, 3000):
+        stato = ist.carri[0]
+        if stato.con_pezzo:
+            continue
+        tau = traiettoria.t0 + (istante - traiettoria.t0) % sim.T
+        i = max(0, bisect.bisect_right(traiettoria.inizi, tau) - 1)
+        s = traiettoria.segmenti[i]
+        if s.kind != "empty":
+            continue
+        da, a = stazione_in(s.x_start), stazione_in(s.x_end)
+        if da is None or a is None:
+            continue
+        basso = min(frazione_a_riposo(da), frazione_a_riposo(a))
+        alto = max(frazione_a_riposo(da), frazione_a_riposo(a))
+        f = (
+            0.0
+            if stato.corsa <= 0 or stato.z >= 0
+            else min(1.0, -stato.z / stato.corsa)
+        )
+        guardati += 1
+        if not (basso - 1e-6 <= f <= alto + 1e-6):
+            fuori += 1
+            peggiore = (
+                f"a t={istante:.1f} frazione {f:.3f} fuori da "
+                f"[{basso:.3f}, {alto:.3f}]"
+            )
     check(
-        in_viaggio and all(c.z < -0.5 * c.corsa for c in in_viaggio if c.corsa > 0),
-        f"nemmeno mentre trasla da una vasca all'altra ({len(in_viaggio)} istanti)",
+        guardati > 0 and fuori == 0,
+        f"e traslando a vuoto non si alza mai piu' del necessario "
+        f"({guardati} istanti guardati, {fuori} fuori posto"
+        + (f": {peggiore}" if peggiore else "")
+        + ")",
     )
 
     # E i tempi lo seguono: senza le due corse a vuoto, presa e rilascio si
@@ -917,6 +1062,8 @@ def main() -> int:
     test_pezzo_da_seguire(d)
     test_assegnazione_parziale(d)
     test_vasca_a_piu_posti()
+    test_quota_continua()
+    test_quota_solo_da_fermi()
     test_gancio_resta_giu(d)
     test_cambio_quota()
     try:

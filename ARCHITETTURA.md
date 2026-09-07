@@ -6,7 +6,7 @@ invarianti regge, e dove sono le trappole — comprese quelle in cui siamo gia'
 caduti, che sono la parte piu' utile.
 
 Stato al momento della scrittura: 16 file Python, 15.223 righe, cinque suite di
-test per **402 asserzioni** complessive.
+test per **406 asserzioni** complessive.
 
 ---
 
@@ -589,6 +589,12 @@ continuita', da dove l'ha lasciato l'ultimo pezzo a dove lo vuole il prossimo.
 Gli intervalli in cui e' vincolato sono precalcolati in `_Traiettoria.impegni`,
 ricavati dalle fasi con `loaded=True`.
 
+Lo spostamento non e' spalmato sul tempo, ma sul tempo in cui il carroponte
+**gia' si muove** — `_Traiettoria.mobile_t/mobile_c`, il cumulato che le attese
+non fanno crescere. Distribuendolo sull'intervallo intero, un carrello fermo
+sopra una vasca per un minuto scivolava di lato per tutto il minuto: continuo
+sui numeri, e peggio dello scatto che sostituiva.
+
 > Legandola al TRATTO invece che al telaio — com'era prima — fuori dalle mosse
 > la corsia valeva zero, cioe' il centro della vasca, e il carrello **scattava**
 > di lato: appena finito un rilascio, e di nuovo passando da un pezzo al
@@ -596,6 +602,42 @@ ricavati dalle fasi con `loaded=True`.
 > attesa in cui spostarsi. Su una vasca a un posto solo era invisibile, perche'
 > li' il centro E' il posto: e' un difetto che si vede solo dove ci sono piu'
 > posti, ed e' per questo che il test di continuita' sta nel caso a due pezzi.
+
+**Le postazioni SENZA CORSA sono il caso che rompe tutto.** Sul carico e sullo
+scarico di quasi tutte le linee `lift_height` vale zero, e li' "il gancio e'
+calato" e "il gancio e' in alto" sono **la stessa quota**. Chi teneva il conto a
+stati — dopo un rilascio e' giu', dopo una salita e' su — da quel punto in poi
+diceva il contrario del vero: la discesa successiva veniva disegnata come una
+salita, e al primo aggancio il gancio saltava di tutta la corsa. Adesso lo stato
+si ricava dalla quota vera (`quota_di_riposo`), non dal tipo di tratto.
+
+Lo stesso vale col gancio che trasla basso: partendo da una postazione senza
+corsa il gancio e' in alto e alla vasca dopo deve stare in basso, e il modello
+non da' un secondo per portarcelo. Dove mettere quel dislivello lo decide
+`_quote_a_vuoto`, e la regola e' una sola:
+
+> **Mentre il carroponte TRASLA la quota non cambia.** Tutto quello che sale o
+> scende avviene da fermi. E' la stessa cosa che racconta il ciclogramma — un
+> tratto obliquo e' uno spostamento, un tratto piatto e' tutto il resto — e le
+> due viste devono dire la stessa cosa, altrimenti chi le confronta vede due
+> macchine diverse.
+
+Il dislivello finisce quindi in una **sosta**, che nel ciclogramma e' il tratto
+piatto dove l'occhio si aspetta un movimento verticale. Se attorno al rientro
+non c'e' nessuna sosta si ripiega sulla traslazione, ed e' un ripiego
+dichiarato: non c'e' nessun altro posto dove metterlo.
+
+Si interpola la **frazione** di discesa, non i millimetri: due quote diverse su
+corse diverse possono essere tutte e due "in fondo". E le quote agli estremi si
+leggono dalle FASI (`pick_phases[0].z_start`, `release_phases[-1].z_end`), non
+dalla quota di riposo del telaio: su una zona di cambio quota sono due cose
+diverse — il telaio riposa a meta' corsa, il gancio ci arriva dal fondo.
+
+> Il test da scrivere non e' "il gancio non si alza mai": andando verso una
+> postazione senza corsa il telaio si prende alla quota di trasporto, e li' il
+> gancio DEVE alzarsi. E' "non si alza piu' di quanto chiedano i due capi del
+> rientro". Il criterio sbagliato e' rimasto in `test_simulazione.py` finche'
+> non ha cominciato a bocciare il comportamento corretto.
 
 **Il gancio resta calato** finche' il carroponte sta fermo sopra una vasca, in
 tutti e due i casi in cui capita: dopo aver deposto, e aspettando di prelevare.
@@ -630,7 +672,7 @@ lascia il pulsante vuoto.
 
 ---
 
-## 11. I test — 402 asserzioni, cinque suite
+## 11. I test — 406 asserzioni, cinque suite
 
 Nessun pytest: ogni file si lancia da solo, stampa cosa ha provato e restituisce
 un codice d'uscita.
@@ -639,7 +681,7 @@ un codice d'uscita.
 | --- | ---: | --- | --- |
 | `test_verify.py` | 98 | — | il verificatore trova davvero quello che deve? |
 | `test_excel_io.py` | 94 | — | un file compilato male viene respinto con un messaggio utile? |
-| `test_simulazione.py` | 72 | — | la simulazione mostra il ciclogramma che c'e'? |
+| `test_simulazione.py` | 76 | — | la simulazione mostra il ciclogramma che c'e'? |
 | `test_model.py` | 40 | OR-Tools | il modello produce soluzioni fisicamente valide? |
 | `test_interfaccia.py` | 98 | OR-Tools + grafica | l'interfaccia si comporta come deve? |
 
