@@ -576,6 +576,11 @@ per il telaio, altrimenti il pezzo si stacca dal bilancino — difetto del solo
 disegno, invisibile ai controlli sulle quote vere, e per questo c'e' un test
 che lo verifica **sulle coordinate disegnate**.
 
+L'ORLO della vasca non sta poco sotto la quota di trasporto: sta poco sopra la
+quota del telaio immerso, cosi' il pezzo galleggia a filo. Il fondo invece resta
+dov'e'. Con l'orlo in alto le vasche erano scatoloni alti due terzi del disegno
+con dentro un telaio piccolo in fondo, e le proporzioni non dicevano piu' niente.
+
 Il denominatore del rimappaggio e' `corsa_verticale(stazione)`, non
 `lift_height_at`: su una zona di cambio quota il gancio scende fino in fondo
 alla corsa del carroponte, e le quote in gioco diventano quattro (fondo,

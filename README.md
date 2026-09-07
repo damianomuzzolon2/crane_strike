@@ -302,6 +302,13 @@ Le vasche sono **tutte uguali** e i telai immersi stanno **tutti alla stessa
 altezza**, sospesi nel bagno: sul fondo non ci si appoggiano mai, perche' non
 ci si appoggiano nemmeno davvero.
 
+**L'orlo della vasca segue il telaio.** Il fondo resta fondo — il telaio ci
+galleggia sopra — ma il bordo sta poco piu' su della quota a cui il telaio si
+immerge, cosi' il pezzo si vede galleggiare **a filo**. Tenendo l'orlo poco
+sotto la quota di trasporto le vasche diventavano scatoloni alti due terzi del
+disegno con dentro un telaio piccolo in fondo: tutto bagno vuoto, e le
+proporzioni non dicevano piu' niente.
+
 Quello che si disegna non e' la quota in millimetri ma **a che punto e'
 arrivata la discesa**, da zero (quota di trasporto) a uno (immerso). La
 profondita' vera della vasca non e' un dato dichiarato — delle vasche si sa

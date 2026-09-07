@@ -1261,7 +1261,8 @@ class FinestraSimulazione(tk.Toplevel):
         self.raggio_ruota = 0.04 * h_max
         self.altezza_carro = 0.20 * h_max
         self.larghezza_gancio = 0.20 * larghezza
-        self.bordo_vasca = -0.045 * h_max  # il telaio passa SOPRA il bordo
+        # bordo_vasca si calcola piu' sotto, quando si sa a che quota finisce
+        # il telaio immerso: l'orlo lo segue.
         # Le vasche sono tutte della STESSA profondita', e fonde abbastanza da
         # tenere dentro anche la corsa piu' lunga con dello spazio sotto.
         #
@@ -1294,6 +1295,14 @@ class FinestraSimulazione(tk.Toplevel):
         # disegno sotto la quota che gli si assegna. Serve a posare il telaio
         # SOPRA un piano di carico invece che dentro.
         self.altezza_telaio = 0.11 * h_max
+        # L'ORLO SEGUE IL TELAIO. Il fondo resta dov'e' -- la vasca e' fonda,
+        # e il telaio ci galleggia dentro senza appoggiarsi -- ma l'orlo scende
+        # fin quasi alla quota del telaio immerso, cosi' il pezzo si vede
+        # galleggiare A FILO. Tenendolo poco sotto la quota di trasporto, come
+        # prima, le vasche diventavano scatoloni alti due terzi del disegno con
+        # dentro un telaio piccolo in fondo: tutto bagno vuoto, e le proporzioni
+        # non dicevano piu' niente.
+        self.bordo_vasca = self.quota_immersione + 0.05 * h_max
 
         # -- il capannone: pavimento e colonne che reggono la rotaia -----
         self.assi.add_patch(
