@@ -324,15 +324,48 @@ CONTROLLI = [
      "traiettoria. Le si vede una per volta."),
     ("c", "verify._check_per_hoist", None, "        # -- continuita' nel tempo"),
 
+    ("h3", "Il carroponte in due posti insieme"),
+    ("c", "verify._check_per_hoist", "        # -- il carroponte e' in due posti insieme?",
+     "        # -- continuita' nel tempo"),
+    ("c", "verify._mosse_sovrapposte"),
+    ("q",
+     "VA CERCATO PER PRIMO, PERCHE' RENDE PRIVO DI SENSO IL RESTO. Continuita', "
+     "periodicita' e durata della mossa si calcolano tutte confrontando tratti "
+     "CONSECUTIVI, e hanno senso solo se i tratti formano una catena. Se due "
+     "mosse si sovrappongono nel tempo la catena non esiste, e quei controlli "
+     "si mettono a segnalare la stessa cosa una volta per ogni coppia. Su una "
+     "composizione a mano lasciata a meta' -- che e' lo stato normale mentre "
+     "si lavora -- significa trentacinque violazioni per sei fatti, con il "
+     "messaggio utile sepolto in mezzo."),
+    ("p",
+     "La funzione restituisce una riga per COPPIA DI MOSSE, non per tratto: "
+     "due mosse sovrapposte producono decine di tratti che si accavallano, e "
+     "ciascuno darebbe una violazione. Guarda solo i tratti che dichiarano una "
+     "mossa -- attesa e rientro a vuoto non ne hanno una, e possono "
+     "legittimamente toccare l'inizio o la fine di un'altra."),
+    ("p",
+     "Il messaggio nomina le due mosse e le due vasche, e dice le due cose "
+     "che si possono fare: dare una delle due a un altro carroponte, oppure "
+     "allontanarle nel tempo cambiando i tempi in vasca."),
+
     ("h3", "Continuita'"),
     ("c", "verify._check_per_hoist", "        # -- continuita' nel tempo",
-     "        # -- il ciclo deve durare"),
+     "        for s in segs:"),
     ("p",
      "Due controlli su ogni coppia di segmenti consecutivi: che non ci sia un "
      "buco o una sovrapposizione nel TEMPO, e che non ci sia un salto nello "
      "SPAZIO. Il secondo e' quello che intercetta un carroponte che si "
      "teletrasporta -- un difetto che non produce nessun sintomo nel modello, "
      "perche' li' i segmenti sono solo intervalli con delle durate."),
+    ("q",
+     "UNA ROTTURA SOLA SI DICE PER INTERO, MOLTE SI RIASSUMONO. Una "
+     "traiettoria spezzata si rompe in piu' punti, e ogni punto produce due "
+     "violazioni -- il tempo e la posizione -- che descrivono lo stesso "
+     "guasto visto da dove si vede. Con una sola rottura il punto preciso E' "
+     "l'informazione e va detto; con dieci, quello che serve e' sapere che "
+     "sono dieci e qual e' la peggiore, piu' il fatto che spariranno tutte "
+     "insieme. Non e' un filtro sulla severita': la soluzione resta "
+     "rifiutata."),
     ("p",
      "Le due tolleranze sono diverse, e non per distrazione: il tempo si "
      "confronta con time_tol (un decimo di secondo, la tolleranza del "
@@ -355,6 +388,12 @@ CONTROLLI = [
      "che intercetta la traiettoria che deriva -- un giro che si sposta di "
      "qualche millimetro a ogni ripetizione, e che dopo cento cicli e' "
      "altrove."),
+    ("q",
+     "SOLO SE I TRATTI FORMANO UNA CATENA. Su una traiettoria spezzata, "
+     "`ultimo.t_end - primo.t_start` non e' la durata di un giro: e' la "
+     "distanza fra due istanti che non si susseguono. Segnalarla come periodo "
+     "sbagliato aggiunge un errore che non descrive niente -- e sulla "
+     "composizione a mano ne aggiungeva uno per carroponte."),
 
     ("h3", "Confini della zona"),
     ("c", "verify._check_per_hoist", "        # -- confini spaziali",
@@ -379,6 +418,14 @@ CONTROLLI = [
      "lunga del dovuto passerebbe: i due errori si annullano nella somma. "
      "Sono proprio i due valori che il modello calcola separatamente, quindi "
      "sono anche i due posti in cui puo' sbagliare separatamente."),
+    ("q",
+     "E PERCHE' IL TOTALE TACE SU UNA TRAIETTORIA SPEZZATA. La durata della "
+     "mossa intera si ricava allargandosi ai tratti ADIACENTI: se i tratti di "
+     "due mosse sono intrecciati, il vicino di una presa e' il rilascio "
+     "dell'altra e l'allargamento si ferma subito. Ne esce 'la mossa dura "
+     "26,7 s invece di 46,7' -- vero come misura e inservibile come diagnosi, "
+     "perche' la causa e' l'intreccio, gia' segnalato. Il controllo sulla sola "
+     "traslazione invece regge sempre: guarda un tratto solo."),
 
     ("h3", "Le tratte a vuoto, le quote, e i tipi sconosciuti"),
     ("c", "verify._check_per_hoist", '            elif s.kind == "empty":',

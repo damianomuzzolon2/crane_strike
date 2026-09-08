@@ -874,6 +874,76 @@ def test_input_malformato():
             check(True, f"{descr}: ValueError come previsto")
 
 
+def test_due_posti_insieme():
+    """Un carroponte a cui si chiede di essere in due posti nello stesso
+    momento.
+
+    E' lo stato normale di una composizione a mano lasciata a meta', e prima
+    produceva una VALANGA: continuita', periodicita' e durate delle mosse si
+    calcolano tutte confrontando tratti CONSECUTIVI, e su tratti intrecciati
+    si mettono a segnalare la stessa cosa una volta per coppia. Trentacinque
+    violazioni per sei fatti, con il messaggio utile sepolto in mezzo.
+
+    Qui si pretende che la causa sia detta UNA volta e per nome, e che i
+    controlli che non hanno piu' senso su una traiettoria spezzata tacciano
+    invece di ripeterla."""
+    print("\n[19-bis] il carroponte in due posti insieme")
+    data, sol = reference_case()
+
+    # si duplica una mossa spostandola addosso a un'altra dello stesso
+    # carroponte: due tratti a carico che si sovrappongono nel tempo
+    segs = list(sol.segments_per_hoist[0])
+    carico = [s for s in segs if s.kind == "loaded"]
+    check(len(carico) >= 2, f"il caso di prova ha {len(carico)} tratti a carico")
+    primo, secondo = carico[0], carico[1]
+    scostamento = primo.t_start - secondo.t_start
+    rotti = [
+        dataclasses.replace(
+            s, t_start=s.t_start + scostamento, t_end=s.t_end + scostamento
+        )
+        if s.move == secondo.move
+        else s
+        for s in segs
+    ]
+    guasta = dataclasses.replace(
+        sol,
+        segments_per_hoist=[rotti] + list(sol.segments_per_hoist[1:]),
+    )
+    r = verify_solution(data, guasta)
+
+    sovrapposti = [v for v in r.violations if v.kind == "overlap"]
+    check(
+        bool(sovrapposti),
+        f"la sovrapposizione viene segnalata ({len(sovrapposti)} volte)",
+    )
+    check(
+        all(
+            str(primo.move) in v.message and str(secondo.move) in v.message
+            for v in sovrapposti
+        ),
+        f"e nomina le due mosse: \"{sovrapposti[0].message[:70]}...\"",
+    )
+    # i controlli derivati non devono moltiplicare lo stesso fatto
+    per_carro = [
+        v
+        for v in r.violations
+        if v.kind == "continuity" and v.hoists == (0,) and "durata negativa" not in v.message
+    ]
+    check(
+        len(per_carro) <= 1,
+        f"la continuita' spezzata si dice una volta sola, non una per coppia "
+        f"({len(per_carro)})",
+    )
+    check(
+        not [v for v in r.violations if v.kind == "periodicity" and v.hoists == (0,)],
+        "e la periodicita' tace: su una traiettoria spezzata non vuol dire niente",
+    )
+    check(
+        not r.ok,
+        "ma la soluzione resta RIFIUTATA: si e' tolto rumore, non severita'",
+    )
+
+
 def test_senza_valori_risolti():
     print("\n[20] degrado gentile senza solution.plans")
     data, sol = reference_case()
@@ -1259,6 +1329,7 @@ def main():
     test_zero_verticale_non_regressione()
     test_stazione_condivisa()
     test_input_malformato()
+    test_due_posti_insieme()
     test_senza_valori_risolti()
     print("\n" + "=" * 72)
     print(f"RISULTATO: {_n_pass} ok, {_n_fail} falliti")

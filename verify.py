@@ -75,7 +75,7 @@ class Violation:
 
     kind: str  # 'collision'|'dwell_min'|'dwell_max'|'periodicity'|'phase'|
     # 'segment_duration'|'continuity'|'zone_bounds'|'order'|
-    # 'takt_range'|'layout'|'transfer'|'tank_capacity'
+    # 'takt_range'|'layout'|'transfer'|'tank_capacity'|'overlap'
     severity: str  # 'error' | 'warning' | 'info'
     message: str
     hoists: tuple[int, ...] = ()
@@ -466,30 +466,72 @@ def _check_per_hoist(data, solution, plans, T, time_tol, add) -> list[_Trajector
             continue
         segs = sorted(segs, key=lambda s: (s.t_start, s.t_end))
 
+        # -- il carroponte e' in due posti insieme? --
+        #
+        # Va cercato PRIMA di tutto il resto, perche' rende privo di senso
+        # tutto il resto. Continuita' e periodicita' confrontano tratti
+        # CONSECUTIVI, e hanno senso solo se i tratti formano una catena: se
+        # due mosse si sovrappongono nel tempo la catena non esiste, e i due
+        # controlli si mettono a segnalare la stessa cosa una volta per ogni
+        # coppia di tratti. Su una composizione a mano fatta a meta' significa
+        # ventuno errori per sei fatti, e il messaggio utile sparisce dentro
+        # quelli derivati.
+        sovrapposte = _mosse_sovrapposte(segs, time_tol)
+        for k1, k2, da, a_ in sovrapposte:
+            add(
+                "overlap",
+                "error",
+                f"il carroponte dovrebbe essere in due posti nello stesso "
+                f"momento: la mossa {k1} (da {data.route[k1].tank_id}) e la "
+                f"mossa {k2} (da {data.route[k2].tank_id}) si sovrappongono "
+                f"fra {da:.1f}s e {a_:.1f}s. Assegna una delle due a un altro "
+                f"carroponte, oppure allontanale nel tempo cambiando i tempi "
+                f"in vasca.",
+                hoists=(h,),
+                move=k1,
+                t=da,
+                value=a_ - da,
+                bound=0.0,
+                slack=da - a_,
+            )
+
         # -- continuita' nel tempo e nello spazio --
+        #
+        # Una traiettoria rotta si spezza in PIU' punti, e ogni punto produce
+        # due violazioni (il tempo e la posizione). Riportarle tutte non
+        # aggiunge niente dopo la prima: descrivono lo stesso guasto -- i
+        # tratti non formano una catena -- vista da tutti i punti in cui si
+        # vede. Se ce n'e' UNA sola la si dice per intero, perche' li' il
+        # punto preciso e' l'informazione; se sono molte si dice quante sono e
+        # qual e' la peggiore, che e' da dove conviene guardare.
+        rotture = []
         for a, b in zip(segs, segs[1:]):
             gap = b.t_start - a.t_end
-            if abs(gap) > time_tol:
-                add(
-                    "continuity",
-                    "error",
-                    f"discontinuita' temporale di {gap:+.3f}s fra due segmenti",
-                    hoists=(h,),
-                    t=a.t_end,
-                    value=gap,
-                    bound=0.0,
-                )
             dx = b.x_start - a.x_end
+            if abs(gap) > time_tol:
+                rotture.append((abs(gap), a.t_end, f"{gap:+.1f}s nel tempo"))
             if abs(dx) > 1e-6:
-                add(
-                    "continuity",
-                    "error",
-                    f"salto di posizione di {dx:+.3f}m fra due segmenti",
-                    hoists=(h,),
-                    t=a.t_end,
-                    value=dx,
-                    bound=0.0,
-                )
+                rotture.append((abs(dx) / 1000.0, a.t_end, f"{dx:+.0f} mm di posizione"))
+        if len(rotture) == 1:
+            _peso, quando, come = rotture[0]
+            add(
+                "continuity",
+                "error",
+                f"i tratti non si toccano: salto di {come} a t={quando:.1f}s",
+                hoists=(h,), t=quando, value=_peso, bound=0.0,
+            )
+        elif rotture:
+            _peso, quando, come = max(rotture)
+            add(
+                "continuity",
+                "error",
+                f"la traiettoria non forma una catena: {len(rotture)} salti fra "
+                f"tratti che dovrebbero toccarsi, il piu' grande di {come} a "
+                f"t={quando:.1f}s. Non sono guasti diversi -- il giro cosi' "
+                f"com'e' non e' percorribile, e sistemato quello spariscono "
+                f"tutti insieme.",
+                hoists=(h,), t=quando, value=_peso, bound=0.0,
+            )
         for s in segs:
             if s.t_end < s.t_start - 1e-9:
                 add(
@@ -501,26 +543,32 @@ def _check_per_hoist(data, solution, plans, T, time_tol, add) -> list[_Trajector
                 )
 
         # -- il ciclo deve durare esattamente T --
-        span = segs[-1].t_end - segs[0].t_start
-        if abs(span - T) > time_tol:
-            add(
-                "periodicity",
-                "error",
-                f"il ciclo dura {span:.3f}s invece di T={T:.3f}s",
-                hoists=(h,),
-                value=span,
-                bound=T,
-                slack=span - T,
-            )
-        # -- la traiettoria deve richiudersi su se stessa --
-        if abs(segs[-1].x_end - segs[0].x_start) > 1e-6:
-            add(
-                "periodicity",
-                "error",
-                f"il carroponte non torna al punto di partenza "
-                f"({segs[0].x_start:.0f} -> {segs[-1].x_end:.0f} mm)",
-                hoists=(h,),
-            )
+        #
+        # Solo se i tratti formano davvero una catena: su una traiettoria
+        # spezzata, `ultimo.t_end - primo.t_start` non e' la durata di un giro,
+        # e' la distanza fra due istanti che non si susseguono. Segnalarla
+        # come periodo sbagliato aggiunge un errore che non descrive niente.
+        if not sovrapposte and not rotture:
+            span = segs[-1].t_end - segs[0].t_start
+            if abs(span - T) > time_tol:
+                add(
+                    "periodicity",
+                    "error",
+                    f"il ciclo dura {span:.3f}s invece di T={T:.3f}s",
+                    hoists=(h,),
+                    value=span,
+                    bound=T,
+                    slack=span - T,
+                )
+            # -- la traiettoria deve richiudersi su se stessa --
+            if abs(segs[-1].x_end - segs[0].x_start) > 1e-6:
+                add(
+                    "periodicity",
+                    "error",
+                    f"il carroponte non torna al punto di partenza "
+                    f"({segs[0].x_start:.0f} -> {segs[-1].x_end:.0f} mm)",
+                    hoists=(h,),
+                )
 
         # -- confini spaziali della zona --
         xs = [data.station_position(i) for i in range(zone.lo, zone.hi + 2)]
@@ -575,21 +623,32 @@ def _check_per_hoist(data, solution, plans, T, time_tol, add) -> list[_Trajector
                         bound=atteso_h,
                         slack=durata_h - atteso_h,
                     )
-                atteso = data.loaded_leg_seconds(k)
-                durata = _leg_duration(segs, i_seg)
-                if abs(durata - atteso) > time_tol:
-                    add(
-                        "segment_duration",
-                        "error",
-                        f"la mossa (presa + traslazione + rilascio) dura "
-                        f"{durata:.3f}s invece di {atteso:.3f}s",
-                        hoists=(h,),
-                        move=k,
-                        t=s.t_start,
-                        value=durata,
-                        bound=atteso,
-                        slack=durata - atteso,
-                    )
+                # La durata della mossa INTERA si ricava allargandosi ai tratti
+                # ADIACENTI, quindi ha senso solo su una traiettoria che sia
+                # una catena: se i tratti di due mosse sono intrecciati, il
+                # vicino di una presa e' il rilascio dell'altra e
+                # l'allargamento si ferma subito. Il risultato e' una mossa
+                # che 'dura 26,7 s invece di 46,7' -- vero come misura,
+                # inservibile come diagnosi, perche' la causa e'
+                # l'intreccio, gia' segnalato. Il controllo sulla sola
+                # traslazione qui sopra invece regge sempre: guarda un
+                # tratto solo.
+                if not sovrapposte and not rotture:
+                    atteso = data.loaded_leg_seconds(k)
+                    durata = _leg_duration(segs, i_seg)
+                    if abs(durata - atteso) > time_tol:
+                        add(
+                            "segment_duration",
+                            "error",
+                            f"la mossa (presa + traslazione + rilascio) dura "
+                            f"{durata:.3f}s invece di {atteso:.3f}s",
+                            hoists=(h,),
+                            move=k,
+                            t=s.t_start,
+                            value=durata,
+                            bound=atteso,
+                            slack=durata - atteso,
+                        )
             elif s.kind == "empty":
                 # la singola tratta orizzontale, non il giro: fra due vasche il
                 # rientro puo' essere spezzato dalla salita e dalla discesa
@@ -677,6 +736,37 @@ def _check_per_hoist(data, solution, plans, T, time_tol, add) -> list[_Trajector
 
         trajectories.append(_Trajectory(segs, T))
     return trajectories
+
+
+def _mosse_sovrapposte(
+    segs: list[Segment], time_tol: float
+) -> list[tuple[int, int, float, float]]:
+    """Coppie di mosse che lo stesso carroponte dovrebbe eseguire insieme.
+
+    Restituisce `(mossa1, mossa2, da, a)`: una riga per coppia, non una per
+    tratto. E' la differenza fra dire una cosa e dirla venti volte -- due mosse
+    sovrapposte producono decine di tratti che si accavallano, e ciascuno
+    darebbe una violazione.
+
+    Si guardano solo i tratti che DICHIARANO una mossa. Attesa e rientro a
+    vuoto non ne hanno una, e possono legittimamente coincidere con l'inizio o
+    la fine di un'altra a meno degli arrotondamenti."""
+    per_mossa: dict[int, tuple[float, float]] = {}
+    for s in segs:
+        if s.move is None:
+            continue
+        da, a = per_mossa.get(s.move, (s.t_start, s.t_end))
+        per_mossa[s.move] = (min(da, s.t_start), max(a, s.t_end))
+    fuori = []
+    mosse = sorted(per_mossa)
+    for i, k1 in enumerate(mosse):
+        for k2 in mosse[i + 1:]:
+            a1, b1 = per_mossa[k1]
+            a2, b2 = per_mossa[k2]
+            da, a_ = max(a1, a2), min(b1, b2)
+            if a_ - da > time_tol:
+                fuori.append((k1, k2, da, a_))
+    return fuori
 
 
 def _leg_duration(segs: list[Segment], i: int) -> float:
