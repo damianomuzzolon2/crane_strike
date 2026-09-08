@@ -1558,6 +1558,38 @@ AUTOMATICA = [
      "max_candidates come limite di sicurezza. E' l'onesta' che serve: la "
      "strategia e' esponenziale, e lo dice."),
 
+    ("h3", "I due prefiltri, in un posto solo"),
+    ("c", "model._scarto_prefiltro"),
+    ("p",
+     "Restituisce None se la suddivisione va provata col solutore, altrimenti "
+     "il motivo per cui si scarta. I due filtri sono economici -- una somma e "
+     "un confronto fra intervalli -- e tolgono di mezzo moltissimo: su una "
+     "linea di dieci vasche con il takt time stretto, 176 suddivisioni "
+     "diventano 10."),
+    ("q",
+     "PERCHE' NON DENTRO solve_auto_zones. Il docstring lo dice: servono a due "
+     "cose, scartare e CONTARE. Il conteggio a priori -- quante risoluzioni si "
+     "faranno -- e' quello che permette all'interfaccia di mostrare un "
+     "avanzamento vero invece di una barra che oscilla. Duplicare i filtri "
+     "vorrebbe dire che il conteggio e la ricerca possono dire numeri diversi, "
+     "e la barra arriverebbe in fondo prima della fine."),
+    ("c", "model.tentativi_previsti"),
+    ("p",
+     "Quante risoluzioni CP-SAT servirebbero per un dato numero di "
+     "carroponti. Costa millisecondi e si puo' chiamare prima di cominciare: "
+     "il numero di suddivisioni e' combinatoria pura e i prefiltri sono "
+     "deterministici."),
+    ("q",
+     "COSA RESTA IMPREVEDIBILE, E VA DETTO. Il docstring lo dichiara: non si "
+     "sa a quale numero di carroponti la ricerca si fermera' -- e' proprio "
+     "l'informazione che si sta cercando -- ne' quanto durera' ciascuna "
+     "risoluzione, che va da qualche centesimo a tutto il limite di tempo "
+     "secondo quanto e' difficile l'istanza. Il totale a priori sarebbe quindi "
+     "il caso peggiore: sull'esempio del programma darebbe sei minuti e mezzo "
+     "contro sei secondi e mezzo reali. E' per questo che l'interfaccia stima "
+     "STRADA FACENDO, misurando i tentativi gia' fatti, invece di annunciare "
+     "un numero prima di partire."),
+
     ("c", "model._enumerate_contiguous_partitions"),
     ("p",
      "Tre righe. Una suddivisione contigua in n gruppi e' determinata dai suoi "
@@ -1584,28 +1616,38 @@ AUTOMATICA = [
      "ridurre mosse o carroponti, oppure dichiarare le zone a mano e usare "
      "solve() direttamente."),
 
-    ("h3", "I due prefiltri"),
+    ("h3", "Filtrare tutto, poi risolvere"),
     ("c", "model.solve_auto_zones", "    travel_loaded_seconds =", "    if best_solution is None:"),
     ("p",
-     "Prima di invocare CP-SAT si scartano due categorie di suddivisioni, e i "
-     "due filtri hanno nature diverse."),
+     "Il lavoro e' in DUE tempi: prima si applicano i prefiltri a tutte le "
+     "suddivisioni, poi si risolvono quelle sopravvissute."),
+    ("q",
+     "PERCHE' NON IN UN CICLO SOLO. Il commento lo dice: farlo in due tempi "
+     "costa una lista di poche decine di elementi e in cambio da' il TOTALE "
+     "ESATTO delle risoluzioni da fare. Senza, un avanzamento potrebbe solo "
+     "dire quante ne sono state fatte, non quante ne mancano -- e una barra "
+     "che non sa dove finisce non e' una barra."),
     ("p",
-     "Il PRIMO e' una condizione necessaria banale: se la somma dei soli "
-     "trasporti a carico di una zona -- senza contare nemmeno un trasferimento "
-     "a vuoto -- supera gia' il takt time massimo, quella suddivisione e' "
-     "infattibile qualunque sia l'ordine di visita. Costa una somma e "
-     "risparmia una risoluzione CP-SAT intera."),
+     "Il primo prefiltro e' una condizione necessaria banale: se la somma dei "
+     "soli trasporti a carico di una zona -- senza contare nemmeno un "
+     "trasferimento a vuoto -- supera gia' il takt time massimo, quella "
+     "suddivisione e' infattibile qualunque sia l'ordine di visita. Costa una "
+     "somma e risparmia una risoluzione CP-SAT intera."),
     ("p",
-     "Il SECONDO scarta le geometrie patologiche con zone_layout_conflicts. Il "
-     "commento dice perche' qui e non lasciando fallire solve(): scartandole "
-     "qui, la scelta automatica TROVA DA SOLA una suddivisione valida quando "
-     "esiste. Lasciando fallire solve(), la prima geometria patologica farebbe "
-     "abortire tutta la ricerca -- e su una linea con vasche non perfettamente "
-     "ordinate sarebbe la norma, non l'eccezione."),
+     "Il secondo scarta le geometrie patologiche. Farlo qui invece di lasciar "
+     "fallire solve() fa si' che la scelta automatica TROVI DA SOLA una "
+     "suddivisione valida quando esiste: lasciando fallire solve(), la prima "
+     "geometria patologica farebbe abortire tutta la ricerca -- e su una linea "
+     "con vasche non perfettamente ordinate sarebbe la norma, non "
+     "l'eccezione."),
     ("p",
-     "Poi il ciclo vero: si risolve ciascuna candidata e si tiene quella col "
-     "takt minore. `log_progress` stampa una riga per candidata, ed e' il modo "
-     "per capire perche' una ricerca non trova niente."),
+     "`su_tentativo` viene chiamata prima di ogni risoluzione, con l'indice e "
+     "il totale gia' al netto dei prefiltri. Gira nel thread del chiamante, "
+     "quindi -- come avverte il docstring -- non deve toccare widget: chi la "
+     "usa dall'interfaccia grafica ci mette dentro solo un accodamento."),
+    ("p",
+     "`log_progress` stampa una riga per candidata, ed e' il modo per capire "
+     "da terminale perche' una ricerca non trova niente."),
     ("c", "model.solve_auto_zones", "    if best_solution is None:", None),
     ("p",
      "Fallendo, si restituisce un INFEASIBLE che porta con se' i CONTATORI: "

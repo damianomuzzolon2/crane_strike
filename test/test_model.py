@@ -536,6 +536,48 @@ def test_scelta_automatica():
     )
 
 
+def test_tentativi_previsti():
+    """Il conto fatto PRIMA deve coincidere con le risoluzioni fatte DOPO.
+
+    E' l'unica proprieta' che rende utile un avanzamento: se il totale
+    annunciato non fosse quello vero, la barra arriverebbe in fondo prima
+    della fine, o si fermerebbe prima. Il rischio concreto e' che i due
+    prefiltri si sdoppino -- uno nel conteggio, uno nella ricerca -- e allora
+    divergono in silenzio."""
+    print("\n[7-bis] i tentativi previsti coincidono con quelli fatti")
+    from model import tentativi_previsti
+
+    data = linea(6, 1200, None, takt_min=10.0, takt_max=60.0)
+    visti: list[tuple[int, int, int]] = []
+    solve_auto_hoists(
+        data,
+        max_hoists=3,
+        time_limit_per_candidate=15.0,
+        su_tentativo=lambda h, i, t: visti.append((h, i, t)),
+    )
+    fatti: dict[int, int] = {}
+    for h, _i, _t in visti:
+        fatti[h] = fatti.get(h, 0) + 1
+    check(
+        bool(visti), f"il solutore ha segnalato {len(visti)} tentativi"
+    )
+    for h, quanti in sorted(fatti.items()):
+        check(
+            tentativi_previsti(data, h) == quanti,
+            f"{h} carroponti: previsti {tentativi_previsti(data, h)}, "
+            f"fatti {quanti}",
+        )
+    # il totale annunciato deve essere lo stesso a ogni segnalazione dello
+    # stesso numero di carroponti, e gli indici devono salire da 1 senza salti
+    for h, quanti in sorted(fatti.items()):
+        indici = [i for hh, i, _t in visti if hh == h]
+        totali = {t for hh, _i, t in visti if hh == h}
+        check(
+            indici == list(range(1, quanti + 1)) and totali == {quanti},
+            f"{h} carroponti: indici {indici} su totale {totali}",
+        )
+
+
 def test_vasca_ripetuta():
     print("\n[8] stessa vasca fisica usata due volte nella ricetta")
     # Il pezzo torna in LAV dopo essere passato da SEC: le posizioni lungo la
@@ -675,6 +717,7 @@ def main():
     test_cambio_quota_end_to_end()
     test_passo_controllo()
     test_scelta_automatica()
+    test_tentativi_previsti()
     test_vasca_ripetuta()
     test_ricostruzione_fedele()
     print("\n" + "=" * 72)

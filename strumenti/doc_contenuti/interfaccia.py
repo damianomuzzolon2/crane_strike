@@ -255,6 +255,56 @@ CALCOLO = [
      "vero. L'orologio e' MONOTONO, cosi' non salta se cambia l'ora di "
      "sistema."),
 
+    ("h3", "L'avanzamento: quanto manca"),
+    ("p",
+     "Un calcolo puo' durare minuti, e una barra che oscilla non dice se manca "
+     "un secondo o cinque. Il tempo pero' si scompone in due fattori, e solo "
+     "uno dei due e' imprevedibile."),
+    ("t", [
+        ["fattore", "si sa prima?", "perche'"],
+        ["quanti tentativi", "SI', esattamente",
+         "combinatoria piu' due prefiltri deterministici"],
+        ["quanto dura ognuno", "no",
+         "da qualche centesimo a tutto il limite di tempo"],
+        ["a quanti carroponti si ferma", "no",
+         "e' l'informazione che la ricerca sta cercando"],
+    ]),
+    ("c", "interfaccia.Applicazione._segnala_tentativo"),
+    ("p",
+     "Il solutore la chiama prima di ogni tentativo, DAL THREAD DI LAVORO. Non "
+     "tocca widget: mette il messaggio nella coda, che e' l'unico modo sicuro "
+     "di parlare con la finestra da un altro thread. E' la stessa coda che "
+     "porta indietro il risultato, usata per un secondo tipo di messaggio."),
+    ("c", "interfaccia.Applicazione._mostra_avanzamento"),
+    ("p",
+     "I tentativi rimasti si sanno esattamente; quanto durera' ciascuno lo si "
+     "MISURA su quelli gia' fatti. Al tentativo k ne sono conclusi k-1, e il "
+     "tempo trascorso diviso quelli da' la durata media."),
+    ("q",
+     "LA STIMA NON COMPARE SUBITO. Con meno di due tentativi conclusi la media "
+     "e' un numero solo, e su una grandezza cosi' dispersa non vuol dire "
+     "niente: meglio non dire un tempo che dirne uno sbagliato di dieci volte. "
+     "Anche dopo resta una stima -- i tentativi che finiscono INFEASIBLE sono "
+     "molto piu' rapidi di quelli che trovano una soluzione e devono "
+     "dimostrarla ottima -- ma sulle linee di prova cade entro un fattore due, "
+     "che basta a rispondere alla sola domanda che ci si pone davvero: "
+     "aspetto, o mi alzo?"),
+    ("q",
+     "E COPRE SOLO QUESTO NUMERO DI CARROPONTI. Se anche l'ultimo tentativo "
+     "fallisce, la ricerca ricomincia con un carroponte in piu' e il "
+     "conteggio riparte da capo con un totale nuovo. E' una limitazione "
+     "onesta, e si vede: il testo dice sempre a quale numero di carroponti si "
+     "riferisce. Prima di cominciare non si stima invece niente -- l'unico "
+     "numero calcolabile a priori sarebbe il caso peggiore, e sull'esempio "
+     "darebbe sei minuti e mezzo contro sei secondi e mezzo reali. Un numero "
+     "sessanta volte sbagliato non informa, spaventa."),
+    ("p",
+     "La barra parte INDETERMINATA e passa a determinata al primo tentativo "
+     "segnalato. Con le zone dichiarate a mano nel file Excel il solutore fa "
+     "una chiamata sola e non segnala niente, quindi resta a oscillare -- ed "
+     "e' giusto: li' non c'e' un avanzamento da mostrare, c'e' un'unica "
+     "attesa."),
+
     ("h3", "Il ritorno del risultato"),
     ("c", "interfaccia.Applicazione._controlla_coda", None,
      "        esito, sol, dati, report = carico"),
@@ -262,6 +312,13 @@ CALCOLO = [
      "Si prova a leggere senza bloccare; se la coda e' vuota ci si riarma. Un "
      "'eccezione' produce un messaggio con la traccia completa: e' un difetto "
      "del programma, e nasconderla renderebbe impossibile capirlo."),
+    ("q",
+     "SI SVUOTA LA CODA, NON SI LEGGE UN MESSAGGIO SOLO. Il commento ne da' la "
+     "ragione: i messaggi di avanzamento arrivano piu' in fretta di quanto si "
+     "controlli, e leggerne uno per giro li farebbe accumulare. La barra "
+     "resterebbe indietro rispetto al calcolo, che e' peggio di non averla. Il "
+     "ciclo consuma tutti i 'progresso' e si ferma al primo messaggio di "
+     "esito, che e' quello che chiude il lavoro."),
     ("c", "interfaccia.Applicazione._controlla_coda",
      "        esito, sol, dati, report = carico",
      "        self.soluzione, self.dati, self.report = sol, dati, report"),

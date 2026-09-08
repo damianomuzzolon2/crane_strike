@@ -287,6 +287,100 @@ def _app_risolta(percorso_linea):
     return app
 
 
+def test_avanzamento_del_calcolo(percorso_linea):
+    """L'avanzamento durante 'Calcola auto'.
+
+    Il calcolo puo' durare minuti, e una barra che oscilla non dice se manca
+    un secondo o cinque. I tentativi rimasti pero' si SANNO -- sono
+    combinatoria piu' due prefiltri deterministici -- quindi si possono
+    contare, e la loro durata media si misura strada facendo.
+
+    Il rischio vero non e' che la stima sia imprecisa: e' che il totale
+    annunciato non sia quello vero. Qui si controlla proprio quello,
+    confrontandolo con `tentativi_previsti`, che e' la stessa funzione che
+    l'interfaccia non usa -- cosi' se i due prefiltri si sdoppiassero il test
+    lo vedrebbe."""
+    print("\n[2-bis] avanzamento e stima durante il calcolo")
+    from interfaccia import Applicazione
+    from model import tentativi_previsti
+
+    app = Applicazione(percorso_linea)
+    try:
+        for _ in range(50):
+            app.update()
+            if app.config_linea is not None:
+                break
+            time.sleep(0.02)
+
+        registro = []
+        originale = app._stato
+
+        def spia(testo):
+            registro.append((testo, str(app.avanzamento.cget("mode"))))
+            originale(testo)
+
+        app._stato = spia
+        app._calcola_automatico()
+        check(pompa(app), "il calcolo termina")
+        app._stato = originale
+
+        tentativi = [t for t, _m in registro if "tentativo" in t]
+        check(
+            len(tentativi) >= 2,
+            f"l'avanzamento viene segnalato ({len(tentativi)} tentativi)",
+        )
+        check(
+            any(m == "determinate" for _t, m in registro),
+            "la barra passa da indeterminata a determinata",
+        )
+        check(
+            str(app.avanzamento.cget("mode")) == "indeterminate",
+            "e torna indeterminata alla fine, senza restare piena",
+        )
+
+        # I totali annunciati devono coincidere con il conto fatto a priori.
+        d = app.config_linea.data
+        annunciati: dict[int, int] = {}
+        for testo in tentativi:
+            # "2 carroponti: tentativo 3 di 5 - ancora circa ..."
+            n_h = int(testo.split()[0])
+            di = int(testo.split(" di ")[1].split()[0])
+            annunciati[n_h] = di
+        for n_h, totale in sorted(annunciati.items()):
+            check(
+                tentativi_previsti(d, n_h) == totale,
+                f"{n_h} carroponti: annunciati {totale} tentativi, "
+                f"previsti {tentativi_previsti(d, n_h)}",
+            )
+        # Gli indici salgono da 1 fino al totale, senza salti ne' ripetizioni.
+        for n_h, totale in sorted(annunciati.items()):
+            indici = [
+                int(t.split("tentativo ")[1].split()[0])
+                for t in tentativi
+                if int(t.split()[0]) == n_h
+            ]
+            check(
+                indici == list(range(1, len(indici) + 1)) and len(indici) <= totale,
+                f"{n_h} carroponti: indici {indici} entro {totale}",
+            )
+        # La stima compare, ma non subito: con un solo tentativo concluso la
+        # media e' un numero solo, e su una grandezza cosi' dispersa non vuol
+        # dire niente. Meglio nessun tempo che un tempo sbagliato di dieci
+        # volte.
+        con_stima = [t for t in tentativi if "ancora circa" in t]
+        check(
+            "ancora circa" not in tentativi[0],
+            "il primo tentativo non azzarda nessuna stima",
+        )
+        check(
+            bool(con_stima) or len(tentativi) < 3,
+            f"la stima compare quando c'e' su cosa calcolarla "
+            f"({len(con_stima)} tentativi su {len(tentativi)})",
+        )
+    finally:
+        chiudi(app)
+
+
 def test_modifica_tempi_in_vasca(percorso_linea):
     print("\n[4] modifica dei tempi in vasca su un ciclogramma calcolato")
     app = _app_risolta(percorso_linea)
@@ -1091,6 +1185,7 @@ def main():
     try:
         test_apertura_e_proposta(linea)
         test_calcolo_automatico(linea)
+        test_avanzamento_del_calcolo(linea)
         test_modifica_tempi_in_vasca(linea)
         test_vista_e_immagine(linea)
         test_takt_e_carroponti(linea)

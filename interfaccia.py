@@ -648,6 +648,14 @@ class Applicazione(tk.Tk):
             lambda: self._risolvi(cfg),
         )
 
+    def _segnala_tentativo(self, n_hoists: int, indice: int, totale: int):
+        """Chiamata dal solutore PRIMA di ogni tentativo, dal thread di lavoro.
+
+        Non tocca widget: mette il messaggio nella coda, che e' l'unico modo
+        sicuro di parlare con la finestra da un altro thread. Chi lo legge e'
+        _controlla_coda."""
+        self._coda.put(("progresso", (n_hoists, indice, totale)))
+
     def _risolvi(self, cfg):
         """Gira nel thread di lavoro: niente widget qui dentro."""
         d = cfg.data
@@ -659,6 +667,7 @@ class Applicazione(tk.Tk):
                 d,
                 max_hoists=cfg.max_carroponti,
                 time_limit_per_candidate=cfg.tempo_limite_s,
+                su_tentativo=self._segnala_tentativo,
             )
         if sol.status not in ("OPTIMAL", "FEASIBLE"):
             return ("nessuna", sol, None, None)
@@ -820,8 +829,21 @@ class Applicazione(tk.Tk):
         # linea che prova quattro numeri di carroponti direbbe una frazione del
         # vero. Orologio monotono: non salta se cambia l'ora di sistema.
         self._inizio_lavoro = time.monotonic()
+        # Quanti tentativi il solutore ha gia' AVVIATO. Serve a stimare quanto
+        # manca: al momento del tentativo k ne sono conclusi k-1, e il tempo
+        # trascorso diviso quelli da' la durata media. Si conta su tutta la
+        # ricerca, non sul numero di carroponti in corso: se la ricerca e' gia'
+        # ripiegata su un carroponte in piu', anche i tentativi precedenti
+        # dicono qualcosa su quanto e' pesante questa linea.
+        self._tentativi_avviati = 0
         self._aggiorna_stato_pulsanti()
         self._stato(messaggio)
+        # Barra indeterminata finche' non si sa quanti tentativi saranno: il
+        # primo `su_tentativo` la fa passare a determinata. Con le zone
+        # dichiarate a mano il solutore fa una chiamata sola e non segnala
+        # niente, quindi resta a oscillare -- ed e' giusto: li' non c'e' un
+        # avanzamento da mostrare, c'e' un'unica attesa.
+        self.avanzamento.configure(mode="indeterminate")
         self.avanzamento.start(12)
 
         def involucro():
@@ -833,14 +855,70 @@ class Applicazione(tk.Tk):
         threading.Thread(target=involucro, daemon=True).start()
         self.after(80, self._controlla_coda)
 
+    def _mostra_avanzamento(self, n_hoists: int, indice: int, totale: int):
+        """A che punto e' la ricerca, e quanto manca.
+
+        I TENTATIVI RIMASTI si sanno esattamente: sono combinatoria piu' due
+        prefiltri deterministici, e il solutore li ha gia' contati. Quello che
+        non si sa e' quanto durera' ciascuno -- va da qualche centesimo a tutto
+        il limite di tempo, secondo quanto e' difficile l'istanza -- e allora
+        lo si MISURA su quelli gia' fatti.
+
+        La stima resta una stima: i tentativi che finiscono INFEASIBLE sono
+        molto piu' rapidi di quelli che trovano una soluzione e devono
+        dimostrarla ottima, quindi il numero balla. Sulle linee di prova cade
+        entro un fattore due, che basta a rispondere alla sola domanda che ci
+        si pone davvero: aspetto, o mi alzo?
+
+        La stima copre i tentativi rimasti CON QUESTO numero di carroponti, non
+        l'intera ricerca: se anche l'ultimo fallisce si ricomincia con uno in
+        piu' e il conteggio riparte da capo con un totale nuovo. E' una
+        limitazione onesta -- quanti carroponti serviranno e' la domanda a cui
+        la ricerca sta rispondendo -- e si vede, perche' il testo dice sempre a
+        quale numero di carroponti si riferisce.
+
+        Non si stima invece NIENTE prima di cominciare: l'unico numero
+        calcolabile a priori sarebbe il limite superiore (tutti i tentativi
+        possibili al limite di tempo), e sull'esempio darebbe sei minuti e
+        mezzo contro sei secondi e mezzo reali. Un numero sessanta volte
+        sbagliato non informa, spaventa."""
+        if self.avanzamento.cget("mode") != "determinate":
+            self.avanzamento.stop()
+            self.avanzamento.configure(mode="determinate", maximum=totale)
+        self.avanzamento.configure(maximum=totale, value=indice)
+
+        conclusi = self._tentativi_avviati
+        self._tentativi_avviati += 1
+        testo = (
+            f"{n_hoists} carropont{'e' if n_hoists == 1 else 'i'}: "
+            f"tentativo {indice} di {totale}"
+        )
+        # Con meno di due tentativi conclusi la media e' un numero solo, e su
+        # una grandezza cosi' dispersa non vuol dire niente: meglio non dire
+        # un tempo che dirne uno sbagliato di dieci volte.
+        if conclusi >= 2:
+            media = (time.monotonic() - self._inizio_lavoro) / conclusi
+            manca = media * (totale - indice + 1)
+            testo += f" - ancora circa {_durata_leggibile(manca)}"
+        self._stato(testo)
+
     def _controlla_coda(self):
+        # Si svuota la coda invece di leggere un messaggio solo: i messaggi di
+        # avanzamento arrivano piu' in fretta di quanto si controlli, e
+        # leggerne uno per giro li farebbe accumulare -- la barra resterebbe
+        # indietro rispetto al calcolo, che e' peggio di non averla.
         try:
-            tipo, carico = self._coda.get_nowait()
+            while True:
+                tipo, carico = self._coda.get_nowait()
+                if tipo != "progresso":
+                    break
+                self._mostra_avanzamento(*carico)
         except queue.Empty:
             self.after(80, self._controlla_coda)
             return
 
         self.avanzamento.stop()
+        self.avanzamento.configure(mode="indeterminate", value=0)
         self._lavoro_in_corso = False
         durata = time.monotonic() - self._inizio_lavoro
 
@@ -1158,7 +1236,10 @@ class Applicazione(tk.Tk):
 
         def lavoro():
             sol, zone = solve_auto_zones(
-                cfg.data, n_hoists=n, time_limit_per_candidate=cfg.tempo_limite_s
+                cfg.data,
+                n_hoists=n,
+                time_limit_per_candidate=cfg.tempo_limite_s,
+                su_tentativo=self._segnala_tentativo,
             )
             if sol.status not in ("OPTIMAL", "FEASIBLE"):
                 return ("nessuna", sol, None, None)

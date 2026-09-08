@@ -2419,12 +2419,65 @@ def _enumerate_contiguous_partitions(n_moves: int, n_hoists: int):
         yield [HoistZone(bounds[i] + 1, bounds[i + 1]) for i in range(n_hoists)]
 
 
+def _scarto_prefiltro(
+    data: ProblemData, zones: list[HoistZone], carichi: list[float]
+) -> Optional[tuple[str, str]]:
+    """None se questa suddivisione va provata col solutore, altrimenti
+    (motivo, spiegazione) per cui si scarta senza nemmeno costruire il modello.
+
+    I due prefiltri stanno QUI e non dentro solve_auto_zones perche' servono a
+    due cose: scartare, e CONTARE quante risoluzioni si faranno prima di
+    cominciare (vedi `tentativi_previsti`). Duplicarli vorrebbe dire che il
+    conteggio e la ricerca possono dire numeri diversi.
+
+    Sono entrambi economici -- una somma e un confronto fra intervalli -- e
+    tolgono di mezzo moltissimo: su una linea di dieci vasche con il takt time
+    stretto, 176 suddivisioni diventano 10.
+    """
+    # 1) una zona il cui solo trasporto-a-carico (senza nemmeno contare i
+    # trasferimenti a vuoto) supera gia' il takt time massimo e' certamente
+    # infattibile, qualunque sia l'ordine di visita.
+    for z in zones:
+        if sum(carichi[k] for k in range(z.lo, z.hi + 1)) > data.takt_max:
+            return ("carico", f"la zona [{z.lo}-{z.hi}] non ci sta nel takt time")
+    # 2) geometria patologica (vasche non ordinate lungo la rotaia, zone che si
+    # scavalcano). Scartarla qui, invece di lasciar fallire solve(), fa si' che
+    # la scelta automatica trovi da sola una suddivisione valida quando esiste.
+    problemi = zone_layout_conflicts(data, zones)
+    if problemi:
+        return ("geometria", problemi[0])
+    return None
+
+
+def tentativi_previsti(data: ProblemData, n_hoists: int) -> int:
+    """Quante risoluzioni CP-SAT servirebbero per provare tutte le suddivisioni
+    in `n_hoists` zone.
+
+    E' noto PRIMA di risolvere, e costa millisecondi: il numero di suddivisioni
+    e' combinatoria pura, e i due prefiltri sono deterministici. Serve a dare
+    un avanzamento vero invece di una barra che oscilla.
+
+    Quello che NON si sa in anticipo e' a quale numero di carroponti la ricerca
+    si fermera' -- e' proprio l'informazione che si sta cercando -- ne' quanto
+    durera' ciascuna risoluzione, che dipende da quanto e' difficile
+    l'istanza."""
+    if n_hoists < 1 or n_hoists > data.n_moves:
+        return 0
+    carichi = [data.loaded_leg_seconds(k) for k in range(data.n_moves)]
+    return sum(
+        1
+        for zones in _enumerate_contiguous_partitions(data.n_moves, n_hoists)
+        if _scarto_prefiltro(data, zones, carichi) is None
+    )
+
+
 def solve_auto_zones(
     data: ProblemData,
     n_hoists: int,
     time_limit_per_candidate: float = 8.0,
     max_candidates: int = 500,
     log_progress: bool = False,
+    su_tentativo=None,
 ) -> tuple[Solution, Optional[list[HoistZone]]]:
     """Prova automaticamente tutte le suddivisioni contigue delle mosse in
     `n_hoists` zone (una per carroponte) e restituisce la soluzione con il
@@ -2434,6 +2487,11 @@ def solve_auto_zones(
     `data.zones` puo' essere None (verra' ignorato/sovrascritto per ogni
     tentativo). Restituisce (Solution, zones) -- se nessuna suddivisione e'
     fattibile, Solution.status sara' "INFEASIBLE" e zones sara' None.
+
+    `su_tentativo(n_hoists, indice, totale)` viene chiamata PRIMA di ogni
+    risoluzione, con l'indice contato da 1 e il totale gia' al netto dei
+    prefiltri. Serve a chi mostra un avanzamento; gira nel thread del
+    chiamante, quindi non deve toccare widget.
     """
     n_moves = data.n_moves
     if n_hoists < 1:
@@ -2463,33 +2521,31 @@ def solve_auto_zones(
     n_skipped_layout = 0
     esempio_layout: Optional[str] = None
 
+    # Prima si applicano i prefiltri a TUTTE le suddivisioni, poi si risolve.
+    # Farlo in due tempi costa una lista di poche decine di elementi e in
+    # cambio da' il totale esatto delle risoluzioni da fare: senza, un
+    # avanzamento potrebbe solo dire quante ne sono state fatte, non quante ne
+    # mancano.
+    da_provare: list[list[HoistZone]] = []
     for zones in _enumerate_contiguous_partitions(n_moves, n_hoists):
-        # pre-filtro 1: una zona il cui solo trasporto-a-carico (senza
-        # nemmeno contare trasferimenti a vuoto) gia' supera il takt time
-        # massimo e' certamente infattibile, qualunque sia l'ordine di visita.
-        content_ok = all(
-            sum(travel_loaded_seconds[k] for k in range(z.lo, z.hi + 1))
-            <= data.takt_max
-            for z in zones
-        )
-        if not content_ok:
+        scarto = _scarto_prefiltro(data, zones, travel_loaded_seconds)
+        if scarto is None:
+            da_provare.append(zones)
+            continue
+        motivo, spiegazione = scarto
+        if motivo == "carico":
             n_skipped += 1
             continue
+        n_skipped_layout += 1
+        if esempio_layout is None:
+            esempio_layout = spiegazione
+        if log_progress:
+            zone_str = ", ".join(f"[{z.lo}-{z.hi}]" for z in zones)
+            print(f"  zone {zone_str}: scartata (geometria irrappresentabile)")
 
-        # pre-filtro 2: geometria patologica (vasche non ordinate lungo la
-        # rotaia, zone che si scavalcano). Scartarla qui, invece di lasciar
-        # fallire solve(), fa si' che la scelta automatica delle zone trovi da
-        # sola una suddivisione valida quando esiste.
-        problemi = zone_layout_conflicts(data, zones)
-        if problemi:
-            n_skipped_layout += 1
-            if esempio_layout is None:
-                esempio_layout = problemi[0]
-            if log_progress:
-                zone_str = ", ".join(f"[{z.lo}-{z.hi}]" for z in zones)
-                print(f"  zone {zone_str}: scartata (geometria irrappresentabile)")
-            continue
-
+    for indice, zones in enumerate(da_provare, start=1):
+        if su_tentativo is not None:
+            su_tentativo(n_hoists, indice, len(da_provare))
         candidate_data = dataclasses.replace(data, zones=zones)
         n_tried += 1
         sol = solve(candidate_data, time_limit_s=time_limit_per_candidate)
@@ -2544,6 +2600,7 @@ def solve_auto_hoists(
     time_limit_per_candidate: float = 8.0,
     max_candidates_per_hoist_count: int = 500,
     log_progress: bool = False,
+    su_tentativo=None,
 ) -> tuple[Solution, Optional[list[HoistZone]], Optional[int]]:
     """Cerca automaticamente sia il numero minimo di carroponti necessario
     sia le zone di ciascuno: prova n_hoists = min_hoists, min_hoists+1, ...,
@@ -2555,6 +2612,10 @@ def solve_auto_hoists(
     carroponti fino a max_hoists risulta fattibile, Solution.status sara'
     "INFEASIBLE" e zones/n_hoists saranno None -- in tal caso prova ad
     aumentare max_hoists o la tolleranza sul takt time.
+
+    `su_tentativo(n_hoists, indice, totale)` viene passata a solve_auto_zones:
+    vedi li'. Il totale riguarda il numero di carroponti in corso, non l'intera
+    ricerca -- quanti carroponti serviranno non si sa finche' non si trova.
     """
     n_moves = data.n_moves
     max_hoists = min(max_hoists, n_moves)
@@ -2577,6 +2638,7 @@ def solve_auto_hoists(
                 time_limit_per_candidate=time_limit_per_candidate,
                 max_candidates=max_candidates_per_hoist_count,
                 log_progress=log_progress,
+                su_tentativo=su_tentativo,
             )
         except ValueError as e:
             # troppe suddivisioni possibili per questo n_hoists: lo segnalo

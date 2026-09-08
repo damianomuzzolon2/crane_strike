@@ -153,7 +153,7 @@ programma.
 | --- | --- |
 | `Apri linea...` | Carica un file Excel con la definizione della linea. Se il file e' compilato male non succede nulla di brutto: compare una finestra con **tutti** gli errori trovati, con foglio e cella. |
 | `Nuovo modello Excel...` | Crea il file da compilare, gia' pieno con una linea di zincatura d'esempio, e chiede se aprirlo subito. E' il modo consigliato di cominciare: si parte da qualcosa che funziona e lo si modifica. |
-| `Calcola auto` | Cerca il numero minimo di carroponti, la suddivisione migliore della linea e il takt time piu' basso. Puo' durare da qualche secondo a qualche minuto: la barra in basso a destra si muove, i pulsanti si spengono e la scheda *Ciclogramma* si chiude finche' non ha finito. La finestra **non si blocca**. |
+| `Calcola auto` | Cerca il numero minimo di carroponti, la suddivisione migliore della linea e il takt time piu' basso. Puo' durare da qualche secondo a qualche minuto: i pulsanti si spengono e la scheda *Ciclogramma* si chiude finche' non ha finito, ma la finestra **non si blocca**. In basso a destra la barra dice a che punto e': `2 carroponti: tentativo 3 di 5 - ancora circa 3 s` (vedi *Quanto durera' il calcolo*). |
 | `Calcola man` | Butta via il ciclogramma corrente e riparte dai tempi minimi di processo, con **nessun trasporto assegnato**, per comporlo a mano (vedi sotto). |
 | `Modifica` / `Fine modifica` | Apre alla modifica il ciclogramma che c'e', portando sul **pettine** — che e' il foglio su cui si assegna. Non cambia niente, ma e' il passaggio obbligato: senza, la scheda *Ciclogramma* resta chiusa. Premuto di nuovo chiude la modifica e riporta a guardare il ciclogramma. |
 | `Simulazione` | Apre una finestra a parte in cui la linea si vede **di fronte e in movimento**: i carroponti che scorrono, calano il gancio, tirano su il telaio, lo portano e lo immergono. Si accende solo quando un ciclogramma c'e' — calcolato o composto a mano, e' lo stesso oggetto. Vedi sotto. |
@@ -164,6 +164,38 @@ non solo il nome, perche' dello stesso file girano di solito piu' copie (la
 scrivania, la cartella di commessa, la rete) e serve sapere quale si sta
 guardando. Lo stesso percorso compare nel titolo della finestra e in cima alla
 scheda *Riepilogo*: se la barra e' troppo stretta per contenerlo, si legge li'.
+
+### Quanto durera' il calcolo
+
+Durante `Calcola auto` la barra in basso a destra si riempie e accanto si
+legge, per esempio:
+
+```text
+2 carroponti: tentativo 3 di 5 - ancora circa 3,1 s
+```
+
+Il numero di **tentativi** e' esatto: il programma prova una suddivisione della
+linea per volta, e quante siano lo sa in anticipo — e' combinatoria, piu' due
+scarti rapidi che tolgono di mezzo le suddivisioni palesemente inutili (su una
+linea di dieci vasche, 176 diventano 10).
+
+Il **tempo** invece e' una stima, misurata sui tentativi gia' fatti. Balla,
+perche' un tentativo che non trova niente e' molto piu' rapido di uno che trova
+una soluzione e deve dimostrarla ottima: prendila come "aspetto o mi alzo?",
+non come un cronometro.
+
+Due cose che vale la pena sapere:
+
+- la stima riguarda **quel** numero di carroponti. Se nessuna suddivisione
+  funziona, il programma ricomincia con un carroponte in piu' e il conteggio
+  riparte da capo: e' normale, e si vede perche' il testo dice sempre con
+  quanti carroponti sta provando.
+- **prima** di cominciare non viene detto niente, ed e' voluto: l'unico numero
+  onesto sarebbe il caso peggiore, e sulla linea d'esempio sarebbe sei minuti e
+  mezzo contro sei secondi e mezzo reali.
+
+Se hai dichiarato tu le zone nel foglio *Zone*, non c'e' niente da provare: il
+calcolo e' uno solo e la barra si limita a oscillare.
 
 ### Come si legge il ciclogramma
 
@@ -1546,8 +1578,8 @@ python test/esempio.py           # risoluzione reale + verifica + grafico
 ```
 
 Ognuno stampa cosa ha provato e finisce con `RISULTATO: n ok, m falliti`.
-Nessuna dipendenza da pytest. Stato attuale: **77, 83, 59, 35 e 95 asserzioni,
-zero fallimenti**.
+Nessuna dipendenza da pytest. Stato attuale: **98, 94, 78, 43 e 108
+asserzioni, zero fallimenti**.
 
 **La risoluzione CP-SAT e' eseguita e verificata end-to-end.** Sull'esempio
 fornito il solver trova `T = 110,00 s` con 2 carroponti, separazione minima
