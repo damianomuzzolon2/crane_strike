@@ -1605,16 +1605,10 @@ AUTOMATICA = [
     ("h2", "1. solve_auto_zones"),
     ("c", "model.solve_auto_zones", None, "    travel_loaded_seconds ="),
     ("p",
-     "I controlli d'ingresso sono due, e il secondo e' quello che vale la "
-     "pena leggere: se le suddivisioni possibili superano max_candidates, si "
-     "SOLLEVA invece di troncare silenziosamente l'esplorazione."),
-    ("q",
-     "TRONCARE SAREBBE PEGGIO CHE FALLIRE. Restituire la migliore fra le prime "
-     "cinquecento darebbe una risposta che sembra completa e non lo e': "
-     "l'utente crederebbe di avere l'ottimo. Il messaggio elenca invece tre "
-     "vie d'uscita esplicite -- alzare max_candidates accettando il tempo, "
-     "ridurre mosse o carroponti, oppure dichiarare le zone a mano e usare "
-     "solve() direttamente."),
+     "I controlli d'ingresso sono due e riguardano solo la coerenza: "
+     "n_hoists positivo e non superiore al numero di mosse. Il tetto sul "
+     "numero di suddivisioni non e' qui -- si applica piu' avanti, quando si "
+     "sa quante ne restano davvero da risolvere."),
 
     ("h3", "Filtrare tutto, poi risolvere"),
     ("c", "model.solve_auto_zones", "    travel_loaded_seconds =", "    if best_solution is None:"),
@@ -1640,6 +1634,28 @@ AUTOMATICA = [
      "geometria patologica farebbe abortire tutta la ricerca -- e su una linea "
      "con vasche non perfettamente ordinate sarebbe la norma, non "
      "l'eccezione."),
+    ("q",
+     "IL TETTO SI APPLICA A QUELLO CHE SI RISOLVE. E' l'unica cosa che ha "
+     "senso contare, e contare le combinazioni sulla carta e' costato caro: su "
+     "una linea di diciassette mosse con quattro carroponti le combinazioni "
+     "sono 560 e le suddivisioni che arrivano al solutore 336. Col tetto a 500 "
+     "applicato alle prime, quella ricerca veniva saltata per intero -- e con "
+     "lei tutti i numeri di carroponti superiori, perche' crescono. Una linea "
+     "risolvibile con sei carroponti risultava impossibile senza che nessuno "
+     "avesse provato oltre i tre."),
+    ("p",
+     "Il valore predefinito e' 5000, alto di proposito: saltare una ricerca e' "
+     "un danno molto peggiore di farla durare. Una ricerca lunga si vede -- la "
+     "barra dice a che tentativo e' arrivata e quanto manca -- e si puo' "
+     "interrompere; una saltata produce un 'nessuna soluzione' che sembra un "
+     "verdetto sulla linea e non lo e'. Quello che resta e' una rete contro il "
+     "caso veramente fuori scala, dove aspettare non avrebbe comunque senso."),
+    ("p",
+     "Quando il tetto scatta si SOLLEVA invece di troncare l'esplorazione: "
+     "restituire la migliore fra le prime cinquemila darebbe una risposta che "
+     "sembra completa e non lo e'. Chi chiama decide -- solve_auto_hoists "
+     "registra il salto e passa al numero successivo, cosi' un valore "
+     "impraticabile non impedisce di provare gli altri."),
     ("p",
      "`su_tentativo` viene chiamata prima di ogni risoluzione, con l'indice e "
      "il totale gia' al netto dei prefiltri. Gira nel thread del chiamante, "
@@ -1663,7 +1679,75 @@ AUTOMATICA = [
      "distinguibili solo grazie a quei numeri."),
 
     # ==================================================================
-    ("h2", "2. solve_auto_hoists"),
+    ("h2", "2. Perche' non si riesce"),
+    ("c", "model", "# \"Nessuna soluzione\" e' la risposta meno utile", "def _prova"),
+    ("p",
+     "Il commento di sezione pone il problema: il solutore dice che i vincoli "
+     "insieme sono incompatibili, non quale sia di troppo. Non lo nasconde -- "
+     "non lo sa. Lo si scopre RILASSANDO un vincolo per volta e riprovando."),
+    ("q",
+     "E' UN METODO GREZZO, E RISPONDE ALLA DOMANDA GIUSTA. Non e' un'analisi "
+     "esatta di infattibilita': se a bloccare sono due vincoli insieme, "
+     "nessun rilassamento singolo basta. Ma la domanda di chi ha davanti un "
+     "rifiuto non e' 'quali sono i vincoli attivi', e' 'dove metto le mani' -- "
+     "e a quella un elenco di tutto cio' che si potrebbe cambiare non risponde."),
+    ("c", "model._prova"),
+    ("q",
+     "LA DISTINZIONE FRA 'no' E 'boh' E' TUTTA LA DIFFERENZA. 'no' e' "
+     "INFEASIBLE, cioe' una dimostrazione: nemmeno rilassando quel vincolo si "
+     "riesce, quindi non e' lui a bloccare. 'boh' e' UNKNOWN, cioe' tempo "
+     "scaduto: non si sa niente. Confonderli fa dire alla diagnosi che un "
+     "vincolo e' innocente quando invece non e' stato esaminato -- ed e' il "
+     "modo piu' efficace di mandare qualcuno a cercare nel posto sbagliato. "
+     "Non e' un rischio teorico: e' successo alla prima stesura, e proprio "
+     "sulla prova piu' utile."),
+    ("c", "model.diagnosi_zone"),
+    ("p",
+     "Quattro prove in ordine, e ciascuna esce appena conclude. La prima cosa "
+     "che fa pero' non e' una prova: e' chiedersi se ci sia qualcosa da "
+     "diagnosticare."),
+    ("q",
+     "SU UNA LINEA CHE FUNZIONA, OGNI RILASSAMENTO RIESCE. Senza il controllo "
+     "iniziale, la prima prova verrebbe scambiata per la causa e la diagnosi "
+     "annuncerebbe un colpevole inventato. Costa una risoluzione ed e' il "
+     "controllo piu' importante del metodo -- e' anche l'errore che si fa "
+     "usando la funzione a mano su una suddivisione sbagliata."),
+    ("p",
+     "La prova sul takt time non ALLARGA la banda: la SPOSTA, tenendola "
+     "stretta. Allargarla ingrandisce il modello -- il numero di traslazioni "
+     "da generare va come orizzonte diviso takt minimo -- e la prova scade "
+     "prima di dire qualcosa. Una banda stretta piazzata piu' in alto costa "
+     "quanto l'originale e risponde alla stessa domanda."),
+    ("p",
+     "Anche il limite INFERIORE del takt puo' bloccare, e sorprende: un ciclo "
+     "piu' lungo tiene i pezzi in vasca piu' a lungo, e se il processo non lo "
+     "tollera la linea non sta in piedi."),
+    ("q",
+     "IL MINIMO SI RIPORTA COME INTERVALLO. Trovato uno scalino che funziona, "
+     "il minimo sta fra quello e lo scalino precedente che aveva fallito. "
+     "Annunciare il valore trovato come 'il minimo' farebbe alzare "
+     "takt_max_s piu' del necessario. E' la stessa disciplina del limite "
+     "d'errore nel verificatore: si dichiara quello che si sa, con "
+     "l'incertezza attaccata."),
+    ("c", "model._vasche_che_bloccano"),
+    ("p",
+     "Quando a bloccare sono i tempi di processo, dire 'i tempi sono stretti' "
+     "non serve a niente: serve sapere QUALE vasca e DI QUANTO. Si allarga "
+     "una vasca per volta, e se quella da sola sblocca si cerca per bisezione "
+     "il minimo che basta."),
+    ("p",
+     "Nella bisezione un esito incerto si tratta come un no: l'intervallo si "
+     "stringe dal lato prudente, e il valore riportato non promette meno di "
+     "quanto serva davvero."),
+    ("c", "model._piu_equilibrata"),
+    ("p",
+     "Quando NESSUNA suddivisione funziona bisogna sceglierne una su cui "
+     "indagare. Il docstring argomenta perche' questa e' la meno arbitraria: "
+     "se il problema fosse il carico, sarebbe l'ultima a soffrirne, quindi "
+     "quello che blocca lei blocca anche tutte le altre."),
+
+    # ==================================================================
+    ("h2", "3. solve_auto_hoists"),
     ("c", "model", "# Piu' carroponti possono solo ampliare", "def solve_auto_hoists"),
     ("q",
      "PERCHE' BASTA UNO SWEEP CRESCENTE. Il commento contiene l'argomento: "

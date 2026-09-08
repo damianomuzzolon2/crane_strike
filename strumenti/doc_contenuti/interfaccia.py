@@ -336,6 +336,43 @@ CALCOLO = [
      "senza trovare niente, allungarlo e' la prima cosa da provare -- e senza "
      "il numero non si sa se il limite e' stato raggiunto o se la linea e' "
      "davvero infattibile."),
+    ("h3", "Quando non si trova niente"),
+    ("c", "interfaccia.Applicazione._resoconto_fallimento"),
+    ("q",
+     "IL REGISTRO C'ERA GIA', E NON VENIVA MOSTRATO. E' il difetto che questo "
+     "metodo corregge, e non era innocuo: la ricerca automatica SALTA i numeri "
+     "di carroponti per cui le suddivisioni da provare superano il limite, e "
+     "senza il registro quel salto era invisibile. Una linea risolvibile con "
+     "quattro carroponti poteva sembrare impossibile perche' nessuno aveva "
+     "provato con quattro."),
+    ("p", "Il resoconto ha tre parti, e ciascuna risponde a una domanda diversa."),
+    ("li", "COSA E' STATO PROVATO -- per ogni numero di carroponti: quante "
+           "suddivisioni risolte, con quale esito, quante scartate senza "
+           "risolverle, e quali non sono state provate affatto;"),
+    ("li", "PERCHE' NON RIESCE -- la diagnosi, se ha concluso qualcosa;"),
+    ("li", "COSA SI PUO' FARE -- le leve, in ordine di quanto e' probabile che "
+           "siano loro."),
+    ("q",
+     "UNKNOWN E INFEASIBLE VOGLIONO DUE AZIONI OPPOSTE. Il conteggio per stato "
+     "e' li' per questo: INFEASIBLE e' una dimostrazione, e allora va cambiata "
+     "la linea; UNKNOWN vuol dire solo che il tempo e' scaduto, e allora basta "
+     "darne di piu' -- fra quei tentativi potrebbe esserci la soluzione. "
+     "Confonderli manda a rifare il lavoro sbagliato, e il messaggio li separa "
+     "con un avviso a parte."),
+    ("c", "interfaccia.Applicazione._diagnostica"),
+    ("p",
+     "Gira nel thread di lavoro, subito dopo un calcolo fallito, e indaga "
+     "sulla suddivisione col carico piu' equilibrato fra quelle provate con il "
+     "numero PIU' ALTO di carroponti: e' quella che aveva piu' margine."),
+    ("p",
+     "Costa qualche risoluzione in piu' su un calcolo che e' gia' fallito. "
+     "Sembra molto e non lo e': l'alternativa e' che l'utente ripeta lo stesso "
+     "calcolo tre volte cambiando un parametro a caso ogni volta."),
+    ("p",
+     "L'except cattura tutto: una diagnosi che fallisce non deve mai portarsi "
+     "dietro il risultato del calcolo, che a quel punto e' l'unica cosa che "
+     "l'utente ha."),
+
     ("c", "interfaccia.Applicazione._controlla_coda",
      "        self.soluzione, self.dati, self.report = sol, dati, report", None),
     ("p",

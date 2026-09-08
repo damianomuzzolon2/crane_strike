@@ -2475,7 +2475,7 @@ def solve_auto_zones(
     data: ProblemData,
     n_hoists: int,
     time_limit_per_candidate: float = 8.0,
-    max_candidates: int = 500,
+    max_candidates: int = 5000,
     log_progress: bool = False,
     su_tentativo=None,
 ) -> tuple[Solution, Optional[list[HoistZone]]]:
@@ -2500,16 +2500,6 @@ def solve_auto_zones(
         raise ValueError(
             f"n_hoists ({n_hoists}) non puo' superare il numero di mosse ({n_moves}): "
             f"ogni carroponte deve avere almeno una mossa."
-        )
-
-    n_combinations = math.comb(n_moves - 1, n_hoists - 1)
-    if n_combinations > max_candidates:
-        raise ValueError(
-            f"Il numero di suddivisioni possibili ({n_combinations}) supera "
-            f"max_candidates ({max_candidates}). Aumenta max_candidates se vuoi "
-            f"comunque una ricerca esaustiva (puo' richiedere molto tempo), oppure "
-            f"riduci il numero di mosse/carroponti, oppure specifica tu stesso le "
-            f"zone e usa solve() direttamente."
         )
 
     travel_loaded_seconds = [data.loaded_leg_seconds(k) for k in range(n_moves)]
@@ -2543,12 +2533,45 @@ def solve_auto_zones(
             zone_str = ", ".join(f"[{z.lo}-{z.hi}]" for z in zones)
             print(f"  zone {zone_str}: scartata (geometria irrappresentabile)")
 
+    # Il tetto si applica a quello che si RISOLVE, non alle combinazioni sulla
+    # carta. La differenza non e' accademica: su una linea di diciassette mosse
+    # con quattro carroponti le combinazioni sono 560 e le suddivisioni che
+    # arrivano al solutore 336. Contando le prime, la ricerca veniva saltata
+    # per intero -- e con lei tutti i numeri di carroponti superiori, perche'
+    # crescono. Il risultato era che una linea risolvibile con quattro
+    # carroponti veniva dichiarata impossibile senza che nessuno ci avesse
+    # provato.
+    #
+    # Il valore predefinito e' alto (5000) di proposito: saltare una ricerca e'
+    # un danno molto peggiore di farla durare. Una ricerca lunga si vede -- la
+    # barra dice a che tentativo e' e quanto manca -- e si puo' interrompere;
+    # una saltata produce un "nessuna soluzione" che sembra un verdetto sulla
+    # linea e non lo e'. Quello che resta e' una rete contro il caso
+    # veramente fuori scala, dove aspettare non avrebbe comunque senso.
+    if len(da_provare) > max_candidates:
+        raise ValueError(
+            f"Con {n_hoists} carroponti restano {len(da_provare)} suddivisioni "
+            f"da provare (su {math.comb(n_moves - 1, n_hoists - 1)} possibili) "
+            f"e il limite e' {max_candidates}. Alza max_candidates se accetti "
+            f"di aspettare -- al peggio {len(da_provare)} risoluzioni -- "
+            f"oppure indica tu le zone nel foglio Zone e usa solve()."
+        )
+
+    # Quante volte ciascun esito. Serve a distinguere due situazioni che
+    # 'nessuna soluzione' confonde: INFEASIBLE e' una DIMOSTRAZIONE che con
+    # quelle zone non si puo' fare, e allora va cambiata la linea; UNKNOWN
+    # vuol dire solo che il tempo e' scaduto, e allora basta darne di piu'.
+    # Sono due azioni opposte, e senza questo conteggio l'utente non ha modo
+    # di sapere quale delle due gli tocca.
+    per_stato: dict[str, int] = {}
+
     for indice, zones in enumerate(da_provare, start=1):
         if su_tentativo is not None:
             su_tentativo(n_hoists, indice, len(da_provare))
         candidate_data = dataclasses.replace(data, zones=zones)
         n_tried += 1
         sol = solve(candidate_data, time_limit_s=time_limit_per_candidate)
+        per_stato[sol.status] = per_stato.get(sol.status, 0) + 1
         if log_progress:
             zone_str = ", ".join(f"[{z.lo}-{z.hi}]" for z in zones)
             info = f"T={sol.T:.2f}s" if sol.T is not None else sol.status
@@ -2558,27 +2581,337 @@ def solve_auto_zones(
                 best_solution = sol
                 best_zones = zones
 
-    if best_solution is None:
-        return (
-            Solution(
-                status="INFEASIBLE",
-                T=None,
-                raw={
-                    "n_tried": n_tried,
-                    "n_skipped": n_skipped,
-                    "n_skipped_layout": n_skipped_layout,
-                    "layout_example": esempio_layout,
-                },
-            ),
-            None,
-        )
+    conti = {
+        "n_tried": n_tried,
+        "n_skipped": n_skipped,
+        "n_skipped_layout": n_skipped_layout,
+        "layout_example": esempio_layout,
+        "per_stato": per_stato,
+        # la suddivisione col carico piu' equilibrato: e' quella su cui ha
+        # senso indagare quando nessuna funziona (vedi `diagnosi_zone`)
+        "candidata_tipica": _piu_equilibrata(da_provare, travel_loaded_seconds),
+    }
 
-    best_solution.raw["n_tried"] = n_tried
-    best_solution.raw["n_skipped"] = n_skipped
-    best_solution.raw["n_skipped_layout"] = n_skipped_layout
-    best_solution.raw["layout_example"] = esempio_layout
+    if best_solution is None:
+        return Solution(status="INFEASIBLE", T=None, raw=conti), None
+
+    best_solution.raw.update(conti)
     best_solution.raw["zones"] = best_zones
     return best_solution, best_zones
+
+
+def _piu_equilibrata(
+    candidate: list[list[HoistZone]], carichi: list[float]
+) -> Optional[list[HoistZone]]:
+    """La suddivisione in cui il carico e' distribuito meglio fra i carroponti.
+
+    Quando NESSUNA suddivisione funziona bisogna sceglierne una su cui
+    indagare, e questa e' la meno arbitraria: se il problema fosse il carico,
+    sarebbe l'ultima a soffrirne, quindi quello che la blocca blocca anche
+    tutte le altre."""
+    if not candidate:
+        return None
+    return min(
+        candidate,
+        key=lambda zone: max(
+            sum(carichi[k] for k in range(z.lo, z.hi + 1)) for z in zone
+        ),
+    )
+
+
+# --------------------------------------------------------------------------
+# Perche' non si riesce
+# --------------------------------------------------------------------------
+#
+# "Nessuna soluzione" e' la risposta meno utile che un programma possa dare:
+# non dice se manca un secondo o un carroponte. Il solutore non lo dice perche'
+# non lo sa -- dimostra che i vincoli insieme sono incompatibili, non quale sia
+# di troppo.
+#
+# Lo si scopre RILASSANDO un vincolo per volta e riprovando: se togliendo il
+# limite sui tempi di processo la linea diventa risolvibile, sono quelli a
+# bloccare; se serve toglierne due, il problema e' piu' profondo. E' un metodo
+# grezzo e costa qualche risoluzione, ma risponde alla domanda giusta -- dove
+# metto le mani -- invece di elencare tutto quello che si potrebbe cambiare.
+
+
+def _prova(data, zones, limite: float) -> tuple[str, Optional[float]]:
+    """Esito di una variante rilassata: ("si", T) | ("no", None) | ("boh", None).
+
+    LA DISTINZIONE FRA "no" E "boh" E' TUTTA LA DIFFERENZA. "no" e' INFEASIBLE,
+    cioe' una dimostrazione: nemmeno rilassando quel vincolo si riesce, quindi
+    non e' lui a bloccare. "boh" e' UNKNOWN, cioe' tempo scaduto: non si sa
+    niente. Confonderli fa dire alla diagnosi che un vincolo e' innocente
+    quando invece non e' stato esaminato -- ed e' il modo piu' efficace di
+    mandare qualcuno a cercare nel posto sbagliato.
+
+    Non e' un rischio teorico: allargare la banda del takt time INGRANDISCE il
+    modello (le traslazioni da generare vanno come orizzonte/takt minimo), e
+    proprio la prova piu' utile e' quella che scade piu' facilmente.
+
+    Una variante puo' anche non passare le validazioni di ProblemData: li' si
+    sta esplorando, non costruendo una linea, quindi vale come "no"."""
+    try:
+        sol = solve(dataclasses.replace(data, zones=zones), time_limit_s=limite)
+    except ValueError:
+        return ("no", None)
+    if sol.status in ("OPTIMAL", "FEASIBLE") and sol.T is not None:
+        return ("si", sol.T)
+    return ("no", None) if sol.status == "INFEASIBLE" else ("boh", None)
+
+
+def diagnosi_zone(
+    data: ProblemData,
+    zones: list[HoistZone],
+    time_limit_s: float = 15.0,
+    dettaglio_vasche: bool = True,
+) -> list[str]:
+    """Perche' questa suddivisione non e' risolvibile: righe gia' leggibili.
+
+    Si rilassa un vincolo per volta e si guarda quale rilassamento fa passare
+    la linea. Quando il rilassamento e' una GRANDEZZA -- il takt time, un tempo
+    massimo di processo -- non ci si ferma al si'/no: si cerca per bisezione il
+    valore minimo che basta, cosi' la risposta e' 'mancano 12 s su ED' invece
+    di 'i tempi di processo sono stretti'.
+
+    Costa una manciata di risoluzioni piu' una per vasca se
+    `dettaglio_vasche`. Non e' un'analisi esatta di infattibilita': se a
+    bloccare sono DUE vincoli insieme, nessun rilassamento singolo basta e la
+    diagnosi lo dice -- che e' comunque un'informazione."""
+    fuori: list[str] = []
+    incerti: list[str] = []
+    intermedie = list(range(1, data.n_stations - 1))
+
+    # -- 0) c'e' davvero qualcosa da diagnosticare? ------------------------
+    #
+    # Ogni prova qui sotto rilassa un vincolo e guarda se la linea passa. Su
+    # una suddivisione che passava GIA', tutte le prove riescono, e la prima
+    # verrebbe scambiata per la causa. Chiedersi prima se il paziente sta male
+    # costa una risoluzione ed evita una diagnosi inventata.
+    esito, t = _prova(data, zones, time_limit_s)
+    if esito == "si":
+        return [
+            f"Questa suddivisione FUNZIONA (T = {t:.0f} s): non c'e' niente da "
+            f"diagnosticare. Se la ricerca automatica non l'ha trovata, non e' "
+            f"perche' la linea non regge -- guarda il registro dei tentativi."
+        ]
+    if esito == "boh":
+        return [
+            "Il solutore non ha concluso nel tempo concesso su questa "
+            "suddivisione: non e' stato dimostrato che sia impossibile, e "
+            "quindi non c'e' ancora niente da spiegare. Rilancia con un "
+            "limite di tempo piu' alto."
+        ]
+
+    # -- 1) il takt time --------------------------------------------------
+    #
+    # Non si allarga la banda: la si SPOSTA, tenendola stretta. Allargarla
+    # ingrandisce il modello -- il numero di traslazioni da generare va come
+    # orizzonte diviso takt minimo -- e la prova scade prima di dire qualcosa.
+    # Una banda stretta piazzata piu' in alto costa quanto l'originale e
+    # risponde alla stessa domanda: con un ciclo piu' lungo, si riesce?
+    precedente = data.takt_max  # l'ultimo valore per cui si e' visto che NON va
+    for fattore in (1.25, 1.5, 2.0, 3.0):
+        basso = data.takt_max * fattore
+        esito, t = _prova(
+            dataclasses.replace(data, takt_min=basso, takt_max=basso * 1.1),
+            zones, time_limit_s,
+        )
+        if esito == "si":
+            # Si e' trovato un ciclo che basta, non il piu' corto che basti:
+            # il minimo sta fra l'ultimo scalino fallito e questo. Dirlo come
+            # intervallo e' l'unica forma onesta -- annunciare `t` come "il
+            # minimo" farebbe alzare takt_max_s piu' del necessario.
+            fuori.append(
+                f"IL TAKT TIME E' TROPPO STRETTO: con un ciclo di {t:.0f} s "
+                f"queste zone funzionano, mentre il massimo dichiarato e' "
+                f"{data.takt_max:.0f} s. Il minimo che basta sta fra "
+                f"{precedente:.0f} e {t:.0f} s, cioe' servono da "
+                f"{max(0.0, precedente - data.takt_max):.0f} a "
+                f"{t - data.takt_max:.0f} s in piu'. Alza takt_max_s, oppure "
+                f"aggiungi un carroponte per accorciare i giri."
+            )
+            return fuori
+        if esito == "boh":
+            incerti.append(f"takt time attorno a {basso:.0f} s")
+        else:
+            precedente = basso * 1.1
+
+    # Anche il limite INFERIORE puo' bloccare, e sorprende: un ciclo piu' lungo
+    # tiene i pezzi in vasca piu' a lungo, e se il processo non lo tollera la
+    # linea non sta in piedi. Si prova a dimezzarlo.
+    esito, t = _prova(
+        dataclasses.replace(
+            data,
+            takt_min=max(1.0, data.takt_min / 2),
+            takt_max=data.takt_min,
+        ),
+        zones, time_limit_s,
+    )
+    if esito == "si":
+        fuori.append(
+            f"IL TAKT TIME MINIMO E' TROPPO ALTO: con un ciclo di {t:.0f} s -- "
+            f"piu' corto del minimo dichiarato ({data.takt_min:.0f} s) -- la "
+            f"linea si risolve. Un ciclo lungo tiene i pezzi in vasca oltre il "
+            f"tempo di processo: abbassa takt_min_s."
+        )
+        return fuori
+    if esito == "boh":
+        incerti.append(f"takt time sotto {data.takt_min:.0f} s")
+
+    # -- 2) la non collisione fra carroponti ------------------------------
+    senza_urti = dataclasses.replace(
+        data, hoist_extent_pos=0.0, hoist_extent_neg=0.0, safety_distance=0.0
+    )
+    esito, _t = _prova(senza_urti, zones, time_limit_s)
+    if esito == "boh":
+        incerti.append("non collisione")
+    if esito == "si":
+        confini = [
+            f"{data.route[zones[h].hi + 1].tank_id} "
+            f"(fra il carroponte {h + 1} e il {h + 2})"
+            for h in range(len(zones) - 1)
+        ]
+        fuori.append(
+            f"E' LA NON COLLISIONE: facendo passare i carroponti uno "
+            f"attraverso l'altro la linea si risolve, quindi a bloccare e' lo "
+            f"spazio che devono lasciarsi. Servono "
+            f"{data.hoist_length + data.safety_distance:.0f} mm fra due ganci "
+            f"(ingombro {data.hoist_extent_neg:.0f}+{data.hoist_extent_pos:.0f} "
+            f"+ sicurezza {data.safety_distance:.0f}). I confini in gioco: "
+            + "; ".join(confini)
+            + ". Sposta un confine di zona su una vasca piu' isolata, riduci "
+            "distanza_sicurezza_mm, oppure infittisci "
+            "passo_controllo_distanza_mm (il calcolo sta dal lato sicuro fra "
+            "una verifica e l'altra)."
+        )
+        return fuori
+
+    # -- 3) i tempi massimi di processo -----------------------------------
+    largo = dataclasses.replace(
+        data,
+        route=[
+            dataclasses.replace(s, dwell_max=s.dwell_max * 10 + 1000.0)
+            if 0 < i < data.n_stations - 1
+            else s
+            for i, s in enumerate(data.route)
+        ],
+    )
+    esito, _t = _prova(largo, zones, time_limit_s)
+    if esito == "boh":
+        incerti.append("tempi massimi di processo")
+    if esito == "si":
+        fuori.append(
+            "SONO I TEMPI MASSIMI DI PROCESSO: allargandoli la linea si "
+            "risolve. Il pezzo dovrebbe restare in vasca piu' di quanto la "
+            "ricetta consenta."
+        )
+        if dettaglio_vasche:
+            fuori.extend(
+                _vasche_che_bloccano(data, zones, time_limit_s, intermedie)
+            )
+        return fuori
+
+    # -- 4) la capienza delle vasche --------------------------------------
+    capienti = dataclasses.replace(
+        data,
+        tanks={
+            tid: dataclasses.replace(t, capacity=t.capacity + 2)
+            for tid, t in data.tanks.items()
+        },
+    )
+    esito, _t = _prova(capienti, zones, time_limit_s)
+    if esito == "boh":
+        incerti.append("capienza delle vasche")
+    if esito == "si":
+        fuori.append(
+            "E' LA CAPIENZA DELLE VASCHE: dando due posti in piu' a ciascuna "
+            "la linea si risolve. Guarda il foglio Vasche, colonna 'posti': "
+            "sono i pezzi che ci stanno dentro contemporaneamente, e su un "
+            "bagno lungo ne servono piu' di uno."
+        )
+        return fuori
+
+    # -- niente di tutto questo -------------------------------------------
+    #
+    # Qui bisogna stare attenti a cosa si afferma. Se tutte le prove hanno
+    # DIMOSTRATO l'infattibilita', si puo' dire che nessun vincolo da solo
+    # basta. Se qualcuna e' scaduta, non si sa: dirlo comunque manderebbe a
+    # cercare altrove un problema che magari era proprio li'.
+    if incerti:
+        fuori.append(
+            "NON SI RIESCE A DIRLO nel tempo concesso. Queste prove sono "
+            "scadute senza rispondere: "
+            + ", ".join(incerti)
+            + ". Non vuol dire che quei vincoli siano innocenti -- vuol dire "
+            "che non sono stati esaminati. Rilancia la diagnosi con un limite "
+            "di tempo piu' alto."
+        )
+        return fuori
+    fuori.append(
+        "Nessun vincolo preso DA SOLO spiega il rifiuto: e' stato DIMOSTRATO "
+        "che allargando il takt time, togliendo le collisioni, allungando i "
+        "tempi di processo o aggiungendo posti in vasca questa suddivisione "
+        "resta irrisolvibile. A bloccare sono piu' vincoli insieme, e la "
+        "strada e' aggiungere un carroponte -- oppure comporre il ciclogramma "
+        "a mano e leggere cosa segnala il verificatore, che indica il punto "
+        "esatto invece della causa."
+    )
+    return fuori
+
+
+def _vasche_che_bloccano(
+    data: ProblemData,
+    zones: list[HoistZone],
+    time_limit_s: float,
+    intermedie: list[int],
+) -> list[str]:
+    """Quali vasche, da sole, sbloccano la linea se si allunga il loro tempo
+    massimo -- e di quanto.
+
+    E' la domanda che si pone chi ha la ricetta davanti: non 'i tempi sono
+    stretti' ma 'quale allungo, e di quanto'. Per ogni vasca si allarga solo
+    lei; se basta, si cerca per bisezione il minimo che serve."""
+    fuori: list[str] = []
+    for i in intermedie:
+        spec = data.route[i]
+
+        def con(valore: float):
+            return dataclasses.replace(
+                data,
+                route=[
+                    dataclasses.replace(s, dwell_max=valore) if j == i else s
+                    for j, s in enumerate(data.route)
+                ],
+            )
+
+        molto = spec.dwell_max * 10 + 1000.0
+        if _prova(con(molto), zones, time_limit_s)[0] != "si":
+            continue  # questa vasca da sola non basta a sbloccare
+        # bisezione sul valore minimo che serve: otto passi bastano a
+        # scendere sotto l'1% dell'intervallo, ed e' molto piu' preciso di
+        # quanto serva a chi deve decidere se ritoccare una ricetta.
+        # Un esito incerto si tratta come un no: cosi' l'intervallo si
+        # stringe dal lato prudente e il valore riportato non promette meno
+        # di quanto serva davvero.
+        basso, alto = spec.dwell_max, molto
+        for _ in range(8):
+            mezzo = (basso + alto) / 2
+            if _prova(con(mezzo), zones, time_limit_s)[0] == "si":
+                alto = mezzo
+            else:
+                basso = mezzo
+        fuori.append(
+            f"  - basta la vasca '{spec.tank_id}' (stazione {i}): portando il "
+            f"suo tempo massimo da {spec.dwell_max:.0f} a circa {alto:.0f} s "
+            f"(+{alto - spec.dwell_max:.0f}) la linea si risolve."
+        )
+    if not fuori:
+        fuori.append(
+            "  - nessuna vasca da sola basta: vanno allargate piu' ricette "
+            "insieme, oppure serve un carroponte in piu'."
+        )
+    return fuori
 
 
 # --------------------------------------------------------------------------
@@ -2598,7 +2931,7 @@ def solve_auto_hoists(
     max_hoists: int = 6,
     min_hoists: int = 1,
     time_limit_per_candidate: float = 8.0,
-    max_candidates_per_hoist_count: int = 500,
+    max_candidates_per_hoist_count: int = 5000,
     log_progress: bool = False,
     su_tentativo=None,
 ) -> tuple[Solution, Optional[list[HoistZone]], Optional[int]]:
@@ -2649,7 +2982,18 @@ def solve_auto_hoists(
                 print(f"  saltato: {e}")
             continue
 
-        voce = {"n_hoists": n_hoists, "status": sol.status, "T": sol.T}
+        voce = {
+            "n_hoists": n_hoists,
+            "status": sol.status,
+            "T": sol.T,
+            # quante suddivisioni sono state davvero risolte e con che esito,
+            # piu' una su cui indagare se non si trova niente: e' cio' che
+            # permette di spiegare un fallimento invece di annunciarlo
+            "n_tried": sol.raw.get("n_tried", 0),
+            "n_skipped": sol.raw.get("n_skipped", 0),
+            "per_stato": sol.raw.get("per_stato", {}),
+            "candidata_tipica": sol.raw.get("candidata_tipica"),
+        }
         n_layout = sol.raw.get("n_skipped_layout", 0)
         if n_layout:
             voce["n_skipped_layout"] = n_layout

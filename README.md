@@ -197,6 +197,45 @@ Due cose che vale la pena sapere:
 Se hai dichiarato tu le zone nel foglio *Zone*, non c'e' niente da provare: il
 calcolo e' uno solo e la barra si limita a oscillare.
 
+### Se non trova niente
+
+Il *Riepilogo* non dice piu' soltanto "nessuna soluzione": dice **cosa e' stato
+provato** e, quando riesce a stabilirlo, **perche' non riesce**.
+
+```text
+COSA E' STATO PROVATO
+  3 carroponti: 36 suddivisioni risolte (22 infeasible, 14 unknown), 84 scartate
+  4 carroponti: 336 suddivisioni risolte (191 infeasible, 145 unknown), 224 scartate
+  5 carroponti: NON PROVATO - restano 1470 suddivisioni da provare e il limite e' 500
+
+ATTENZIONE: 159 tentativi sono scaduti senza rispondere (UNKNOWN).
+Non sono stati dimostrati impossibili: allunga tempo_limite_per_tentativo_s.
+
+PERCHE' NON RIESCE
+  IL TAKT TIME E' TROPPO STRETTO: con un ciclo di 690 s queste zone funzionano,
+  mentre il massimo dichiarato e' 460 s. Il minimo che basta sta fra 632 e 690 s.
+```
+
+Tre cose vanno lette con attenzione.
+
+**`INFEASIBLE` e `UNKNOWN` vogliono azioni opposte.** Il primo e' una
+*dimostrazione*: con quelle zone non si puo' fare, e va cambiata la linea. Il
+secondo vuol dire soltanto che il tempo e' scaduto: fra quei tentativi
+potrebbe esserci la soluzione, e basta alzare `tempo_limite_per_tentativo_s`.
+
+**`NON PROVATO` non vuol dire impossibile.** Se le suddivisioni da esaminare
+superano il limite interno, quel numero di carroponti viene saltato. Prima non
+si vedeva, e una linea risolvibile poteva sembrare impossibile solo perche'
+nessuno ci aveva provato.
+
+**Il *perche'* si ottiene rilassando un vincolo per volta** e guardando quale
+rilassamento fa passare la linea: il takt time, le collisioni fra carroponti, i
+tempi massimi di processo, la capienza delle vasche. Quando la causa e' una
+grandezza, viene cercato anche *di quanto* — fino a nominare la singola vasca:
+«basta portare il massimo di ED da 190 a 212 s». Se nessun rilassamento singolo
+basta, lo dice: significa che a bloccare sono piu' vincoli insieme, e la strada
+e' un carroponte in piu'.
+
 ### Come si legge il ciclogramma
 
 Il grafico ha **due disegni**, e non c'e' niente da scegliere: lo decide il
@@ -1310,10 +1349,14 @@ palesemente infattibili: una zona il cui solo trasporto-a-carico supera
 gia' da solo il takt time massimo) e tiene la soluzione con il takt time
 minore fra quelle fattibili. Il numero di suddivisioni possibili e'
 `C(n_moves-1, n_hoists-1)`: per una manciata di carroponti e qualche decina
-di mosse resta gestibile, ma cresce in fretta — il parametro
-`max_candidates` (default 500) fa fallire la chiamata con un messaggio
-chiaro se la ricerca esaustiva rischia di essere troppo lunga, cosi' puoi
-decidere se aumentarlo, ridurre il problema, o specificare le zone a mano.
+di mosse resta gestibile, ma cresce in fretta. Il parametro
+`max_candidates` (default **5000**) e' una rete contro il caso fuori scala,
+non un filtro: si applica alle suddivisioni che arrivano davvero al
+solutore, cioe' **dopo** i due prefiltri, e non alle combinazioni sulla
+carta. Il default e' alto di proposito — saltare una ricerca e' un danno
+peggiore di farla durare: una ricerca lunga si vede nella barra e si puo'
+interrompere, una saltata produce un «nessuna soluzione» che sembra un
+verdetto sulla linea e non lo e'.
 
 Nota: `data.zones` resta `None` dopo la chiamata (non viene modificato);
 usa `zones` (il secondo valore restituito) — ad es. con
@@ -1578,7 +1621,7 @@ python test/esempio.py           # risoluzione reale + verifica + grafico
 ```
 
 Ognuno stampa cosa ha provato e finisce con `RISULTATO: n ok, m falliti`.
-Nessuna dipendenza da pytest. Stato attuale: **98, 94, 78, 43 e 108
+Nessuna dipendenza da pytest. Stato attuale: **98, 94, 78, 49 e 108
 asserzioni, zero fallimenti**.
 
 **La risoluzione CP-SAT e' eseguita e verificata end-to-end.** Sull'esempio

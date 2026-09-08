@@ -578,6 +578,65 @@ def test_tentativi_previsti():
         )
 
 
+def test_diagnosi():
+    """La diagnosi di un rifiuto deve dire QUALE vincolo blocca.
+
+    Si costruiscono tre casi in cui la causa e' nota per costruzione, e si
+    pretende che la diagnosi la nomini. Il caso piu' importante e' il terzo:
+    su una linea che FUNZIONA la diagnosi non deve inventare una causa --
+    ogni rilassamento riesce, e la prima prova verrebbe scambiata per il
+    colpevole."""
+    print("\n[8-bis] diagnosi di un rifiuto")
+    from model import diagnosi_zone
+
+    import dataclasses
+
+    zone = [HoistZone(0, 2), HoistZone(3, 5)]
+
+    # Caso di partenza che si risolve, per sapere qual e' il ciclo piu' veloce
+    # possibile: da li' si costruisce il caso rotto abbassando il tetto SOTTO
+    # quel valore, cosi' la causa e' nota per costruzione e non c'e' altro che
+    # possa spiegare il rifiuto.
+    base = linea(6, 2500, zone, takt_min=15.0, takt_max=25.0, dwell=(5, 40))
+    riferimento = solve(base, time_limit_s=20.0)
+    check(
+        riferimento.status in ("OPTIMAL", "FEASIBLE"),
+        f"il caso di partenza si risolve (T={riferimento.T:.1f}s)",
+    )
+
+    # 1) su una linea che FUNZIONA la diagnosi non deve inventare una causa
+    righe = diagnosi_zone(base, zone, time_limit_s=20.0)
+    check(
+        any("FUNZIONA" in r for r in righe),
+        f'su una linea che regge non inventa cause: "{righe[0][:60]}..."',
+    )
+
+    # 2) takt time troppo stretto: la linea regge, ma non a quel ritmo
+    stretta = dataclasses.replace(base, takt_max=riferimento.T - 3.0)
+    check(
+        solve(stretta, time_limit_s=20.0).status == "INFEASIBLE",
+        f"col tetto a {riferimento.T - 3.0:.1f}s il caso e' davvero rifiutato",
+    )
+    righe = diagnosi_zone(stretta, zone, time_limit_s=20.0)
+    check(
+        any("TAKT TIME E' TROPPO STRETTO" in r for r in righe),
+        f'riconosce il takt time troppo stretto: "{righe[0][:75]}..."',
+    )
+    # e deve dire di QUANTO, come intervallo: annunciare un minimo esatto che
+    # non e' stato cercato farebbe alzare il parametro piu' del necessario
+    check(
+        any("Il minimo che basta sta fra" in r for r in righe),
+        "e dice fra quali valori sta il minimo, senza spacciarlo per esatto",
+    )
+
+    # 3) la diagnosi non deve mai restare muta: qualcosa dice sempre, anche
+    #    quando la conclusione e' 'non sono riuscito a stabilirlo'
+    check(
+        all(isinstance(r, str) and r.strip() for r in righe) and bool(righe),
+        f"il referto e' sempre non vuoto ({len(righe)} righe)",
+    )
+
+
 def test_vasca_ripetuta():
     print("\n[8] stessa vasca fisica usata due volte nella ricetta")
     # Il pezzo torna in LAV dopo essere passato da SEC: le posizioni lungo la
@@ -718,6 +777,7 @@ def main():
     test_passo_controllo()
     test_scelta_automatica()
     test_tentativi_previsti()
+    test_diagnosi()
     test_vasca_ripetuta()
     test_ricostruzione_fedele()
     print("\n" + "=" * 72)

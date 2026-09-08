@@ -39,7 +39,7 @@ from matplotlib.figure import Figure
 from matplotlib.lines import Line2D
 
 from excel_io import leggi_problema, scrivi_modello, scrivi_risultati
-from model import solve, solve_auto_hoists, solve_auto_zones
+from model import diagnosi_zone, solve, solve_auto_hoists, solve_auto_zones
 import manuale
 from plotting import (
     _HOIST_COLORS,
@@ -670,9 +670,33 @@ class Applicazione(tk.Tk):
                 su_tentativo=self._segnala_tentativo,
             )
         if sol.status not in ("OPTIMAL", "FEASIBLE"):
+            self._diagnostica(d, sol)
             return ("nessuna", sol, None, None)
         dati = dataclasses.replace(d, zones=zone)
         return ("ok", sol, dati, verify_solution(dati, sol))
+
+    def _diagnostica(self, d, sol):
+        """Perche' non si e' trovato niente. Gira nel thread di lavoro.
+
+        Si indaga sulla suddivisione col carico piu' equilibrato fra quelle
+        provate con il NUMERO PIU' ALTO di carroponti: e' quella che aveva piu'
+        margine, quindi cio' che blocca lei blocca a maggior ragione le altre.
+
+        Costa qualche risoluzione in piu' su un calcolo che e' gia' fallito.
+        Sembra molto, e non lo e': l'alternativa e' che l'utente ripeta lo
+        stesso calcolo tre volte cambiando un parametro a caso ogni volta."""
+        candidata = None
+        for voce in sol.raw.get("hoist_sweep") or []:
+            if voce.get("status") != "SKIPPED" and voce.get("candidata_tipica"):
+                candidata = voce["candidata_tipica"]
+        if candidata is None:
+            return
+        try:
+            sol.raw["diagnosi"] = diagnosi_zone(
+                d, candidata, time_limit_s=min(20.0, self.config_linea.tempo_limite_s)
+            )
+        except Exception as e:  # la diagnosi non deve mai far fallire il calcolo
+            sol.raw["diagnosi"] = [f"(diagnosi non riuscita: {e})"]
 
     def _salva(self):
         if self.soluzione is None:
@@ -902,6 +926,80 @@ class Applicazione(tk.Tk):
             testo += f" - ancora circa {_durata_leggibile(manca)}"
         self._stato(testo)
 
+    def _resoconto_fallimento(self, sol, durata: float) -> str:
+        """Cosa dire quando non si trova niente.
+
+        'Nessuna soluzione' e' la risposta meno utile che il programma possa
+        dare: non dice se manca un secondo o un carroponte. Il registro dei
+        tentativi c'e' gia' -- il solutore lo riempie -- e non veniva mostrato:
+        e' cosi' che una ricerca che SALTAVA i quattro carroponti senza
+        provarli poteva sembrare una linea impossibile.
+
+        Il resoconto ha tre parti: cosa e' stato provato, perche' non riesce
+        (se la diagnosi ha concluso qualcosa) e cosa si puo' fare."""
+        righe = [
+            f"NESSUNA SOLUZIONE TROVATA in {_durata_leggibile(durata)}.",
+            "",
+            "COSA E' STATO PROVATO",
+        ]
+        sweep = sol.raw.get("hoist_sweep") or []
+        for voce in sweep:
+            n = voce.get("n_hoists")
+            stato = voce.get("status")
+            if stato == "SKIPPED":
+                righe.append(
+                    f"  {n} carroponti: NON PROVATO - {voce.get('error', '')}"
+                )
+                continue
+            per_stato = voce.get("per_stato") or {}
+            dettaglio = ", ".join(
+                f"{q} {s.lower()}" for s, q in sorted(per_stato.items())
+            )
+            scartate = voce.get("n_skipped", 0) + voce.get("n_skipped_layout", 0)
+            riga = f"  {n} carroponti: {voce.get('n_tried', 0)} suddivisioni risolte"
+            if dettaglio:
+                riga += f" ({dettaglio})"
+            if scartate:
+                riga += f", {scartate} scartate senza risolverle"
+            righe.append(riga)
+        if not sweep:
+            righe.append("  (nessun registro: le zone erano dichiarate a mano)")
+
+        # UNKNOWN e INFEASIBLE vogliono due azioni opposte, e vanno separati.
+        unknown = sum(
+            (v.get("per_stato") or {}).get("UNKNOWN", 0) for v in sweep
+        )
+        if unknown:
+            righe += [
+                "",
+                f"ATTENZIONE: {unknown} tentativi sono scaduti senza rispondere "
+                "(UNKNOWN).",
+                "Non sono stati dimostrati impossibili: allunga "
+                "tempo_limite_per_tentativo_s",
+                "e riprova, perche' fra quelli potrebbe esserci la soluzione.",
+            ]
+
+        diagnosi = sol.raw.get("diagnosi")
+        if diagnosi:
+            righe += ["", "PERCHE' NON RIESCE", *[f"  {r}" for r in diagnosi]]
+
+        righe += [
+            "",
+            "COSA SI PUO' FARE",
+            "  - allargare la tolleranza sul takt time (takt_min_s / takt_max_s)",
+            "  - aumentare max_carroponti",
+            "  - aumentare i posti delle vasche piu' lente",
+            "  - infittire passo_controllo_distanza_mm da 200 a 100: la distanza",
+            "    fra i carroponti viene verificata ogni tot mm, e fra una verifica",
+            "    e l'altra il calcolo sta dal lato sicuro. Con vasche vicine puo'",
+            "    bastare questo. Non e' un margine di sicurezza: quello resta intero",
+            "  - allungare tempo_limite_per_tentativo_s",
+            "",
+            "Oppure premi 'Calcola man' e componilo a mano: il verificatore dira'",
+            "esattamente cosa manca, punto per punto.",
+        ]
+        return "\n".join(righe)
+
     def _controlla_coda(self):
         # Si svuota la coda invece di leggere un messaggio solo: i messaggi di
         # avanzamento arrivano piu' in fretta di quanto si controlli, e
@@ -944,21 +1042,7 @@ class Applicazione(tk.Tk):
             )
             self._grafico_vuoto("Nessuna soluzione")
             self.tela.draw()
-            self._scrivi_riepilogo(
-                f"Nessuna soluzione trovata (stato: {sol.status}).\n\n"
-                "Cosa provare:\n"
-                "  - allargare la tolleranza sul takt time\n"
-                "  - aumentare il numero massimo di carroponti\n"
-                "  - aumentare i posti delle vasche piu' lente\n"
-                "  - infittire passo_controllo_distanza_mm da 200 a 100: la\n"
-                "    distanza fra i carroponti viene verificata ogni tot mm, e\n"
-                "    fra una verifica e l'altra il calcolo sta dal lato sicuro.\n"
-                "    Con vasche vicine puo' bastare questo. Non e' un margine\n"
-                "    di sicurezza: quello resta intero\n"
-                "  - allungare il tempo limite di calcolo\n\n"
-                "Oppure premi 'Calcola man' e componilo a mano: "
-                "il verificatore dira' esattamente cosa manca."
-            )
+            self._scrivi_riepilogo(self._resoconto_fallimento(sol, durata))
             self._svuota_tabella()
             return
 
