@@ -761,9 +761,24 @@ python test/esempio.py
 ## La documentazione in `doc/`
 
 Oltre a questo file e ad `ARCHITETTURA.md`, in `doc/` c'e' una sottocartella
-per ogni modulo con i documenti Word che lo spiegano **riga per riga**, nello
-stile di `doc/model/solve_riga_per_riga.docx`. Piu' `ALBERO_DELLE_CHIAMATE.docx`,
-che dice quale funzione ne chiama quale altra.
+per ogni modulo con i documenti Word che lo spiegano **riga per riga**. Piu'
+`ALBERO_DELLE_CHIAMATE.docx`, che dice quale funzione ne chiama quale altra.
+
+Ventiquattro documenti, che coprono **tutte e 286** le fra funzioni e metodi
+del progetto:
+
+| cartella | documenti | funzioni |
+| --- | ---: | ---: |
+| `doc/kinematics/` | 1 | 4 |
+| `doc/model/` | 6 | 63 |
+| `doc/verify/` | 3 | 27 |
+| `doc/excel_io/` | 3 | 29 |
+| `doc/plotting/` | 1 | 6 |
+| `doc/manuale/` | 1 | 12 |
+| `doc/simulazione/` | 3 | 67 |
+| `doc/interfaccia/` | 4 | 76 |
+| `doc/ciclogramma/` | 1 | 2 |
+| `doc/ALBERO_DELLE_CHIAMATE.docx` | 1 | — |
 
 ```bash
 python strumenti/genera_doc.py              # rigenera tutto

@@ -26,6 +26,26 @@ gira dalla cartella o dall'eseguibile PyInstaller. Il prezzo e' che chi sta in
 una sottocartella deve rimettersi la radice fra i percorsi di ricerca: i test
 lo fanno con tre righe in testa al file, il `.spec` con `SPECPATH`.
 
+### La documentazione riga per riga
+
+In `doc/` c'e' una sottocartella per modulo con i documenti Word che lo
+spiegano funzione per funzione — ventiquattro documenti che coprono tutte e
+286 le fra funzioni e metodi — piu' `ALBERO_DELLE_CHIAMATE.docx`. Si
+rigenerano con `python strumenti/genera_doc.py`, e il testo sta in
+`strumenti/doc_contenuti/<modulo>.py`.
+
+Due cose da sapere prima di modificare il codice:
+
+- **il codice citato non e' trascritto**, viene ritagliato dal sorgente per
+  nome (via AST) delimitando i tratti con pezzi di righe vere. Se una riga
+  citata sparisce la generazione **fallisce**, dicendo quale documento e quale
+  ancora: e' il segnale che quel paragrafo va riscritto;
+- `python strumenti/genera_doc.py --copertura` dice quali funzioni **non**
+  sono ancora spiegate. Una funzione nuova ci compare subito.
+
+L'albero delle chiamate lo ricava l'AST a ogni generazione, e con lui verifica
+da solo la regola qui sotto: nessun modulo chiama quelli che gli stanno sopra.
+
 ### La direzione delle dipendenze
 
 ```text
