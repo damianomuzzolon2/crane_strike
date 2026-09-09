@@ -36,6 +36,18 @@ APPROCCIO SCELTO E SUE ASSUNZIONI (importante leggere prima di usare il codice)
    abbondantemente il takt time -- cosa che il vecchio schema sequenziale
    non riusciva a rappresentare.
 
+3-bis. **Anche il punto in cui il giro si richiude e' libero.** Il giro e' un
+   ciclo: uno dei suoi archi attraversa la fine del periodo, e a quello -- e
+   solo a quello -- si somma un T. Per un tratto il modello dava per scontato
+   che fosse l'arco entrante nella mossa di confine basso, e ne seguiva
+   (perche' su tutti gli altri archi le fasi dovevano crescere) che QUELLA
+   mossa fosse per forza la piu' anticipata del carroponte. Era una
+   restrizione non dichiarata e non voluta: i ciclogrammi in cui un
+   carroponte comincia il giro da un'altra mossa non stavano nello spazio di
+   ricerca, e il solutore li dichiarava INFEASIBLE senza averli considerati.
+   Adesso quale arco richiuda il periodo lo sceglie il solutore
+   (`inizio[k]`), e il modello e' completo rispetto a questa dimensione.
+
 4. Non collisione: attorno a ogni stazione di confine fra due zone adiacenti
    il modello impone che i due carroponti restino sempre ad almeno
    hoist_length + safety_distance l'uno dall'altro, tenendo conto della
@@ -1464,6 +1476,9 @@ def solve(
                     dep_hi=dep_hi,
                     arr_lo=arr_lo,
                     arc_lits=None,
+                    # con una sola mossa il giro si richiude per forza su di
+                    # lei: non c'e' niente da scegliere
+                    inizio=None,
                     # unico "arco": andata (gia' nella mossa) + rientro a vuoto
                     arcs=[
                         dict(
@@ -1494,13 +1509,49 @@ def solve(
                 arcs_for_circuit.append((local_idx[k1], local_idx[k2], lit))
         model.AddCircuit(arcs_for_circuit)
 
+        # -- da quale mossa comincia il giro ---------------------------------
+        #
+        # Il giro e' un CICLO: uno dei suoi archi attraversa la fine del
+        # periodo, e a quello -- e solo a quello -- si somma un T, perche' il
+        # prelievo a cui porta appartiene al ciclo dopo. Quale sia lo decide il
+        # solutore: `inizio[k]` vale 1 sulla mossa a cui il periodo si
+        # richiude, cioe' la prima del giro.
+        #
+        # PRIMA ERA FISSATO SU lo_h, e non era una convenzione innocua. Per
+        # ogni arco che NON portava a lo_h il vincolo era
+        # `finish[k1] + t_vuoto <= local_pick[k2]`, e poiche' finish[k1] e'
+        # maggiore di local_pick[k1] ne seguiva local_pick[k2] > local_pick[k1]:
+        # lungo il giro le fasi dovevano crescere, e partendo da lo_h questo
+        # OBBLIGAVA lo_h a essere la mossa piu' anticipata del carroponte.
+        # Ciclogrammi perfettamente realizzabili in cui il carroponte comincia
+        # il giro da un'altra mossa non stavano nello spazio di ricerca: il
+        # solutore li dichiarava INFEASIBLE senza averli mai considerati.
+        inizio = {k: model.NewBoolVar(f"inizio_{h}_{k}") for k in moves}
+        model.AddExactlyOne(list(inizio.values()))
+
+        # `bersaglio[k]` e' l'istante ENTRO CUI bisogna essere pronti per il
+        # prelievo della mossa k: la sua fase, piu' un periodo se e' li' che il
+        # giro si richiude. Materializzarlo in una variabile costa un IntVar e
+        # due vincoli per mossa, e in cambio tutto quello che segue resta
+        # scritto una volta sola.
+        #
+        # La prima stesura invece condizionava OGNI vincolo e OGNI intervallo
+        # su `inizio[k2]`, raddoppiandoli: il modello ci metteva piu' del
+        # doppio a risolvere, e sulle linee grandi i tentativi cominciavano a
+        # scadere. La differenza non e' di stile -- e' che una scelta che
+        # riguarda la MOSSA veniva ripetuta su ogni ARCO che ci arriva.
+        bersaglio = {}
+        for k in moves:
+            b = model.NewIntVar(0, 2 * T_max, f"bersaglio_{h}_{k}")
+            model.Add(b == local_pick[k] + Tv).OnlyEnforceIf(inizio[k])
+            model.Add(b == local_pick[k]).OnlyEnforceIf(inizio[k].Not())
+            bersaglio[k] = b
+
         # vincolo di tempo per ciascun arco possibile: se selezionato,
         # bisogna riuscire ad arrivare in tempo alla mossa successiva
-        # (con +T solo se si sta richiudendo il periodo su lo_h).
         for (k1, k2), lit in arc_lits.items():
             t_emp = travel_empty_ticks(k1 + 1, k2)
-            bound = local_pick[k2] + (Tv if k2 == lo_h else 0)
-            model.Add(finish[k1] + t_emp <= bound).OnlyEnforceIf(lit)
+            model.Add(finish[k1] + t_emp <= bersaglio[k2]).OnlyEnforceIf(lit)
 
         # -- variabili libere di confine (per traiettoria e non-collisione) --
         dep_hi = model.NewIntVar(0, DEP_MAX, f"dep_hi_{h}")
@@ -1509,8 +1560,9 @@ def solve(
             if k2 == hi_h:
                 continue
             t_emp = travel_empty_ticks(hi_h + 1, k2)
-            bound = local_pick[k2] + (Tv if k2 == lo_h else 0)
-            model.Add(dep_hi + t_emp <= bound).OnlyEnforceIf(arc_lits[(hi_h, k2)])
+            model.Add(dep_hi + t_emp <= bersaglio[k2]).OnlyEnforceIf(
+                arc_lits[(hi_h, k2)]
+            )
 
         arr_lo = model.NewIntVar(0, DEP_MAX, f"arr_lo_{h}")
         for k1 in moves:
@@ -1518,7 +1570,10 @@ def solve(
                 continue
             t_emp = travel_empty_ticks(k1 + 1, lo_h)
             model.Add(arr_lo >= finish[k1] + t_emp).OnlyEnforceIf(arc_lits[(k1, lo_h)])
-        model.Add(arr_lo <= local_pick[lo_h] + Tv)
+        # arr_lo e' l'arrivo al confine BASSO, e il prelievo di lo_h appartiene
+        # al ciclo dopo solo se e' li' che il periodo si richiude: e' proprio
+        # quello che `bersaglio` dice.
+        model.Add(arr_lo <= bersaglio[lo_h])
 
         # se l'arco hi_h -> lo_h e' selezionato (rientro diretto, senza
         # visitare altre mosse nel mezzo), dep_hi e arr_lo descrivono lo
@@ -1543,6 +1598,9 @@ def solve(
             else:
                 depart = finish[k1]  # convenzione: riparte appena consegnato
             arrive = arr_lo if k2 == lo_h else depart + t_emp
+            # L'attesa DOPO l'arrivo finisce al prelievo successivo, che sta
+            # nel ciclo dopo solo se e' qui che il periodo si richiude: e'
+            # esattamente quello che dice `bersaglio`.
             arcs.append(
                 dict(
                     k1=k1,
@@ -1551,7 +1609,7 @@ def solve(
                     span_start=finish[k1],
                     depart=depart,
                     arrive=arrive,
-                    span_end=local_pick[k2] + (Tv if k2 == lo_h else 0),
+                    span_end=bersaglio[k2],
                 )
             )
 
@@ -1565,6 +1623,7 @@ def solve(
                 dep_hi=dep_hi,
                 arr_lo=arr_lo,
                 arc_lits=arc_lits,
+                inizio=inizio,
                 arcs=arcs,
             )
         )
@@ -1881,11 +1940,19 @@ def solve(
             for (k1, k2), lit in zd["arc_lits"].items():
                 if solver.Value(lit):
                     nxt[k1] = k2
-            order = [z.lo]
-            cur = z.lo
+            # Il giro si racconta a partire dalla mossa su cui il periodo si
+            # richiude, che il solutore ha scelto: NON e' detto sia quella di
+            # confine basso. Partire comunque da z.lo darebbe un elenco con le
+            # fasi fuori ordine, e chi lo legge -- il disegno, il verificatore
+            # -- metterebbe il +T sull'arco sbagliato.
+            partenza = next(
+                k for k in moves if solver.Value(zd["inizio"][k])
+            )
+            order = [partenza]
+            cur = partenza
             while True:
                 cur = nxt[cur]
-                if cur == z.lo:
+                if cur == partenza:
                     break
                 order.append(cur)
 
@@ -2083,10 +2150,16 @@ def _assembla(
                 return arrivo - vuoto, arrivo
             return finish[k1], finish[k1] + vuoto
 
-        prev = order[-1]
-        arr_lo = quando(prev, riferimento)[1]
-        alto = max(moves)
-        dep_hi = quando(alto, order[(order.index(alto) + 1) % len(order)])[0]
+        # I due istanti di confine riguardano le STAZIONI agli estremi della
+        # zona, non il giro: si prendono gli archi che le toccano davvero.
+        # Con un'assegnazione parziale quegli estremi possono non essere fra
+        # le mosse assegnate, e allora si ripiega su quelle che ci sono.
+        dopo = {k: order[(i + 1) % len(order)] for i, k in enumerate(order)}
+        prima = {v: k for k, v in dopo.items()}
+        basso = z.lo if z.lo in lp else riferimento
+        alto = z.hi if z.hi in lp else max(moves)
+        arr_lo = quando(prima[basso], basso)[1]
+        dep_hi = quando(alto, dopo[alto])[0]
         segments_per_hoist.append(
             _build_zone_trajectory(
                 data, z, order, lp, dep_hi, arr_lo, T, incoerenze,
@@ -2376,14 +2449,15 @@ def _build_zone_trajectory(
         x1_next = data.approach_position(nxt_k)
         travel_e = data.empty_leg_seconds(k + 1, nxt_k)
 
-        # `arr_lo` e' l'istante in cui il carroponte torna pronto per la PRIMA
-        # mossa del giro, quella a cui si richiude il periodo: e' order[0], non
-        # zone.lo. Per il solutore sono la stessa cosa -- il modello costringe
-        # la mossa di confine basso a essere anche la prima in ordine di tempo
-        # -- ma un giro composto a mano puo' cominciare da un'altra, e li' i
-        # due indici divergono.
+        # `dep_hi` e `arr_lo` sono i due istanti di CONFINE della zona -- la
+        # partenza dall'estremo alto e l'arrivo a quello basso -- e sono legati
+        # alle stazioni, non al giro: e' su quelle che il modello costruisce il
+        # vincolo di non collisione. Il +T invece riguarda il PERIODO, e sta
+        # sull'arco che si richiude su order[0]. Due cose diverse che per un
+        # po' hanno condiviso la stessa condizione, perche' il modello
+        # obbligava order[0] a coincidere con zone.lo.
         depart_known = k == zone.hi
-        arrive_known = nxt_k == order[0]
+        arrive_known = nxt_k == zone.lo
         # dove il carroponte passa il tempo che avanza sul rientro a vuoto:
         # fermo dove ha appena consegnato, oppure fermo dove deve andare
         target_pick = local_pick[nxt_k] + (T if nxt_k == order[0] else 0)

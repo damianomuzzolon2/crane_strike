@@ -578,6 +578,66 @@ def test_tentativi_previsti():
         )
 
 
+def test_giro_che_non_parte_dal_confine():
+    """Il solutore deve poter far cominciare il giro da una mossa qualsiasi.
+
+    Il giro di un carroponte e' un CICLO: uno dei suoi archi attraversa la fine
+    del periodo, e a quello -- e solo a quello -- si somma un T. Per un lungo
+    tratto il modello dava per scontato che fosse l'arco che entra nella mossa
+    di CONFINE BASSO, e non era una convenzione innocua: implicava che le fasi
+    crescessero lungo il giro a partire da li', cioe' OBBLIGAVA la mossa di
+    confine a essere la piu' anticipata del carroponte.
+
+    Ciclogrammi perfettamente realizzabili in cui il carroponte comincia il
+    giro da un'altra mossa non stavano nello spazio di ricerca: il solutore li
+    dichiarava INFEASIBLE senza averli mai considerati. Su una linea vera di
+    diciassette mosse questo ha fatto dichiarare impossibile con quattro
+    carroponti una linea che con quattro carroponti si fa."""
+    print("\n[7-ter] il giro puo' cominciare da una mossa qualsiasi")
+    zone = [HoistZone(0, 0), HoistZone(1, 2)]
+    # takt fissato e permanenze rigide: la catena del pezzo porta la mossa 2 a
+    # cadere PRIMA della 1 dentro il periodo, e non c'e' modo di evitarlo
+    data = linea(
+        3, 2500.0, zone, takt_min=100.0, takt_max=100.0, dwell=(150.0, 150.0)
+    )
+    sol = solve(data, time_limit_s=30.0)
+    check(
+        sol.status in ("OPTIMAL", "FEASIBLE"),
+        f"il solutore trova la soluzione ({sol.status})",
+    )
+    if sol.status not in ("OPTIMAL", "FEASIBLE"):
+        return
+    p = sol.plans[1]
+    check(
+        p.order[0] != p.zone.lo,
+        f"e il giro comincia dalla mossa {p.order[0]}, non da quella di "
+        f"confine basso ({p.zone.lo})",
+    )
+    fasi = [p.local_pick[k] for k in p.order]
+    check(
+        fasi == sorted(fasi),
+        f"le fasi crescono lungo il giro ({[round(f) for f in fasi]})",
+    )
+    check(verify_solution(data, sol).ok, "la soluzione supera la verifica")
+
+    # Un controllo che non segnala mai nulla e' inutile: si rifa' il conto
+    # sull'arco che chiude il periodo con la convenzione VECCHIA -- il +T solo
+    # entrando nella mossa di confine basso -- e ci si aspetta che quella
+    # fallisca. Se non fallisse, questo caso non proverebbe niente.
+    k1, k2 = p.order[-1], p.order[0]
+    pronto = p.finish[k1] + data.empty_leg_seconds(k1 + 1, k2)
+    vecchia = p.local_pick[k2] + (sol.T if k2 == p.zone.lo else 0.0)
+    check(
+        pronto > vecchia,
+        f"con la vecchia convenzione questo giro era impossibile "
+        f"(pronto a {pronto:.0f}s contro un prelievo a {vecchia:.0f}s)",
+    )
+    check(
+        pronto <= p.local_pick[k2] + sol.T,
+        f"e con quella giusta ci sta, di {p.local_pick[k2] + sol.T - pronto:.0f}s",
+    )
+
+
 def test_diagnosi():
     """La diagnosi di un rifiuto deve dire QUALE vincolo blocca.
 
@@ -777,6 +837,7 @@ def main():
     test_passo_controllo()
     test_scelta_automatica()
     test_tentativi_previsti()
+    test_giro_che_non_parte_dal_confine()
     test_diagnosi()
     test_vasca_ripetuta()
     test_ricostruzione_fedele()

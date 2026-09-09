@@ -1611,6 +1611,15 @@ fa scelte di modellazione precise, in particolare:
   trasferimenti a vuoto necessari (esclusi i tempi di attesa nelle vasche)
   stia entro il takt time: se anche questo viene superato, nessun ordine
   di visita puo' risolvere il problema.
+- **Anche il punto in cui il giro si richiude e' libero.** Il giro e' un ciclo:
+  uno dei suoi archi attraversa la fine del periodo, e a quello si somma un
+  takt time. Per un tratto il modello dava per scontato che fosse l'arco
+  entrante nella prima mossa della zona, e ne seguiva -- senza che fosse
+  scritto da nessuna parte -- che quella mossa dovesse essere anche la prima
+  in ordine di tempo. I ciclogrammi in cui un carroponte comincia il giro da
+  un'altra mossa non stavano nello spazio di ricerca, e venivano dichiarati
+  impossibili senza essere mai stati considerati. Oggi quale arco richiuda il
+  periodo lo sceglie il solutore.
 - **Collisioni vincolate attorno ai confini di zona**: e' l'unica regione in
   cui due carroponti possono avvicinarsi in questa formulazione (zone
   contigue). Il vincolo tiene conto della posizione reale nel tempo e funziona
@@ -1620,7 +1629,10 @@ fa scelte di modellazione precise, in particolare:
 - **Posizione di attesa non scelta dal solver**: per convenzione un carroponte
   che ha consegnato riparte subito e attende alla stazione della mossa
   successiva. Poterlo far attendere altrove gli darebbe piu' modo di
-  allontanarsi dal vicino.
+  allontanarsi dal vicino. La composizione MANUALE invece lo fa aspettare dove
+  ha consegnato, quando quella stazione non e' un confine di zona: e' quindi
+  possibile disegnare a mano un ciclogramma valido che il calcolo automatico,
+  con la sua convenzione piu' rigida, non produrrebbe.
 - **Capienza delle vasche**: vincolata tramite `Tank.capacity`, in modo esatto
   anche quando la stessa vasca compare piu' volte nella ricetta, ma solo per le
   stazioni intermedie (carico e scarico restano fuori).
@@ -1644,7 +1656,7 @@ python test/esempio.py           # risoluzione reale + verifica + grafico
 ```
 
 Ognuno stampa cosa ha provato e finisce con `RISULTATO: n ok, m falliti`.
-Nessuna dipendenza da pytest. Stato attuale: **119, 94, 78, 49 e 112
+Nessuna dipendenza da pytest. Stato attuale: **119, 94, 78, 55 e 112
 asserzioni, zero fallimenti**.
 
 **La risoluzione CP-SAT e' eseguita e verificata end-to-end.** Sull'esempio
@@ -1658,7 +1670,7 @@ I cinque file rispondono a domande diverse e si completano:
   trovare?* Uno solo dei casi e' corretto, gli altri sono rotti di proposito
   (collisioni, permanenze, periodicita', fasi verticali, capienza, geometrie
   patologiche). Le soluzioni sono costruite a mano, quindi non serve OR-Tools.
-- `test_model.py` — 12 casi. *Il modello produce soluzioni fisicamente valide?*
+- `test_model.py` — 16 casi. *Il modello produce soluzioni fisicamente valide?*
   Risolve davvero e passa ogni risultato al verificatore.
 - `test_excel_io.py` — 24 casi. *Un file compilato male viene respinto con un
   messaggio utile, e i risultati escono corretti?* In ingresso: valori mancanti

@@ -938,26 +938,66 @@ SOLVE = [
      "trasporto, o le zone di estremita' di una linea lunga."),
 
     ("h3", "AddCircuit"),
-    ("c", "model.solve", "        # -- circuito generale", "        # -- variabili libere di confine"),
+    ("c", "model.solve", "        # -- circuito generale", "        # -- da quale mossa comincia il giro"),
     ("p",
      "Si crea un letterale booleano per ogni arco possibile fra due mosse "
      "diverse, e AddCircuit impone che gli archi scelti formino un unico "
      "circuito hamiltoniano: il carroponte tocca tutte le sue mosse "
      "esattamente una volta per periodo."),
+
+    ("h3", "Da quale mossa comincia il giro"),
+    ("c", "model.solve", "        # -- da quale mossa comincia il giro", "        # -- variabili libere di confine"),
     ("p",
-     "Poi, per ogni arco, il vincolo che conta: se quell'arco e' scelto, il "
-     "carroponte deve riuscire ad arrivare in tempo. finish[k1] piu' il "
-     "trasferimento a vuoto deve stare entro il prelievo di k2. E' un vincolo "
-     "CONDIZIONATO (OnlyEnforceIf): vale solo se l'arco e' effettivamente "
-     "selezionato."),
+     "Il giro e' un CICLO: uno dei suoi archi attraversa la fine del periodo, e "
+     "a quello -- e solo a quello -- si somma un T, perche' il prelievo a cui "
+     "porta appartiene al ciclo dopo. Quale sia lo decide il solutore: "
+     "`inizio[k]` vale 1 sulla mossa a cui il periodo si richiude."),
+    ("p",
+     "La scelta viene poi materializzata in `bersaglio[k]`: l'istante entro cui "
+     "bisogna essere pronti per il prelievo della mossa k, cioe' la sua fase "
+     "piu' un periodo se e' li' che il giro si richiude. Da quel punto in poi "
+     "il +T non compare piu' da nessuna parte: ogni vincolo si scrive una volta "
+     "sola, contro `bersaglio[k2]`."),
     ("q",
-     "IL +T SOLO SULLA CHIUSURA. `bound = local_pick[k2] + (Tv if k2 == lo_h "
-     "else 0)`. La mossa lo_h e' presa come riferimento di chiusura del "
-     "periodo: l'arco che rientra su di essa e' l'unico a cui si somma un T, "
-     "perche' quel prelievo appartiene al periodo SUCCESSIVO. Senza quel "
-     "termine il modello confronterebbe un arrivo a 95 s con un prelievo a 5 s "
-     "e dichiarerebbe infattibile ogni ciclogramma corretto. E' la stessa riga "
-     "che verify.py deve avere identica, e per la stessa ragione."),
+     "LA PRIMA STESURA NON FACEVA COSI', E SI VEDEVA. Condizionava ogni "
+     "vincolo e ogni intervallo su `inizio[k2]`, in due versioni -- col +T e "
+     "senza -- ciascuna sotto la propria coppia di letterali. E' corretto, e "
+     "costa il doppio: su una zona di n mosse gli archi sono n*(n-1), quindi "
+     "una scelta che riguarda la MOSSA veniva ripetuta su ogni ARCO che ci "
+     "arriva. Una variabile intera per mossa -- n variabili invece di n*(n-1) "
+     "duplicazioni -- dice la stessa cosa e la dice una volta."),
+    ("q",
+     "QUANTO COSTA LA LIBERTA' IN PIU'? Misurato: 56 configurazioni, stesso "
+     "limite di dieci secondi, versione col giro obbligato a partire dal "
+     "confine contro versione attuale. Tempo totale 1078 s contro 1070 s -- "
+     "uguale. Esiti: OPTIMAL da 21 a 26, FEASIBLE da 21 a 28, scaduti "
+     "(UNKNOWN) da 14 a 2. Togliere la restrizione non costa: RENDE il "
+     "modello piu' facile, perche' quei ciclogrammi non erano vicoli ciechi "
+     "da esplorare, erano soluzioni da trovare."),
+    ("q",
+     "E ATTENZIONE A COSA SI MISURA. Quasi tutte le configurazioni saturano "
+     "il limite di tempo, quindi le due versioni ci mettono uguale per "
+     "costruzione: il tempo non distingue niente. A distinguere e' la "
+     "colonna degli esiti. Una misura di prestazioni che guardasse solo il "
+     "cronometro qui direbbe 'nessuna differenza' su una differenza grossa."),
+    ("q",
+     "PRIMA ERA FISSATO SU lo_h, E NON ERA UNA CONVENZIONE INNOCUA. Il vincolo "
+     "per ogni arco che non portava a lo_h era `finish[k1] + t_vuoto <= "
+     "local_pick[k2]`, e poiche' finish[k1] e' maggiore di local_pick[k1] ne "
+     "seguiva local_pick[k2] > local_pick[k1]: lungo il giro le fasi DOVEVANO "
+     "crescere. Partendo da lo_h, questo OBBLIGAVA lo_h a essere la mossa piu' "
+     "anticipata del carroponte -- una restrizione che nessuno aveva scelto e "
+     "che non era scritta da nessuna parte."),
+    ("q",
+     "COSA COSTAVA. I ciclogrammi in cui un carroponte comincia il giro da "
+     "un'altra mossa non stavano nello spazio di ricerca: il solutore li "
+     "dichiarava INFEASIBLE senza averli mai considerati. Su una linea vera di "
+     "diciassette mosse questo ha fatto dichiarare impossibile con quattro "
+     "carroponti una linea che con quattro carroponti si fa -- e la prova e' "
+     "che lo stesso ciclogramma, composto a mano, supera la verifica "
+     "indipendente con 1810 mm di margine sulla separazione. Un modello "
+     "incompleto non sbaglia le soluzioni che trova: sbaglia quelle che dice "
+     "non esistere."),
 
     ("h3", "Le due variabili di confine"),
     ("c", "model.solve", "        # -- variabili libere di confine", "        # Istanti di partenza/arrivo"),
@@ -971,8 +1011,15 @@ SOLVE = [
      "dep_hi e' vincolato a stare dopo la consegna della mossa hi_h, e a "
      "permettere l'arrivo in tempo a qualunque mossa l'arco uscente da hi_h "
      "punti. arr_lo, simmetricamente, deve essere dopo l'arrivo da qualunque "
-     "mossa l'arco entrante in lo_h provenga, e prima del prelievo di lo_h nel "
-     "periodo successivo."),
+     "mossa l'arco entrante in lo_h provenga, e prima del prelievo di lo_h."),
+    ("q",
+     "DEL PRELIEVO DI QUESTO PERIODO O DEL PROSSIMO? E' esattamente la domanda "
+     "a cui risponde `bersaglio[lo_h]`, e infatti il vincolo si scrive "
+     "`arr_lo <= bersaglio[lo_h]` e basta. Le due cose sono indipendenti e "
+     "vanno tenute separate: dep_hi e arr_lo riguardano le STAZIONI di confine "
+     "-- e' su quelle che si costruisce la non collisione -- mentre il +T "
+     "riguarda il PERIODO. Per un lungo tratto hanno condiviso la stessa "
+     "condizione perche' il modello obbligava le due mosse a coincidere."),
     ("p",
      "L'ultimo blocco tratta il caso in cui l'arco hi_h -> lo_h sia proprio "
      "quello scelto: allora dep_hi e arr_lo descrivono lo STESSO spostamento, "
@@ -989,6 +1036,12 @@ SOLVE = [
      "piu' avanti un'altra funzione lo disegna. Se le due convenzioni "
      "divergessero, il vincolo di non collisione proteggerebbe una traiettoria "
      "diversa da quella poi disegnata -- e il disegno sarebbe quello vero."),
+    ("p",
+     "`span_end` chiude l'attesa dopo l'arrivo, ed e' `bersaglio[k2]`: un "
+     "estremo che dipende da una scelta del solutore, ma che resta UNA "
+     "variabile. L'arco porta quindi un solo intervallo di attesa, condizionato "
+     "al solo letterale dell'arco -- che e' anche l'unica condizione di "
+     "presenza che un intervallo opzionale di CP-SAT accetta."),
     ("p",
      "Le tre convenzioni sono: chi parte dal confine alto parte a dep_hi; chi "
      "arriva al confine basso arriva ad arr_lo (e quindi parte a arr_lo meno "
@@ -1232,10 +1285,16 @@ SOLVE = [
     ("c", "model.solve", "    segments_per_hoist = []", "    raw = {"),
     ("p",
      "L'ordine di visita si ricostruisce SEGUENDO gli archi scelti: si parte "
-     "da z.lo, si guarda quale arco uscente e' vero, ci si sposta, e si va "
-     "avanti finche' non si torna al punto di partenza. E' il modo naturale di "
-     "leggere un circuito, e produce l'ordine che comincia da lo per "
-     "costruzione -- la convenzione che verify.py controlla."),
+     "dalla mossa su cui il periodo si richiude -- quella con `inizio` vera, "
+     "che il solutore ha scelto -- si guarda quale arco uscente e' vero, ci si "
+     "sposta, e si va avanti finche' non si torna al punto di partenza."),
+    ("q",
+     "NON SI PARTE DA z.lo. Sembra un dettaglio di presentazione e non lo e': "
+     "il giro elencato a partire da un'altra mossa avrebbe le fasi fuori "
+     "ordine, e chi lo legge -- il disegno delle traiettorie, il controllo dei "
+     "trasferimenti del verificatore -- metterebbe il +T sull'arco sbagliato. "
+     "E' la stessa proprieta' che verify.py controlla: le fasi devono crescere "
+     "lungo il giro."),
     ("p",
      "Poi _build_zone_trajectory trasforma i valori risolti in segmenti "
      "disegnabili. E' la funzione le cui convenzioni devono coincidere con "
