@@ -615,6 +615,38 @@ GRAFICO = [
      "soli spessori -- il disegno risponde a colpo d'occhio alla sola domanda "
      "che conta durante la composizione: cosa manca ancora. Dando un colore "
      "anche ai trasporti liberi, quella domanda richiederebbe di leggere."),
+    ("p",
+     "Anche il pettine porta i suoi PUNTI, e sono i QUATTRO che il ciclogramma "
+     "marca su ogni trasporto -- aggancio, partenza, arrivo, immersione -- "
+     "presi da plotting.eventi_del_trasporto, cioe' dall'unica definizione che "
+     "hanno. Servono perche' su una linea con molte tappe un trasporto corto "
+     "non si distingue da una sosta se non seguendo la pendenza, e la pendenza "
+     "su pochi pixel non si vede."),
+    ("q",
+     "IL GIRO SI POSA SUI PUNTI CHE ERANO GIA' LI'. E' la proprieta' per cui i "
+     "punti valgono la pena: assegnando una mossa, i quattro istanti che il "
+     "carroponte marca cadono ESATTAMENTE su quelli che il pettine mostrava in "
+     "grigio. Sono lo stesso fatto visto dal pezzo e dal carroponte. Prima il "
+     "giro ne marcava due -- i soli estremi della traslazione -- e assegnare "
+     "sembrava cambiare cio' che il pezzo fa; ora i due disegni si "
+     "sovrappongono, e test_interfaccia lo verifica confrontando le due liste "
+     "modulo il takt time."),
+    ("p",
+     "A quale mossa appartiene ogni tratto della scalinata lo dice "
+     "manuale.mosse_del_pettine, non un contatore: la scalinata ha un tratto a "
+     "carico per mossa, ma dedurlo dall'ordine sarebbe un'ipotesi sulla "
+     "costruzione invece di una domanda a chi la costruisce."),
+    ("p",
+     "Sono piu' piccoli e senza bordo bianco di quelli dei carroponti: il "
+     "pettine e' lo sfondo su cui si lavora, e deve restare leggibile SOTTO il "
+     "giro che si sta componendo invece di contendergli l'occhio."),
+    ("q",
+     "UN DISEGNO SOLO, CON I NaN A SEPARARE I TRATTI. Vale per il pettine come "
+     "per i carroponti poco piu' sotto: con dieci scalinate e diciassette "
+     "mosse, una chiamata di disegno per tratto sono seicento artisti -- e di "
+     "ritocchi se ne fanno molti di seguito, ciascuno dei quali ridisegna "
+     "tutto da capo. Raggruppando, il pettine intero sta in due chiamate: la "
+     "linea e i punti."),
 
     # ==================================================================
     ("h2", "2. Cliccare e trascinare"),

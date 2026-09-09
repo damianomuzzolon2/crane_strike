@@ -102,6 +102,46 @@ def _immersione_dall_inizio_rilascio(data: ProblemData, stazione: int) -> float:
     return t
 
 
+def eventi_del_trasporto(
+    data: ProblemData,
+    k: int,
+    inizio_presa: float,
+    x_partenza: float,
+    x_arrivo: float,
+) -> list[tuple[float, float]]:
+    """I quattro istanti in cui succede qualcosa durante la mossa k, con la
+    posizione a cui vanno disegnati.
+
+    Nell'ordine: l'AGGANCIO (il telaio si stacca dal fondo e il pezzo diventa
+    del carroponte), la PARTENZA della traslazione, l'ARRIVO, e l'IMMERSIONE
+    (il telaio torna in vasca e il pezzo smette di essere del carroponte).
+
+    E' l'unica definizione di 'dove succede qualcosa', e la usano tutti e tre i
+    disegni: le traiettorie del ciclogramma, quelle dei carroponti sul pettine,
+    e il pettine stesso. Averne una sola non e' pignoleria: sono gli stessi
+    istanti visti dal lato del carroponte e dal lato del pezzo, e se i due
+    disegni li mettessero in punti diversi, chi li confronta -- che e' il
+    motivo per cui il pettine e il ciclogramma si guardano insieme -- non ci si
+    ritroverebbe.
+
+    Le due posizioni della traslazione si passano da fuori perche' cambiano
+    con il disegno: sul giro del carroponte sono i punti di APPROCCIO, sul
+    pettine sono le vasche. Aggancio e immersione invece avvengono sempre
+    sopra la stazione, che il carroponte ci arrivi da un punto di cambio quota
+    o no."""
+    presa = data.pick_time_at(k)
+    partenza = inizio_presa + presa
+    arrivo = partenza + data.horizontal_loaded_seconds(k)
+    return [
+        (inizio_presa + _aggancio_dall_inizio_presa(data, k),
+         data.station_position(k)),
+        (partenza, x_partenza),
+        (arrivo, x_arrivo),
+        (arrivo + _immersione_dall_inizio_rilascio(data, k + 1),
+         data.station_position(k + 1)),
+    ]
+
+
 def math_sign(v: float) -> float:
     return 1.0 if v >= 0 else -1.0
 
@@ -178,24 +218,26 @@ def plot_cyclogram(
         eventi_t, eventi_x = [], []
         for seg in segs:
             if seg.kind == "loaded" and seg.move is not None:
-                # I due istanti in cui il telaio cambia mano. Si ricavano dal
-                # tratto A CARICO, che c'e' sempre ed e' uno solo per mossa:
-                # presa e rilascio invece possono essere spezzati in piu'
-                # tratti da una zona di cambio quota, e prenderli uno per uno
+                # I quattro istanti della mossa si ricavano dal tratto A
+                # CARICO, che c'e' sempre ed e' uno solo per mossa: presa e
+                # rilascio invece possono essere spezzati in piu' tratti da una
+                # zona di cambio quota, e prenderli uno per uno
                 # moltiplicherebbe i punti.
                 k = seg.move
-                inizio_presa = seg.t_start - data.pick_time_at(k)
-                eventi_t.append(
-                    inizio_presa + _aggancio_dall_inizio_presa(data, k)
-                )
-                eventi_x.append(data.station_position(k))
-                eventi_t.append(
-                    seg.t_end + _immersione_dall_inizio_rilascio(data, k + 1)
-                )
-                eventi_x.append(data.station_position(k + 1))
-            if seg.kind in _KINEMATIC_KINDS and seg.x_end != seg.x_start:
-                # una traslazione vera: si parte da una parte e si arriva
-                # dall'altra. I tratti di lunghezza nulla non sono partenze.
+                for t, x in eventi_del_trasporto(
+                    data,
+                    k,
+                    seg.t_start - data.pick_time_at(k),
+                    seg.x_start,
+                    seg.x_end,
+                ):
+                    eventi_t.append(t)
+                    eventi_x.append(x)
+            elif seg.kind in _KINEMATIC_KINDS and seg.x_end != seg.x_start:
+                # una traslazione vera che non sia il trasporto -- il rientro a
+                # vuoto, o un vai-e-torna di cambio quota: si parte da una parte
+                # e si arriva dall'altra. I tratti di lunghezza nulla non sono
+                # partenze.
                 eventi_t.extend([seg.t_start, seg.t_end])
                 eventi_x.extend([seg.x_start, seg.x_end])
         for cycle in range(n_cycles):

@@ -1621,7 +1621,7 @@ python test/esempio.py           # risoluzione reale + verifica + grafico
 ```
 
 Ognuno stampa cosa ha provato e finisce con `RISULTATO: n ok, m falliti`.
-Nessuna dipendenza da pytest. Stato attuale: **104, 94, 78, 49 e 108
+Nessuna dipendenza da pytest. Stato attuale: **104, 94, 78, 49 e 112
 asserzioni, zero fallimenti**.
 
 **La risoluzione CP-SAT e' eseguita e verificata end-to-end.** Sull'esempio

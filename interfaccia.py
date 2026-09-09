@@ -44,6 +44,7 @@ import manuale
 from plotting import (
     _HOIST_COLORS,
     _sample_segment,
+    eventi_del_trasporto,
     lettura_coordinate,
     plot_cyclogram,
 )
@@ -1513,11 +1514,47 @@ class Applicazione(tk.Tk):
         # assegnare. Colorarne i tratti assegnati faceva del FLUSSO DEI PEZZI
         # il disegno dominante, mentre quello che si sta componendo -- e
         # quello che poi si consegna -- e' il giro dei carroponti.
+        # I PUNTI sono gli STESSI QUATTRO che il ciclogramma marca su ogni
+        # trasporto -- aggancio, partenza, arrivo, immersione -- calcolati da
+        # `eventi_del_trasporto`, cioe' dall'unica definizione che hanno.
+        # Cambiano solo di lato: qui li si guarda dal pezzo invece che dal
+        # carroponte, ma sono lo stesso istante e stanno nello stesso punto.
+        # E' cio' che permette di assegnare una mossa e vedere il giro colorato
+        # posarsi ESATTAMENTE sui punti che erano gia' li' in grigio.
+        #
+        # A quale mossa appartiene ogni tratto lo dice `mosse_del_pettine`, non
+        # un contatore: la scalinata ha un tratto a carico per mossa, ma
+        # dedurlo dall'ordine sarebbe un'ipotesi sulla costruzione invece di
+        # una domanda a chi la costruisce.
+        #
+        # Un disegno solo per tutto il pettine, con i NaN a separare i tratti:
+        # con dieci scalinate e diciassette mosse, una chiamata per tratto
+        # sono seicento disegni a ogni ritocco.
         scalinate = manuale.pettine(d, T, self.permanenze)
+        mosse = manuale.mosse_del_pettine(d, self.permanenze)
+        linea_t, linea_x = [], []
+        punti_t, punti_x = [], []
         for segs in scalinate:
-            for s in segs:
+            for s, k in zip(segs, mosse):
                 ts, xs = _sample_segment(s)
-                self.assi.plot(ts, xs, color=_GRIGIO, linewidth=_SOTTILE, zorder=2)
+                linea_t.extend(list(ts) + [np.nan])
+                linea_x.extend(list(xs) + [np.nan])
+                if s.kind == "loaded":
+                    for t, x in eventi_del_trasporto(
+                        d, k, s.t_start - d.pick_time_at(k), s.x_start, s.x_end
+                    ):
+                        punti_t.append(t)
+                        punti_x.append(x)
+        self.assi.plot(
+            linea_t, linea_x, color=_GRIGIO, linewidth=_SOTTILE, zorder=2
+        )
+        # Piu' piccoli e senza bordo bianco di quelli dei carroponti: il
+        # pettine e' lo sfondo su cui si lavora, e deve restare leggibile
+        # SOTTO il giro che si sta componendo, non contendergli l'occhio.
+        self.assi.plot(
+            punti_t, punti_x, linestyle="none", marker="o", markersize=3.0,
+            markerfacecolor=_GRIGIO, markeredgecolor=_GRIGIO, zorder=3,
+        )
 
         # -- il CICLOGRAMMA: il giro di ogni carroponte, ripetuto -----------
         # Disegnato come nell'altra vista -- colore del carroponte, linea
@@ -1539,12 +1576,27 @@ class Applicazione(tk.Tk):
             punti_t, punti_x = [], []
             for s in sorted(segs, key=lambda x: x.t_start):
                 ts, xs = _sample_segment(s)
+                # Gli stessi quattro istanti del ciclogramma sul trasporto,
+                # piu' gli estremi delle traslazioni che non lo sono (il
+                # rientro a vuoto). Prima qui si marcavano solo gli estremi,
+                # anche del trasporto: assegnando una mossa comparivano due
+                # punti dove il pettine ne mostrava quattro, e i due disegni
+                # sembravano raccontare due cose diverse.
+                if s.kind == "loaded" and s.move is not None:
+                    eventi = eventi_del_trasporto(
+                        d, s.move, s.t_start - d.pick_time_at(s.move),
+                        s.x_start, s.x_end,
+                    )
+                elif s.kind in ("empty", "quota") and s.x_end != s.x_start:
+                    eventi = [(s.t_start, s.x_start), (s.t_end, s.x_end)]
+                else:
+                    eventi = []
                 for ciclo in range(n_cicli):
                     linea_t.extend(list(ts + ciclo * T) + [np.nan])
                     linea_x.extend(list(xs) + [np.nan])
-                    if s.kind in ("loaded", "empty") and s.x_end != s.x_start:
-                        punti_t.extend([s.t_start + ciclo * T, s.t_end + ciclo * T])
-                        punti_x.extend([s.x_start, s.x_end])
+                    for t, x in eventi:
+                        punti_t.append(t + ciclo * T)
+                        punti_x.append(x)
             self.assi.plot(
                 linea_t, linea_x, color=colore, linewidth=_SPESSO, zorder=4
             )

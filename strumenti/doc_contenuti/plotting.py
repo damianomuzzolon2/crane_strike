@@ -159,6 +159,31 @@ RIGA_PER_RIGA = [
      "presa. Se le fasi cambiano, il punto si sposta da solo: non c'e' una "
      "seconda descrizione della presa da tenere allineata."),
 
+    ("h3", "eventi_del_trasporto -- l'unica definizione dei punti"),
+    ("c", "plotting.eventi_del_trasporto"),
+    ("p",
+     "Restituisce i quattro istanti in cui, durante un trasporto, succede "
+     "qualcosa: l'AGGANCIO (il telaio si stacca dal fondo e il pezzo diventa "
+     "del carroponte), la PARTENZA della traslazione, l'ARRIVO, e "
+     "l'IMMERSIONE (il telaio torna in vasca e smette di essere del "
+     "carroponte)."),
+    ("q",
+     "LA USANO TUTTI E TRE I DISEGNI. Le traiettorie del ciclogramma, i giri "
+     "dei carroponti sul pettine, e il pettine stesso. Averne una sola non e' "
+     "pignoleria: sono gli stessi istanti visti dal lato del carroponte e dal "
+     "lato del PEZZO, e il pettine e il ciclogramma si guardano apposta uno "
+     "accanto all'altro. Se i due disegni li mettessero in punti diversi -- o "
+     "se uno ne mostrasse quattro e l'altro due, com'era prima -- chi li "
+     "confronta non ci si ritroverebbe, e assegnare una mossa sembrerebbe "
+     "cambiare cio' che il pezzo fa."),
+    ("p",
+     "Le due posizioni della traslazione si passano da fuori perche' cambiano "
+     "con il disegno: sul giro del carroponte sono i punti di APPROCCIO, sul "
+     "pettine sono le vasche. Aggancio e immersione invece avvengono sempre "
+     "sopra la stazione, che il carroponte ci arrivi da un punto di cambio "
+     "quota o no -- ed e' per questo che quelle due le calcola la funzione "
+     "invece di riceverle."),
+
     ("h3", "_immersione_dall_inizio_rilascio"),
     ("c", "plotting._immersione_dall_inizio_rilascio"),
     ("p",
@@ -247,13 +272,19 @@ RIGA_PER_RIGA = [
      "quota, mentre il tratto a carico c'e' sempre ed e' uno solo per "
      "trasporto. Prendendo i tratti di presa uno per uno, i punti si "
      "moltiplicherebbero. Da li' si risale all'inizio della presa "
-     "sottraendo pick_time_at(k), e si aggiunge l'offset calcolato dalle due "
-     "funzioni del paragrafo 2."),
+     "sottraendo pick_time_at(k), e si chiedono i quattro istanti a "
+     "eventi_del_trasporto."),
     ("p",
-     "L'ultima condizione -- x_end diverso da x_start -- esclude le "
-     "traslazioni di lunghezza nulla. Un tratto che parte e arriva nello "
-     "stesso punto non e' una partenza, e marcarlo metterebbe due punti "
-     "sovrapposti dove non succede niente."),
+     "Il secondo ramo -- `elif` -- marca gli estremi delle traslazioni che NON "
+     "sono il trasporto: il rientro a vuoto e il vai-e-torna di una zona di "
+     "cambio quota. E' un elif e non un if perche' i due estremi del tratto a "
+     "carico li ha gia' messi il ramo sopra: metterli due volte non si "
+     "vedrebbe, ma raddoppierebbe i punti da disegnare."),
+    ("p",
+     "La condizione x_end diverso da x_start esclude le traslazioni di "
+     "lunghezza nulla. Un tratto che parte e arriva nello stesso punto non e' "
+     "una partenza, e marcarlo metterebbe due punti sovrapposti dove non "
+     "succede niente."),
 
     ("h3", "Le traiettorie, ripetute"),
     ("c", "plotting.plot_cyclogram", "        for cycle in range(n_cycles):",

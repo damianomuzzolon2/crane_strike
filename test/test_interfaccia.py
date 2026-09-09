@@ -707,6 +707,39 @@ def test_composizione_da_zero(percorso_linea):
             "e infatti sul grafico non c'e' nessun colore di carroponte",
         )
 
+        # -- i punti sul pettine ---------------------------------------------
+        # Sono i QUATTRO istanti in cui succede qualcosa durante un trasporto
+        # -- aggancio, partenza, arrivo, immersione -- gli stessi che il
+        # ciclogramma marca sulle traiettorie dei carroponti, visti dal lato
+        # del pezzo. Senza, su una linea con molte tappe un trasporto corto non
+        # si distingue da una sosta.
+        import manuale as m
+
+        d = app.config_linea.data
+        punti = [
+            l
+            for l in app.assi.lines
+            if l.get_linestyle() == "None" and len(l.get_xdata())
+        ]
+        check(
+            len(punti) == 1,
+            f"il pettine porta i suoi punti ({len(punti)} disegni di soli punti)",
+        )
+        attesi = 4 * d.n_moves * m.RIPETIZIONI_PREDEFINITE
+        check(
+            len(punti[0].get_xdata()) == attesi,
+            f"quattro per ogni trasporto di ogni scalinata "
+            f"({len(punti[0].get_xdata())} su {attesi} attesi)",
+        )
+        # Il disegno e' RAGGRUPPATO: una chiamata per tratto, con dieci
+        # scalinate, sono centinaia di artisti a ogni ritocco -- e di ritocchi
+        # se ne fanno molti di seguito.
+        check(
+            len(app.assi.lines) < 40,
+            f"e il pettine sta in pochi artisti, non uno per tratto "
+            f"({len(app.assi.lines)})",
+        )
+
         # -- assegnare una mossa per volta -----------------------------------
         # Il clic vale su TUTTO il tratto disegnato, non solo sul suo estremo:
         # obbligare a centrare la vasca di partenza e' una precisione chiesta
@@ -748,6 +781,40 @@ def test_composizione_da_zero(percorso_linea):
         check(
             [app._carro_della_zona(i) for i in range(len(app.dati.zones))] == [None, 1],
             "la zona senza mosse assegnate non e' di nessuno, l'altra e' del 2",
+        )
+
+        # -- il giro si posa sui punti che erano gia' li' in grigio ----------
+        # E' la proprieta' per cui i punti esistono: assegnando una mossa, i
+        # quattro istanti che il carroponte marca devono cadere ESATTAMENTE su
+        # quelli che il pettine mostrava. Sono lo stesso fatto visto dal pezzo
+        # e dal carroponte, e se i due disegni li mettessero altrove chi li
+        # confronta -- che e' il motivo per cui si guardano insieme -- non ci
+        # si ritroverebbe. Il confronto e' modulo T: il pettine mostra il
+        # pezzo j-esimo, il giro del carroponte si ripete ogni periodo.
+        from plotting import eventi_del_trasporto
+
+        tempi = m.catena_pezzo(d, app.permanenze)
+        trasporto = [
+            s
+            for s in app.soluzione.segments_per_hoist[1]
+            if s.kind == "loaded" and s.move == 3
+        ][0]
+        dal_pezzo = eventi_del_trasporto(
+            d, 3, tempi[3], d.station_position(3), d.station_position(4)
+        )
+        dal_carro = eventi_del_trasporto(
+            d, 3, trasporto.t_start - d.pick_time_at(3),
+            trasporto.x_start, trasporto.x_end,
+        )
+        T = app.T_corrente
+        scarti = [
+            max(min((t1 - t2) % T, (t2 - t1) % T), abs(x1 - x2))
+            for (t1, x1), (t2, x2) in zip(dal_pezzo, dal_carro)
+        ]
+        check(
+            len(dal_pezzo) == 4 and max(scarti) < 1e-9,
+            f"i quattro punti del carroponte coincidono con quelli del pettine "
+            f"(scarto massimo {max(scarti):.1e})",
         )
 
         # -- e lo stesso clic la toglie --------------------------------------
