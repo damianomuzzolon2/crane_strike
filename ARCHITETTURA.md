@@ -6,7 +6,7 @@ invarianti regge, e dove sono le trappole — comprese quelle in cui siamo gia'
 caduti, che sono la parte piu' utile.
 
 Stato al momento della scrittura: 16 file Python, 15.223 righe, cinque suite di
-test per **437 asserzioni** complessive.
+test per **443 asserzioni** complessive.
 
 ---
 
@@ -730,14 +730,14 @@ lascia il pulsante vuoto.
 
 ---
 
-## 11. I test — 437 asserzioni, cinque suite
+## 11. I test — 443 asserzioni, cinque suite
 
 Nessun pytest: ogni file si lancia da solo, stampa cosa ha provato e restituisce
 un codice d'uscita.
 
 | file | asserzioni | richiede | domanda a cui risponde |
 | --- | ---: | --- | --- |
-| `test/test_verify.py` | 104 | — | il verificatore trova davvero quello che deve? |
+| `test/test_verify.py` | 110 | — | il verificatore trova davvero quello che deve? |
 | `test/test_excel_io.py` | 94 | — | un file compilato male viene respinto con un messaggio utile? |
 | `test/test_simulazione.py` | 78 | — | la simulazione mostra il ciclogramma che c'e'? |
 | `test/test_model.py` | 49 | OR-Tools | il modello produce soluzioni fisicamente valide? |

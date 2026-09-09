@@ -944,6 +944,69 @@ def test_due_posti_insieme():
     )
 
 
+def test_giro_che_non_parte_dal_confine():
+    """Un giro che comincia da una mossa che non e' quella di confine basso.
+
+    Il solutore non lo produce mai -- il modello costringe la mossa di confine
+    a essere anche la prima in ordine di tempo -- ma componendo A MANO nessuno
+    lo costringe: si sceglie il tempo in vasca e le fasi cadono dove cadono.
+
+    Il difetto: il giro veniva RUOTATO per farlo cominciare dalla mossa di
+    indice piu' basso, e il +T che chiude il periodo restava attaccato a
+    quella. Ne usciva la pretesa di andare dall'ultima mossa alla prima senza
+    cambiare periodo, cioe' indietro nel tempo, e un 'non arriva in tempo'
+    sfasato di esattamente un takt time su un giro che sta benissimo in
+    piedi."""
+    print("\n[19-ter] un giro che non comincia dalla mossa di confine basso")
+    data = make_data(
+        positions=[0, 5000, 10000, 15000, 20000],
+        dwells=[(0, 0), (30, 300), (30, 300), (30, 300), (0, 0)],
+        zones=[HoistZone(0, 1), HoistZone(2, 3)],
+    )
+    T = 200.0
+    # nella zona [2,3] il carroponte serve PRIMA la mossa 3 (fase 60) e poi la
+    # 2 (fase 190): l'opposto dell'ordine degli indici
+    sol = build_solution(data, T, [{0: 0.0, 1: 60.0}, {2: 190.0, 3: 60.0}])
+    plan = sol.plans[1]
+    check(
+        plan.order == [3, 2],
+        f"il giro si racconta in ordine di prelievo, non di indice "
+        f"({plan.order})",
+    )
+    check(
+        plan.order[0] != plan.zone.lo,
+        f"e infatti non comincia dalla mossa di confine basso "
+        f"({plan.order[0]} invece di {plan.zone.lo}): e' il caso che il "
+        f"solutore non produce mai",
+    )
+    r = verify_solution(data, sol)
+    trasferimenti = [v for v in r.violations if v.kind == "transfer"]
+    check(
+        not trasferimenti,
+        f"nessun trasferimento impossibile: il giro regge "
+        f"({[v.message[:50] for v in trasferimenti]})",
+    )
+    check(r.ok, "e la soluzione passa la verifica per intero")
+
+    # Un controllo che non segnala mai nulla e' inutile: si rifa' il conto
+    # sull'arco che CHIUDE il periodo -- dall'ultima mossa del giro alla prima
+    # -- con la convenzione vecchia e con quella nuova, e ci si aspetta che la
+    # vecchia fallisca. Se non fallisse, questo caso non proverebbe niente.
+    k1, k2 = plan.order[-1], plan.order[0]
+    arrivo = plan.finish[k1] + data.empty_leg_seconds(k1 + 1, k2)
+    vecchia = plan.local_pick[k2] + (T if k2 == plan.zone.lo else 0.0)
+    nuova = plan.local_pick[k2] + T  # k2 E' la prima del giro, quindi +T
+    check(
+        arrivo > vecchia,
+        f"con la vecchia convenzione l'arco di chiusura risultava impossibile "
+        f"(pronto a {arrivo:.1f}s contro un prelievo a {vecchia:.1f}s)",
+    )
+    check(
+        arrivo <= nuova,
+        f"e con quella giusta ci sta, di {nuova - arrivo:.1f}s",
+    )
+
+
 def test_senza_valori_risolti():
     print("\n[20] degrado gentile senza solution.plans")
     data, sol = reference_case()
@@ -1330,6 +1393,7 @@ def main():
     test_stazione_condivisa()
     test_input_malformato()
     test_due_posti_insieme()
+    test_giro_che_non_parte_dal_confine()
     test_senza_valori_risolti()
     print("\n" + "=" * 72)
     print(f"RISULTATO: {_n_pass} ok, {_n_fail} falliti")

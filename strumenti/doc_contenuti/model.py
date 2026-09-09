@@ -1348,9 +1348,19 @@ COSTRUZIONE = [
     ("c", "model._assembla"),
     ("p",
      "Da fasi e tempi assoluti alle traiettorie. L'ordine di visita si ricava "
-     "ORDINANDO le mosse per fase di prelievo, poi si ruota la lista in modo "
-     "che cominci dalla mossa piu' bassa della zona -- la convenzione che "
-     "verify.py controlla."),
+     "ORDINANDO le mosse per fase di prelievo: il giro comincia dalla mossa "
+     "che il carroponte serve per prima dentro il periodo."),
+    ("q",
+     "PRIMA LA LISTA VENIVA RUOTATA per farla cominciare dalla mossa di indice "
+     "piu' basso, che e' la convenzione del solutore -- ed era un difetto. Nel "
+     "modello quella convenzione regge perche' il modello COSTRINGE la mossa "
+     "di confine basso a essere anche la prima in ordine di tempo: lungo il "
+     "giro le fasi crescono, e il giro parte da lei. Componendo a mano nessuno "
+     "lo costringe. Se il carroponte serve prima la mossa 6 e poi la 5, la "
+     "rotazione produce il giro [5, 6] e pretende che dalla 5 si arrivi alla 6 "
+     "SENZA cambiare periodo, cioe' indietro nel tempo: ne usciva un 'non "
+     "arriva in tempo' sfasato di esattamente un takt time, su un giro che "
+     "sta benissimo in piedi, e una traiettoria disegnata a pezzi scambiati."),
     ("p",
      "dep_hi e arr_lo si calcolano con la stessa convenzione del modello: "
      "'parte appena consegnato'. Il commento lo dichiara, ed e' la terza volta "
@@ -1476,9 +1486,15 @@ COSTRUZIONE = [
     ("c", "model._build_zone_trajectory", "        is_last = i == n - 1", "        if depart_t < t1 - EPS:"),
     ("p",
      "Quattro casi, e sono ESATTAMENTE i quattro del blocco `arcs` dentro "
-     "solve(). Chi parte dal confine alto parte a dep_hi; chi arriva al "
-     "confine basso arriva ad arr_lo; se vale l'una e l'altra, entrambe; "
+     "solve(). Chi parte dal confine alto parte a dep_hi; chi torna alla PRIMA "
+     "mossa del giro arriva ad arr_lo; se vale l'una e l'altra, entrambe; "
      "altrimenti si riparte appena consegnati."),
+    ("q",
+     "arr_lo E' LEGATO A order[0], NON A zone.lo. Per il solutore sono la "
+     "stessa mossa -- il modello costringe quella di confine basso a essere "
+     "anche la prima in ordine di tempo -- ma un giro composto a mano puo' "
+     "cominciare da un'altra, e li' i due indici divergono. Guardare zone.lo "
+     "attaccava l'istante di richiusura del periodo alla mossa sbagliata."),
     ("p",
      "Il commento sull'ultimo caso dichiara che e' una convenzione per la "
      "VISUALIZZAZIONE: nessuna attesa gratuita prima della partenza, e "
@@ -1518,10 +1534,16 @@ COSTRUZIONE = [
      "a tre rami, e il messaggio dice di quanti secondi si e' in ritardo -- che "
      "e' il numero su cui l'utente puo' agire, allungando una permanenza o "
      "spostando una mossa a un altro carroponte."),
-    ("p",
-     "Il `+T` quando la mossa successiva e' quella di confine basso e' lo "
-     "stesso di solve() e di verify.py: tre punti che devono avere quella riga "
-     "identica."),
+    ("q",
+     "IL +T STA SULL'ARCO CHE CHIUDE IL PERIODO, cioe' quello che riporta alla "
+     "PRIMA mossa del giro: quel prelievo appartiene al ciclo dopo. La stessa "
+     "riga sta in solve() e in verify.py -- tre punti che devono dire la stessa "
+     "cosa -- e per un po' l'hanno detta in un modo che regge solo per il "
+     "solutore: il +T sulla mossa di CONFINE BASSO. Coincidono finche' il giro "
+     "comincia da li', che il modello garantisce e la composizione a mano no. "
+     "Su un giro manuale che cominci da un'altra mossa, il +T finiva sull'arco "
+     "sbagliato e il ciclogramma veniva dichiarato irrealizzabile per esattamente "
+     "un takt time."),
 ]
 
 

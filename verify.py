@@ -703,9 +703,34 @@ def _check_per_hoist(data, solution, plans, T, time_tol, add) -> list[_Trajector
                     t=s.t_start,
                 )
 
+        # Ogni mossa della zona deve comparire esattamente una volta nel giro.
+        # Le MANCANTI si raccolgono in una riga sola: durante una composizione
+        # a mano sono tutte quelle non ancora assegnate -- su una linea di
+        # diciassette mosse possono essere undici -- e undici righe identiche
+        # dicono lo stesso fatto che ne basta una a dire. Quelle RIPETUTE
+        # restano una per una: sono poche e ciascuna e' un difetto a se'.
+        mancanti = [k for k in range(zone.lo, zone.hi + 1) if seen.get(k, 0) == 0]
+        if len(mancanti) == 1:
+            add(
+                "order",
+                "error",
+                "la mossa non compare nel ciclo",
+                hoists=(h,),
+                move=mancanti[0],
+            )
+        elif mancanti:
+            add(
+                "order",
+                "error",
+                f"{len(mancanti)} mosse della zona non compaiono nel ciclo: "
+                f"{mancanti}. Se stai componendo a mano sono quelle che non "
+                f"hai ancora assegnato a nessun carroponte.",
+                hoists=(h,),
+                move=mancanti[0],
+            )
         for k in range(zone.lo, zone.hi + 1):
             n = seen.get(k, 0)
-            if n != 1:
+            if n > 1:
                 add(
                     "order",
                     "error",
@@ -714,25 +739,55 @@ def _check_per_hoist(data, solution, plans, T, time_tol, add) -> list[_Trajector
                     move=k,
                 )
 
-        # -- l'ordine risolto deve essere una permutazione delle mosse --
+        # -- l'ordine risolto deve elencare mosse della zona, una volta sola --
+        #
+        # Le mosse MANCANTI non si segnalano qui: le ha gia' contate il
+        # controllo di copertura poco sopra, e ripeterle direbbe due volte la
+        # stessa cosa con parole diverse. Qui resta cio' che quel controllo non
+        # vede: una mossa che non appartiene alla zona, o elencata due volte.
         plan = plans[h] if h < len(plans) else None
         if plan is not None:
-            if sorted(plan.order) != list(range(zone.lo, zone.hi + 1)):
+            estranee = sorted(set(plan.order) - set(range(zone.lo, zone.hi + 1)))
+            ripetute = sorted(
+                {k for k in plan.order if plan.order.count(k) > 1}
+            )
+            if estranee or ripetute:
+                guasto = []
+                if estranee:
+                    guasto.append(f"mosse {estranee} che non sono della zona")
+                if ripetute:
+                    guasto.append(f"mosse {ripetute} elencate piu' di una volta")
                 add(
                     "order",
                     "error",
-                    f"order={plan.order} non e' una permutazione delle mosse "
-                    f"{zone.lo}..{zone.hi}",
+                    f"il giro del carroponte contiene " + " e ".join(guasto)
+                    + f" (order={plan.order}, zona {zone.lo}..{zone.hi})",
                     hoists=(h,),
                 )
-            elif plan.order[0] != zone.lo:
-                add(
-                    "order",
-                    "error",
-                    f"order deve iniziare dalla mossa di confine basso "
-                    f"{zone.lo}, non da {plan.order[0]}",
-                    hoists=(h,),
-                )
+            else:
+                # Il giro va raccontato in ordine di PRELIEVO, e questa non e'
+                # una convenzione di comodo: e' cio' che rende ben definito
+                # l'arco su cui il periodo si richiude -- l'ultimo -- e quindi
+                # l'unico a cui si somma un T. Un elenco fuori ordine
+                # sposterebbe quel +T su un arco qualunque, e il controllo dei
+                # trasferimenti misurerebbe distanze fra istanti che non si
+                # susseguono.
+                #
+                # Prima qui si pretendeva che il giro cominciasse dalla mossa
+                # di CONFINE BASSO. Per il solutore e' lo stesso -- il modello
+                # costringe quella mossa a essere anche la prima in ordine di
+                # tempo -- ma su un ciclogramma composto a mano no, e il
+                # controllo bocciava giri perfettamente validi.
+                fasi = [plan.local_pick.get(k) for k in plan.order]
+                if None not in fasi and fasi != sorted(fasi):
+                    add(
+                        "order",
+                        "error",
+                        f"il giro non visita le mosse in ordine di prelievo: "
+                        f"order={plan.order} ha fasi "
+                        f"{[round(f, 1) for f in fasi]}",
+                        hoists=(h,),
+                    )
 
         trajectories.append(_Trajectory(segs, T))
     return trajectories
@@ -940,9 +995,16 @@ def _compute_dwell_slack(data, solution, T) -> dict[int, tuple[float, float]]:
 
 
 def _check_transfers(data, plans, T, time_tol, add):
-    """7) Fattibilita' degli spostamenti a vuoto fra mosse consecutive."""
+    """7) Fattibilita' degli spostamenti a vuoto fra mosse consecutive.
+
+    Il +T va sull'arco che CHIUDE il periodo, cioe' quello che riporta alla
+    PRIMA mossa del giro: quel prelievo appartiene al ciclo dopo. Prima si
+    guardava la mossa di confine basso della zona, il che e' lo stesso finche'
+    il giro comincia da li' -- vero per il solutore, che costringe quella mossa
+    a essere anche la prima in ordine di tempo, e falso per un ciclogramma
+    composto a mano. Il risultato era un "non arriva in tempo" su giri
+    perfettamente validi, sfasato di esattamente un takt time."""
     for h, plan in enumerate(plans):
-        z = plan.zone
         order = plan.order
         if not order or not plan.finish:
             continue
@@ -952,7 +1014,7 @@ def _check_transfers(data, plans, T, time_tol, add):
                 continue
             t_emp = data.empty_leg_seconds(k1 + 1, k2)
             arrivo = plan.finish[k1] + t_emp
-            target = plan.local_pick[k2] + (T if k2 == z.lo else 0.0)
+            target = plan.local_pick[k2] + (T if k2 == order[0] else 0.0)
             if arrivo > target + time_tol:
                 add(
                     "transfer",

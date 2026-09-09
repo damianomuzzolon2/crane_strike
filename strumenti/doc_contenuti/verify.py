@@ -447,16 +447,36 @@ CONTROLLI = [
     ("c", "verify._check_per_hoist", "        for k in range(zone.lo, zone.hi + 1):",
      None),
     ("p",
-     "Ogni mossa della zona deve comparire ESATTAMENTE una volta nel ciclo. Il "
-     "messaggio dice quante volte compare, che distingue subito i due difetti "
-     "opposti: zero significa una mossa dimenticata, due o piu' significa un "
-     "giro che ripassa."),
+     "Ogni mossa della zona deve comparire ESATTAMENTE una volta nel ciclo, e "
+     "i due difetti opposti si dicono in modo diverso. Le mosse MANCANTI si "
+     "raccolgono in una riga sola: durante una composizione a mano sono tutte "
+     "quelle non ancora assegnate, e su una linea lunga possono essere dieci "
+     "-- dieci righe identiche dicono lo stesso fatto che ne basta una a dire. "
+     "Quelle RIPETUTE restano una per una: sono poche e ciascuna e' un difetto "
+     "a se'."),
     ("p",
-     "Poi due controlli sull'ordine risolto: che sia una permutazione delle "
-     "mosse della zona, e che COMINCI dalla mossa di confine basso. La seconda "
-     "e' una convenzione del modello -- il giro si racconta a partire da li' "
-     "-- e violarla non renderebbe il ciclogramma sbagliato, ma renderebbe "
-     "sbagliato ogni conto fatto assumendola."),
+     "Sull'ordine si controlla poi che non contenga mosse ESTRANEE alla zona "
+     "ne' mosse elencate due volte. Le mancanti no: le ha gia' contate il "
+     "controllo di copertura, e ripeterle direbbe due volte la stessa cosa con "
+     "parole diverse."),
+    ("q",
+     "IL GIRO VA RACCONTATO IN ORDINE DI PRELIEVO. Non e' una convenzione di "
+     "comodo: e' cio' che rende ben definito l'arco su cui il periodo si "
+     "richiude -- l'ultimo -- e quindi l'unico a cui si somma un T. Un elenco "
+     "fuori ordine sposterebbe quel +T su un arco qualunque, e il controllo "
+     "dei trasferimenti misurerebbe distanze fra istanti che non si "
+     "susseguono."),
+    ("q",
+     "PRIMA QUI SI PRETENDEVA CHE IL GIRO COMINCIASSE DALLA MOSSA DI CONFINE "
+     "BASSO, ed era un difetto vero. Per il solutore le due cose coincidono -- "
+     "il modello costringe quella mossa a essere anche la prima in ordine di "
+     "tempo -- ma componendo A MANO nessuno lo costringe: si sceglie il tempo "
+     "in vasca e le fasi cadono dove cadono. Il giro veniva allora RUOTATO per "
+     "farlo cominciare da li', e il +T restava attaccato alla mossa sbagliata: "
+     "ne usciva la pretesa di andare dall'ultima mossa alla prima senza "
+     "cambiare periodo, cioe' indietro nel tempo. Un 'non arriva in tempo' "
+     "sfasato di esattamente un takt time, su un giro che stava benissimo in "
+     "piedi."),
 
     ("h3", "_leg_duration -- allargarsi fino a dove?"),
     ("c", "verify._leg_duration"),

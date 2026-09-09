@@ -2054,10 +2054,21 @@ def _assembla(
         if not moves:
             segments_per_hoist.append([])
             continue
+        # Il giro si racconta in ordine di PRELIEVO, e comincia dalla mossa che
+        # il carroponte serve per prima dentro il periodo.
+        #
+        # Prima lo si ruotava per farlo cominciare dalla mossa di indice piu'
+        # basso, che e' la convenzione del solutore -- ma li' regge perche' il
+        # modello COSTRINGE quella mossa a essere anche la prima in ordine di
+        # tempo (lungo il giro le fasi crescono, e il giro parte da lei).
+        # Componendo a mano nessuno lo costringe: se il carroponte serve prima
+        # la mossa 6 e poi la 5, la rotazione produce il giro [5, 6] e pretende
+        # che dalla 5 si arrivi alla 6 SENZA cambiare periodo -- cioe' indietro
+        # nel tempo. Ne usciva un "non arriva in tempo" su un giro che invece
+        # sta benissimo in piedi, e una traiettoria disegnata a pezzi
+        # scambiati.
         order = sorted(moves, key=lambda k: local_pick[k])
-        riferimento = min(moves)
-        i0 = order.index(riferimento)
-        order = order[i0:] + order[:i0]
+        riferimento = order[0]
         lp = {k: float(local_pick[k]) for k in moves}
         finish = {k: lp[k] + data.loaded_leg_seconds(k) for k in moves}
         # "parte appena consegnato": la stessa convenzione che usa il modello
@@ -2316,8 +2327,14 @@ def _build_zone_trajectory(
         x1_next = data.approach_position(nxt_k)
         travel_e = data.empty_leg_seconds(k + 1, nxt_k)
 
+        # `arr_lo` e' l'istante in cui il carroponte torna pronto per la PRIMA
+        # mossa del giro, quella a cui si richiude il periodo: e' order[0], non
+        # zone.lo. Per il solutore sono la stessa cosa -- il modello costringe
+        # la mossa di confine basso a essere anche la prima in ordine di tempo
+        # -- ma un giro composto a mano puo' cominciare da un'altra, e li' i
+        # due indici divergono.
         depart_known = k == zone.hi
-        arrive_known = nxt_k == zone.lo
+        arrive_known = nxt_k == order[0]
 
         if depart_known and arrive_known:
             depart_t, arrive_t = dep_hi, arr_lo
@@ -2366,7 +2383,12 @@ def _build_zone_trajectory(
             # spezza la traiettoria.
             segs.append(Segment("wait", depart_t, arrive_t, x1, x1, None))
 
-        target_pick = local_pick[nxt_k] + (T if nxt_k == zone.lo else 0)
+        # Il +T sta sull'arco che CHIUDE il periodo, cioe' quello che riporta
+        # alla prima mossa del giro: quel prelievo appartiene al ciclo dopo.
+        # Metterlo sull'arco che entra in zone.lo funziona solo finche' le due
+        # mosse coincidono -- vale per il solutore, non per un giro composto a
+        # mano che cominci da un'altra mossa.
+        target_pick = local_pick[nxt_k] + (T if nxt_k == order[0] else 0)
         if target_pick < arrive_t - EPS:
             if incoerenze is None:
                 raise ValueError(
