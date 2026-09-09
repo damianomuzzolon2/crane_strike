@@ -2071,13 +2071,26 @@ def _assembla(
         riferimento = order[0]
         lp = {k: float(local_pick[k]) for k in moves}
         finish = {k: lp[k] + data.loaded_leg_seconds(k) for k in moves}
-        # "parte appena consegnato": la stessa convenzione che usa il modello
-        dep_hi = finish[max(moves)]
+        # I due istanti di confine si calcolano con la STESSA regola che usa il
+        # disegno (`_aspetta_dove_ha_consegnato`), altrimenti descriverebbero
+        # una traiettoria diversa da quella che si vede.
+        def quando(k1: int, k2: int) -> tuple[float, float]:
+            """(partenza, arrivo) del rientro a vuoto dalla mossa k1 alla k2."""
+            vuoto = data.empty_leg_seconds(k1 + 1, k2)
+            bersaglio = lp[k2] + (T if k2 == riferimento else 0.0)
+            if _aspetta_dove_ha_consegnato(z, k1, k2):
+                arrivo = max(bersaglio, finish[k1] + vuoto)
+                return arrivo - vuoto, arrivo
+            return finish[k1], finish[k1] + vuoto
+
         prev = order[-1]
-        arr_lo = finish[prev] + data.empty_leg_seconds(prev + 1, riferimento)
+        arr_lo = quando(prev, riferimento)[1]
+        alto = max(moves)
+        dep_hi = quando(alto, order[(order.index(alto) + 1) % len(order)])[0]
         segments_per_hoist.append(
             _build_zone_trajectory(
-                data, z, order, lp, dep_hi, arr_lo, T, incoerenze
+                data, z, order, lp, dep_hi, arr_lo, T, incoerenze,
+                attesa_alla_partenza=True,
             )
         )
         plans.append(HoistPlan(z, order, lp, finish, dep_hi, arr_lo))
@@ -2264,6 +2277,26 @@ def _segmenti_fasi(
     return segs
 
 
+def _aspetta_dove_ha_consegnato(zone: HoistZone, k: int, nxt_k: int) -> bool:
+    """Dove conviene che il carroponte passi il tempo che gli avanza fra due
+    mosse: dove ha appena consegnato (True) o dove deve andare (False).
+
+    La regola e' una sola: NON SOSTARE SU UNA VASCA DI CONFINE. Le stazioni
+    agli estremi della zona -- `zone.lo` e `zone.hi + 1` -- sono quelle che il
+    carroponte CONDIVIDE con il vicino: e' li' che uno consegna e l'altro
+    viene a prendere. Restarci fermi per un minuto quando si potrebbe stare
+    altrove e' il modo piu' facile di fabbricare una collisione che non c'era
+    bisogno di avere.
+
+    Quindi si aspetta all'estremo che NON e' un confine. Se lo sono tutti e
+    due -- succede a un carroponte con poche mosse, dove partenza e arrivo
+    sono entrambi condivisi -- non c'e' una scelta migliore dell'altra e si
+    tiene quella predefinita, partire subito: almeno il tratto in mezzo lo si
+    percorre presto e non si resta fermi in mezzo alla rotaia."""
+    confini = {zone.lo, zone.hi + 1}
+    return nxt_k in confini and (k + 1) not in confini
+
+
 def _build_zone_trajectory(
     data: ProblemData,
     zone: HoistZone,
@@ -2273,6 +2306,7 @@ def _build_zone_trajectory(
     arr_lo: float,
     T: float,
     incoerenze: Optional[list[str]] = None,
+    attesa_alla_partenza: bool = False,
 ) -> list[Segment]:
     """incoerenze: se e' una lista, i valori impossibili non sollevano piu'
     un'eccezione ma vengono descritti li' dentro e la traiettoria viene
@@ -2280,13 +2314,28 @@ def _build_zone_trajectory(
     liberamente e vuole VEDERE cosa non torna invece di essere bloccato.
 
     order: lista degli indici di mossa nell'ordine in cui il carroponte
-    le esegue entro un periodo (parte e torna a zone.lo).
+    le esegue entro un periodo, per fase di prelievo crescente.
     local_pick[k]: istante [s], in [0,T), di prelievo per la mossa k.
     dep_hi: istante [s] in cui il carroponte lascia il confine superiore
         della zona (dopo la mossa zone.hi) per il successivo spostamento a
         vuoto (puo' differire dal minimo stretto: e' una scelta del solver).
-    arr_lo: istante [s] in cui il carroponte torna pronto al confine
-        inferiore della zona (zone.lo), per il prelievo di QUESTO ciclo +T.
+    arr_lo: istante [s] in cui il carroponte torna pronto alla PRIMA mossa
+        del giro, per il prelievo di QUESTO ciclo +T.
+
+    attesa_alla_partenza: dove il carroponte passa il tempo che gli avanza
+        sul rientro a vuoto. False (predefinito) = parte appena consegnato e
+        aspetta a destinazione; True = aspetta dove ha consegnato e parte
+        all'ultimo momento utile. La traslazione e' a velocita' piena in
+        entrambi i casi -- cambia QUANDO avviene, non quanto dura.
+
+        NON e' una preferenza estetica. Il solutore deve tenere il valore
+        predefinito, perche' il vincolo di non collisione e' costruito su
+        quella convenzione (`solve`, blocco `arcs`) e protegge quella
+        traiettoria: disegnarne un'altra vorrebbe dire garantire una cosa e
+        mostrarne un'altra. Il disegno manuale invece non ha nessun vincolo
+        da rispettare -- e' il verificatore a controllare cio' che si vede --
+        e li' aspettare alla partenza evita di piazzare il carroponte in
+        anticipo sulla vasca dove deve andare, che spesso e' verso il vicino.
     """
     # Tolleranza numerica: il modello CP-SAT lavora con tempi arrotondati al
     # tick (risoluzione 1/time_scale secondi), mentre qui ricalcoliamo i
@@ -2335,8 +2384,26 @@ def _build_zone_trajectory(
         # due indici divergono.
         depart_known = k == zone.hi
         arrive_known = nxt_k == order[0]
+        # dove il carroponte passa il tempo che avanza sul rientro a vuoto:
+        # fermo dove ha appena consegnato, oppure fermo dove deve andare
+        target_pick = local_pick[nxt_k] + (T if nxt_k == order[0] else 0)
 
-        if depart_known and arrive_known:
+        if attesa_alla_partenza:
+            # Il disegno manuale non deve combaciare con nessun vincolo del
+            # modello, quindi qui si sceglie ARCO PER ARCO dove far passare il
+            # tempo morto, con la regola di `_aspetta_dove_ha_consegnato`. Gli
+            # istanti di confine dep_hi/arr_lo non si guardano: li decide la
+            # stessa regola, e chi li ha calcolati (`_assembla`) l'ha usata.
+            #
+            # La traslazione resta a VELOCITA' PIENA in tutti i casi: cambia
+            # quando avviene, non quanto dura.
+            if _aspetta_dove_ha_consegnato(zone, k, nxt_k):
+                arrive_t = max(target_pick, t1 + travel_e)
+                depart_t = arrive_t - travel_e
+            else:
+                depart_t = t1
+                arrive_t = depart_t + travel_e
+        elif depart_known and arrive_known:
             depart_t, arrive_t = dep_hi, arr_lo
         elif depart_known:
             depart_t = dep_hi
@@ -2383,12 +2450,13 @@ def _build_zone_trajectory(
             # spezza la traiettoria.
             segs.append(Segment("wait", depart_t, arrive_t, x1, x1, None))
 
-        # Il +T sta sull'arco che CHIUDE il periodo, cioe' quello che riporta
-        # alla prima mossa del giro: quel prelievo appartiene al ciclo dopo.
-        # Metterlo sull'arco che entra in zone.lo funziona solo finche' le due
-        # mosse coincidono -- vale per il solutore, non per un giro composto a
-        # mano che cominci da un'altra mossa.
-        target_pick = local_pick[nxt_k] + (T if nxt_k == order[0] else 0)
+        # `target_pick` e' calcolato sopra, prima di scegliere quando partire:
+        # con l'attesa alla partenza serve gia' li'. Il +T sta sull'arco che
+        # CHIUDE il periodo, cioe' quello che riporta alla prima mossa del
+        # giro -- quel prelievo appartiene al ciclo dopo. Metterlo sull'arco
+        # che entra in zone.lo funziona solo finche' le due mosse coincidono:
+        # vale per il solutore, non per un giro composto a mano che cominci
+        # da un'altra mossa.
         if target_pick < arrive_t - EPS:
             if incoerenze is None:
                 raise ValueError(

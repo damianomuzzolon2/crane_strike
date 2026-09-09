@@ -1496,6 +1496,35 @@ COSTRUZIONE = [
      "cominciare da un'altra, e li' i due indici divergono. Guardare zone.lo "
      "attaccava l'istante di richiusura del periodo alla mossa sbagliata."),
     ("p",
+     "Il primo ramo, `attesa_alla_partenza`, e' quello del DISEGNO MANUALE, e "
+     "non guarda ne' dep_hi ne' arr_lo: sceglie arco per arco dove far passare "
+     "il tempo morto, con la regola della funzione qui sotto. Puo' farlo "
+     "perche' li' non c'e' nessun vincolo del modello da rispettare -- e' il "
+     "verificatore a controllare cio' che si vede."),
+    ("c", "model._aspetta_dove_ha_consegnato"),
+    ("q",
+     "NON SOSTARE SU UNA VASCA DI CONFINE. Le stazioni agli estremi della zona "
+     "sono quelle CONDIVISE col vicino: uno consegna, l'altro viene a "
+     "prendere. Restarci fermi per un minuto quando si potrebbe stare altrove "
+     "e' il modo piu' facile di fabbricare una collisione che non c'era "
+     "bisogno di avere -- ed e' esattamente quello che il disegno manuale "
+     "faceva, parcheggiando il carroponte sulla vasca di destinazione appena "
+     "consegnato altrove. Su un ciclogramma vero questo bastava a far "
+     "segnalare una collisione su un giro perfettamente realizzabile."),
+    ("p",
+     "La traslazione resta a VELOCITA' PIENA in tutti i casi: cambia QUANDO "
+     "avviene, non quanto dura. E quando entrambi gli estremi sono confini -- "
+     "capita a un carroponte con poche mosse -- non c'e' una scelta migliore "
+     "dell'altra e si tiene quella predefinita, partire subito: almeno il "
+     "tratto in mezzo lo si percorre presto invece di restare fermi in mezzo "
+     "alla rotaia."),
+    ("q",
+     "IL SOLUTORE TIENE LA CONVENZIONE VECCHIA, E DEVE. Il vincolo di non "
+     "collisione e' costruito su di essa (in solve, blocco `arcs`) e protegge "
+     "quella traiettoria: disegnarne un'altra vorrebbe dire garantire una cosa "
+     "e mostrarne un'altra. E' il motivo per cui il comportamento e' un "
+     "parametro con valore predefinito, e non la nuova regola per tutti."),
+    ("p",
      "Il commento sull'ultimo caso dichiara che e' una convenzione per la "
      "VISUALIZZAZIONE: nessuna attesa gratuita prima della partenza, e "
      "l'eventuale margine mostrato come attesa DOPO l'arrivo. E' arbitraria, "
@@ -1503,7 +1532,7 @@ COSTRUZIONE = [
      "scelta."),
 
     ("h3", "Le due incoerenze possibili"),
-    ("c", "model._build_zone_trajectory", "        if depart_t < t1 - EPS:", "        target_pick = local_pick[nxt_k]"),
+    ("c", "model._build_zone_trajectory", "        if depart_t < t1 - EPS:", "        # `target_pick` e' calcolato sopra"),
     ("p",
      "La prima: il carroponte lascerebbe la stazione prima di aver finito la "
      "consegna. La struttura del controllo e' quella che si ripete anche piu' "
@@ -1528,7 +1557,7 @@ COSTRUZIONE = [
      "stazione un 'empty' di lunghezza nulla creerebbe un segmento degenere "
      "che, con lo scarto di arrotondamento sui tick, si ordina male rispetto "
      "ai vicini e SPEZZA la traiettoria."),
-    ("c", "model._build_zone_trajectory", "        target_pick = local_pick[nxt_k]", None),
+    ("c", "model._build_zone_trajectory", "        # `target_pick` e' calcolato sopra", None),
     ("p",
      "La seconda incoerenza: non si fa in tempo ad arrivare. Stessa struttura "
      "a tre rami, e il messaggio dice di quanti secondi si e' in ritardo -- che "

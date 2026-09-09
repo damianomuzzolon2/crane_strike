@@ -1007,6 +1007,98 @@ def test_giro_che_non_parte_dal_confine():
     )
 
 
+def test_dove_si_aspetta():
+    """Dove il carroponte passa il tempo che gli avanza fra due mosse.
+
+    Il tempo morto va speso da qualche parte, e la scelta non e' estetica: le
+    stazioni agli estremi della zona sono quelle CONDIVISE col vicino -- uno
+    consegna, l'altro viene a prendere -- e restarci fermi per un minuto e' il
+    modo piu' facile di fabbricare una collisione che non c'era bisogno di
+    avere.
+
+    Il difetto: il disegno manuale faceva partire il carroponte appena
+    consegnato e lo parcheggiava sulla vasca di destinazione. Su un ciclogramma
+    vero questo produceva un carro fermo sulla vasca di confine per un minuto,
+    addosso al vicino che ci lavorava -- e una collisione segnalata su un
+    ciclogramma che era perfettamente realizzabile."""
+    print("\n[19-quater] dove il carroponte aspetta fra due mosse")
+    from model import _aspetta_dove_ha_consegnato
+
+    z = HoistZone(3, 5)  # mosse 3..5 -> stazioni 3..6, confini 3 e 6
+    check(
+        _aspetta_dove_ha_consegnato(z, 4, 3),
+        "si aspetta dove si e' consegnato se si deve andare su un confine",
+    )
+    check(
+        not _aspetta_dove_ha_consegnato(z, 5, 4),
+        "e non ci si aspetta se e' il punto di consegna a essere un confine",
+    )
+    check(
+        not _aspetta_dove_ha_consegnato(z, 3, 5)
+        and not _aspetta_dove_ha_consegnato(z, 5, 3),
+        "se sono entrambi -- o nessuno dei due -- vale la regola predefinita",
+    )
+
+    data = make_data(
+        positions=[0, 3000, 6000, 9000, 12000, 15000, 18000],
+        dwells=[(0, 0)] + [(30, 400)] * 5 + [(0, 0)],
+        zones=[HoistZone(0, 2), HoistZone(3, 5)],
+        takt_max=300.0,
+    )
+    T = 250.0
+    sol = build_solution(
+        data, T, [{0: 0.0, 1: 40.0, 2: 80.0}, {3: 20.0, 4: 170.0, 5: 120.0}]
+    )
+    segs = sorted(sol.segments_per_hoist[1], key=lambda s: s.t_start)
+    check(
+        sol.plans[1].order == [3, 5, 4],
+        f"il giro tocca le tre mosse in ordine di prelievo ({sol.plans[1].order})",
+    )
+
+    # 1) si va verso il confine basso (stazione 3, a 9000): si aspetta DOVE si
+    #    e' consegnato, e si arriva esattamente sul prelievo del ciclo dopo
+    verso_confine = [s for s in segs if s.kind == "empty" and s.x_end == 9000][0]
+    attesa_prima = [
+        s
+        for s in segs
+        if s.kind == "wait" and abs(s.t_end - verso_confine.t_start) < 1e-9
+    ]
+    check(
+        bool(attesa_prima) and attesa_prima[0].x_start == 15000,
+        f"andando verso il confine si aspetta alla partenza, a "
+        f"{attesa_prima[0].x_start:.0f} mm" if attesa_prima else
+        "andando verso il confine NON si aspetta alla partenza",
+    )
+    check(
+        abs(verso_confine.t_end - (sol.plans[1].local_pick[3] + T)) < 1e-6,
+        f"e si arriva giusto in tempo per il prelievo "
+        f"({verso_confine.t_end:.1f}s contro {sol.plans[1].local_pick[3] + T:.1f}s)",
+    )
+
+    # 2) si viene DAL confine alto (stazione 6, a 18000): si parte subito,
+    #    senza restare fermi li' sopra
+    dal_confine = [s for s in segs if s.kind == "empty" and s.x_start == 18000][0]
+    # la consegna finisce quando il trasporto arriva piu' il rilascio, che su
+    # questa linea di prova dura zero (nessuna corsa verticale) e quindi non
+    # produce nemmeno un segmento
+    trasporto = [s for s in segs if s.kind == "loaded" and s.x_end == 18000][0]
+    fine_consegna = trasporto.t_end + data.release_time_at(6)
+    check(
+        abs(dal_confine.t_start - fine_consegna) < 1e-6,
+        f"venendo dal confine si riparte appena consegnato, senza sostarci "
+        f"({dal_confine.t_start - fine_consegna:+.3f}s)",
+    )
+    check(
+        not [
+            s
+            for s in segs
+            if s.kind == "wait" and s.x_start == 18000 and s.t_end > s.t_start + 1e-9
+        ],
+        "e infatti sulla vasca di confine non c'e' nessuna attesa",
+    )
+    check(verify_solution(data, sol).ok, "la soluzione resta valida")
+
+
 def test_senza_valori_risolti():
     print("\n[20] degrado gentile senza solution.plans")
     data, sol = reference_case()
@@ -1394,6 +1486,7 @@ def main():
     test_input_malformato()
     test_due_posti_insieme()
     test_giro_che_non_parte_dal_confine()
+    test_dove_si_aspetta()
     test_senza_valori_risolti()
     print("\n" + "=" * 72)
     print(f"RISULTATO: {_n_pass} ok, {_n_fail} falliti")

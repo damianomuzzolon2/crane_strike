@@ -197,6 +197,29 @@ Due cose che vale la pena sapere:
 Se hai dichiarato tu le zone nel foglio *Zone*, non c'e' niente da provare: il
 calcolo e' uno solo e la barra si limita a oscillare.
 
+### Dove il carroponte aspetta
+
+Fra una mossa e l'altra al carroponte avanza quasi sempre del tempo. La
+traslazione la fa **sempre a velocita' piena** — quel tempo lo passa fermo — ma
+*dove* lo passa non e' indifferente.
+
+Componendo a mano, il programma lo fa aspettare **all'estremo che non e' una
+vasca di confine**:
+
+- deve andare su una vasca condivisa col vicino? Aspetta dove ha appena
+  consegnato e parte all'ultimo momento utile.
+- ha appena consegnato *su* una vasca condivisa? Riparte subito, senza
+  sostarci.
+
+Le vasche di confine sono quelle dove uno consegna e l'altro viene a prendere:
+restarci fermi per un minuto quando si potrebbe stare altrove e' il modo piu'
+facile di fabbricare una collisione che non c'era bisogno di avere.
+
+Il calcolo automatico invece tiene la convenzione opposta — parte appena
+consegnato — e non e' una svista: il vincolo di non collisione del solutore e'
+costruito su quella, e protegge quella traiettoria. Disegnarne un'altra
+vorrebbe dire garantire una cosa e mostrarne un'altra.
+
 ### Se non trova niente
 
 Il *Riepilogo* non dice piu' soltanto "nessuna soluzione": dice **cosa e' stato
@@ -1621,7 +1644,7 @@ python test/esempio.py           # risoluzione reale + verifica + grafico
 ```
 
 Ognuno stampa cosa ha provato e finisce con `RISULTATO: n ok, m falliti`.
-Nessuna dipendenza da pytest. Stato attuale: **110, 94, 78, 49 e 112
+Nessuna dipendenza da pytest. Stato attuale: **119, 94, 78, 49 e 112
 asserzioni, zero fallimenti**.
 
 **La risoluzione CP-SAT e' eseguita e verificata end-to-end.** Sull'esempio
