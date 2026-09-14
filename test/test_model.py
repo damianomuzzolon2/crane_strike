@@ -790,8 +790,8 @@ def test_ricostruzione_fedele():
         if r is None:
             check(False, f"spaziatura {spacing}: {sol.status}, niente da ricostruire")
             continue
-        T, fasi, giri = estrai_gradi_di_liberta(data, sol)
-        rifatta = build_solution(data, T, fasi, extra_periods=giri)
+        T, fasi, giri, soste = estrai_gradi_di_liberta(data, sol)
+        rifatta = build_solution(data, T, fasi, extra_periods=giri, attese=soste)
         r2 = verify_solution(data, rifatta)
 
         def permanenze(s):
@@ -820,6 +820,112 @@ def test_ricostruzione_fedele():
         )
 
 
+def test_dove_sosta_il_carro():
+    print()
+    print("[9-bis] dove il carroponte passa il tempo morto e' un dato,"
+          " non una regola")
+    # A parita' di takt time, permanenze e assegnazione il carroponte puo'
+    # ripartire subito e aspettare a destinazione, oppure restare fermo dove
+    # ha consegnato. Sono traiettorie DIVERSE, con collisioni diverse.
+    # Finche' la scelta la faceva una convenzione scritta nel codice non
+    # c'era niente da salvare; da quando la fa il solutore, ricostruire senza
+    # quel valore ha prodotto -- su 50 soluzioni verificate pulite -- 14
+    # ciclogrammi che collidevano, uno con i due carri sovrapposti.
+    data = linea(
+        4, 2500, [HoistZone(0, 1), HoistZone(2, 3)],
+        # Il takt time minimo e' tenuto ALTO di proposito: il solutore
+        # minimizza T, e con un takt stretto spreme via ogni attesa -- non
+        # resterebbe tempo morto da collocare, e la prova non proverebbe
+        # niente. Qui invece i carri hanno del tempo che avanza, ed e'
+        # esattamente la situazione in cui scegliere dove passarlo conta.
+        dwell=(30, 400), capacity=3, takt_min=150.0, takt_max=200.0,
+        lift_height=600, drain_time=3.0,
+        kin_lift_empty=Kinematics(v_max=500, a_max=800),
+        kin_lift_loaded=Kinematics(v_max=300, a_max=500),
+        engage_time=2.0, disengage_time=1.0,
+    )
+    sol, r = risolvi_e_verifica(data, "linea a due carroponti")
+    if r is None:
+        check(False, sol.status + ": niente da ricostruire")
+        return
+    T, fasi, giri, soste = estrai_gradi_di_liberta(data, sol)
+    check(
+        set(soste) == set(range(data.n_moves)),
+        f"ogni mossa porta con se' la sua sosta ({len(soste)} su {data.n_moves})",
+    )
+
+    def dopo_la_consegna(soluzione, h, k):
+        """(istante di partenza, margine disponibile) per il rientro a vuoto
+        che segue la mossa k, letti dai segmenti DISEGNATI: quello che si
+        vede, non quello che si spera.
+
+        La partenza e' l'inizio del tratto a vuoto. Dove il carroponte abbia
+        aspettato si vede SOLO se quel tratto esiste: quando consegna e
+        riprende alla stessa vasca non si sposta, e le due attese -- prima e
+        dopo -- sono lo stesso posto. Quei casi si riconoscono da margine
+        disponibile senza tratto a vuoto, e non servono a questa prova."""
+        segs = sorted(soluzione.segments_per_hoist[h], key=lambda sg: sg.t_start)
+        i_rel = max(
+            j for j, sg in enumerate(segs)
+            if sg.kind == "release" and sg.move == k
+        )
+        parte, margine = None, 0.0
+        for sg in segs[i_rel + 1:]:
+            if sg.kind == "pick":
+                break
+            if sg.kind == "wait":
+                margine += sg.t_end - sg.t_start
+            elif sg.kind == "empty" and parte is None:
+                parte = sg.t_start
+        return parte, margine
+
+    # La mossa su cui provare non si sceglie a priori: si prende quella che
+    # ha davvero del tempo morto da collocare. Su un'altra il controllo
+    # direbbe "nessuna differenza" solo perche' non c'era niente da spostare.
+    zero = {j: 0.0 for j in soste}
+    disegno = build_solution(data, T, fasi, extra_periods=giri, attese=zero)
+    margini = {
+        (h, k): dopo_la_consegna(disegno, h, k)
+        for h, p in enumerate(sol.plans)
+        for k in p.order
+    }
+    utili = {hk: m for hk, (parte, m) in margini.items() if parte is not None}
+    check(bool(utili), "c'e' almeno un rientro a vuoto su cui misurare")
+    if not utili:
+        return
+    (h, k), margine = max(utili.items(), key=lambda v: v[1])
+    base = margini[(h, k)][0]
+    check(
+        margine > 1.0,
+        f"il carroponte {h + 1} dopo la mossa {k} ha {margine:.1f} s di "
+        f"tempo morto da collocare",
+    )
+
+    # Una sosta imposta si deve vedere nel disegno, al centesimo di secondo.
+    for frazione in (0.25, 0.75):
+        quanto = round(margine * frazione, 3)
+        rifatta = build_solution(
+            data, T, fasi, extra_periods=giri,
+            attese={**zero, k: quanto},
+        )
+        ritardo = dopo_la_consegna(rifatta, h, k)[0] - base
+        check(
+            abs(ritardo - quanto) < 1e-6,
+            f"sosta di {quanto:.1f} s dopo la mossa {k}: il carro parte "
+            f"{ritardo:.2f} s piu' tardi",
+        )
+
+    # E la soluzione del solutore si ricostruisce identica con le sue soste.
+    con = verify_solution(
+        data, build_solution(data, T, fasi, extra_periods=giri, attese=soste)
+    )
+    check(
+        abs(con.min_separation - r.min_separation) < 1e-6 and con.ok == r.ok,
+        f"con le soste salvate la separazione torna identica "
+        f"({con.min_separation:.3f})",
+    )
+
+
 def main():
     print("=" * 72)
     print("TEST END-TO-END DEL MODELLO (richiede OR-Tools)")
@@ -841,6 +947,7 @@ def main():
     test_diagnosi()
     test_vasca_ripetuta()
     test_ricostruzione_fedele()
+    test_dove_sosta_il_carro()
     print("\n" + "=" * 72)
     print(f"RISULTATO: {_n_pass} ok, {_n_fail} falliti  ({time.perf_counter() - t0:.0f}s)")
     print("=" * 72)

@@ -163,6 +163,11 @@ def main(argv=None) -> int:
                     for h, z in enumerate(data_finale.zones)
                     for k in range(z.lo, z.hi + 1)
                 },
+                # dove il solutore ha fatto sostare i carri: senza, il file
+                # riaperto sarebbe un ciclogramma diverso da questo
+                "attese": {
+                    k: v for p in solution.plans for k, v in p.attese.items()
+                },
             },
         )
         print(f"Risultati salvati in {destinazione}")

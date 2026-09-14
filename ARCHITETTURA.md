@@ -6,7 +6,7 @@ invarianti regge, e dove sono le trappole — comprese quelle in cui siamo gia'
 caduti, che sono la parte piu' utile.
 
 Stato al momento della scrittura: 16 file Python, 15.223 righe, cinque suite di
-test per **458 asserzioni** complessive.
+test per **467 asserzioni** complessive.
 
 ---
 
@@ -422,17 +422,27 @@ traslazione — cioe' con una zona di cambio quota — le soste e le traslazioni
 escono separate, e le seconde hanno `kind == "quota"`. Un tratto unico
 nasconderebbe un movimento vero, e chi campiona le posizioni lo crederebbe fermo.
 
-### 6.1 I tre gradi di liberta', e la trappola del modulo
+### 6.1 I gradi di liberta', e la trappola del modulo
 
-Un ciclogramma ha **tre soli** gradi di liberta' reali: takt time, tempo in
-vasca di ogni tappa, assegnazione delle mosse. Tutto il resto e' conseguenza.
+Un ciclogramma ha **quattro** gradi di liberta' reali: takt time, tempo in
+vasca di ogni tappa, assegnazione delle mosse, e la **sosta** di ogni
+carroponte dove ha consegnato, prima del rientro a vuoto. Tutto il resto e'
+conseguenza.
+
+La sosta e' arrivata per ultima e per necessita': `dep_hi` era gia' una
+variabile libera del solutore — il carroponte poteva sostare sul confine alto —
+ma quel valore non veniva salvato, e la ricostruzione lo rifaceva con una
+convenzione. Su 50 soluzioni verificate pulite, riaperte come fa il programma,
+**14 collidevano**, una con i due carri sovrapposti (0 mm invece di 1200), dopo
+una sosta di 374 s che il file non registrava. Salvando le soste: 0 su 54.
+
 `build_solution` accetta due parametrizzazioni equivalenti:
 
 - `local_pick` (le fasi) → la catena `actual_time` viene dedotta;
 - `actual_time` (i tempi assoluti) → le fasi ne discendono.
 
-E' questo che rende possibile salvare un ciclogramma in tre colonne di Excel e
-ricostruirlo identico. **Attenzione a `_fase_nel_periodo`**:
+E' questo che rende possibile salvare un ciclogramma in poche colonne di Excel
+e ricostruirlo identico. **Attenzione a `_fase_nel_periodo`**:
 
 ```python
 resto = istante % T
@@ -524,7 +534,8 @@ Due punti che si sono gia' rivelati fragili:
 La classe `Applicazione(tk.Tk)` e' tutta la finestra. Lo stato utile:
 
 ```python
-T_corrente, permanenze, assegnazione, n_carroponti   # i tre gradi di liberta'
+T_corrente, permanenze, assegnazione, n_carroponti   # i gradi di liberta'
+attese              # dove ogni carro sosta; None = decide la regola
 soluzione, dati, report, incoerenze
 vista               # "ciclogramma" | "pettine"
 modifica_aperta     # se la scheda Ciclogramma e' aperta
@@ -730,7 +741,7 @@ lascia il pulsante vuoto.
 
 ---
 
-## 11. I test — 458 asserzioni, cinque suite
+## 11. I test — 467 asserzioni, cinque suite
 
 Nessun pytest: ogni file si lancia da solo, stampa cosa ha provato e restituisce
 un codice d'uscita.
@@ -738,9 +749,9 @@ un codice d'uscita.
 | file | asserzioni | richiede | domanda a cui risponde |
 | --- | ---: | --- | --- |
 | `test/test_verify.py` | 119 | — | il verificatore trova davvero quello che deve? |
-| `test/test_excel_io.py` | 94 | — | un file compilato male viene respinto con un messaggio utile? |
+| `test/test_excel_io.py` | 97 | — | un file compilato male viene respinto con un messaggio utile? |
 | `test/test_simulazione.py` | 78 | — | la simulazione mostra il ciclogramma che c'e'? |
-| `test/test_model.py` | 55 | OR-Tools | il modello produce soluzioni fisicamente valide? |
+| `test/test_model.py` | 61 | OR-Tools | il modello produce soluzioni fisicamente valide? |
 | `test/test_interfaccia.py` | 112 | OR-Tools + grafica | l'interfaccia si comporta come deve? |
 
 > `test_model.py` risolve davvero, con limiti di tempo dell'ordine del minuto.

@@ -1183,6 +1183,11 @@ class HoistPlan:
     finish: dict[int, float]  # [s] istante di consegna
     dep_hi: float  # [s] partenza dal confine superiore
     arr_lo: float  # [s] arrivo al confine inferiore
+    # [s] quanto il carroponte resta fermo DOVE HA CONSEGNATO la mossa k,
+    # prima di cominciare il viaggio a vuoto verso la mossa dopo. E' il
+    # QUARTO grado di liberta' del ciclogramma: non discende dalle fasi, e
+    # se non lo si porta dietro la traiettoria non si ricostruisce uguale.
+    attese: dict[int, float] = field(default_factory=dict)
 
 
 @dataclass
@@ -1479,6 +1484,9 @@ def solve(
                     # con una sola mossa il giro si richiude per forza su di
                     # lei: non c'e' niente da scegliere
                     inizio=None,
+                    # l'unico rientro parte dal confine alto, e li' la
+                    # partenza libera e' gia' dep_hi
+                    partenze={},
                     # unico "arco": andata (gia' nella mossa) + rientro a vuoto
                     arcs=[
                         dict(
@@ -1589,6 +1597,7 @@ def solve(
         # a quelle di _build_zone_trajectory, altrimenti il vincolo
         # proteggerebbe una traiettoria diversa da quella poi disegnata.
         arcs = []
+        partenze = {}
         for (k1, k2), lit in arc_lits.items():
             t_emp = travel_empty_ticks(k1 + 1, k2)
             if k1 == hi_h:
@@ -1596,7 +1605,21 @@ def solve(
             elif k2 == lo_h:
                 depart = arr_lo - t_emp
             else:
-                depart = finish[k1]  # convenzione: riparte appena consegnato
+                # DOVE il carroponte passa il tempo che gli avanza lo sceglie
+                # il solutore, non una convenzione: `depart` e' libera fra la
+                # consegna e l'ultimo istante utile per arrivare in tempo.
+                # Partire subito significa aspettare a destinazione, partire
+                # tardi significa aspettare dove si e' consegnato, e ogni via
+                # di mezzo e' ammessa. Sui due archi di confine la stessa
+                # liberta' ce l'hanno gia' dep_hi e arr_lo.
+                #
+                # Questa scelta NON discende dalle fasi: va salvata insieme
+                # al ciclogramma, altrimenti riaprendo il file si
+                # ricostruirebbe una traiettoria diversa da quella verificata.
+                depart = model.NewIntVar(0, DEP_MAX, f"part_{h}_{k1}_{k2}")
+                model.Add(depart >= finish[k1]).OnlyEnforceIf(lit)
+                model.Add(depart + t_emp <= bersaglio[k2]).OnlyEnforceIf(lit)
+                partenze[(k1, k2)] = depart
             arrive = arr_lo if k2 == lo_h else depart + t_emp
             # L'attesa DOPO l'arrivo finisce al prelievo successivo, che sta
             # nel ciclo dopo solo se e' qui che il periodo si richiude: e'
@@ -1625,6 +1648,7 @@ def solve(
                 arc_lits=arc_lits,
                 inizio=inizio,
                 arcs=arcs,
+                partenze=partenze,
             )
         )
 
@@ -1956,8 +1980,26 @@ def solve(
                     break
                 order.append(cur)
 
+        # Quanto il carroponte e' rimasto fermo dove ha consegnato, arco per
+        # arco del giro scelto. E' l'unica parte della traiettoria che non
+        # discende dalle fasi: si legge qui e si porta dietro nel piano.
+        attese = {}
+        for i, k1 in enumerate(order):
+            k2 = order[(i + 1) % len(order)]
+            t_emp = data.empty_leg_seconds(k1 + 1, k2)
+            if k1 == z.hi:
+                partenza_val = dep_hi_val
+            elif k2 == z.lo:
+                partenza_val = arr_lo_val - t_emp
+            else:
+                partenza_val = data.to_seconds(
+                    solver.Value(zd["partenze"][(k1, k2)])
+                )
+            attese[k1] = max(0.0, partenza_val - fin_val[k1])
+
         segs = _build_zone_trajectory(
-            data, z, order, lp_val, dep_hi_val, arr_lo_val, T_seconds
+            data, z, order, lp_val, dep_hi_val, arr_lo_val, T_seconds,
+            attese=attese,
         )
         segments_per_hoist.append(segs)
         plans.append(
@@ -1968,6 +2010,7 @@ def solve(
                 finish=fin_val,
                 dep_hi=dep_hi_val,
                 arr_lo=arr_lo_val,
+                attese=attese,
             )
         )
 
@@ -2003,6 +2046,7 @@ def build_solution(
     actual_time: Optional[list[float]] = None,
     tollerante: bool = False,
     mosse_attive: Optional[set] = None,
+    attese: Optional[dict[int, float]] = None,
 ) -> Solution:
     """Costruisce una Solution completa dai soli gradi di liberta' di un
     ciclogramma: il takt time e l'istante di prelievo (fase, in [0,T)) di
@@ -2019,8 +2063,12 @@ def build_solution(
     - il pezzo viene prelevato al primo istante compatibile con la fase
       scelta che rispetti la permanenza minima; `extra_periods[k]` aggiunge
       altri periodi interi, allungando la permanenza nella vasca k;
-    - dal confine alto si riparte appena consegnato, e l'eventuale margine
-      diventa attesa all'arrivo.
+    - dove il carroponte passa il tempo morto del rientro a vuoto lo dice
+      `attese[k]` (secondi fermo dove ha consegnato la mossa k). E' il quarto
+      grado di liberta': non discende dalle fasi, quindi o arriva da fuori --
+      dal solutore, o dal file in cui era stato salvato -- oppure si ripiega
+      sulla regola predefinita, che e' aspettare dove si e' consegnato tranne
+      che sulle vasche di confine.
 
     Solleva ValueError se la disposizione non e' realizzabile (per esempio se
     un carroponte dovrebbe essere in due posti insieme).
@@ -2052,7 +2100,9 @@ def build_solution(
             else sorted(mosse_attive)
         )
         local_pick = {k: _fase_nel_periodo(actual_time[k], T, data) for k in chiavi}
-        return _assembla(data, T, local_pick, actual_time, status, incoerenze)
+        return _assembla(
+            data, T, local_pick, actual_time, status, incoerenze, attese
+        )
 
     if local_pick is None:
         raise ValueError("servono le fasi di prelievo oppure i tempi assoluti")
@@ -2083,7 +2133,9 @@ def build_solution(
         n_giri = max(0, math.ceil(giri - data.eps_seconds / T))
         actual_time[k] += (n_giri + extra_periods.get(k, 0)) * T
 
-    return _assembla(data, T, local_pick, actual_time, status, incoerenze)
+    return _assembla(
+        data, T, local_pick, actual_time, status, incoerenze, attese
+    )
 
 
 def _fase_nel_periodo(istante: float, T: float, data: ProblemData) -> float:
@@ -2112,6 +2164,7 @@ def _assembla(
     actual_time: list[float],
     status: str,
     incoerenze: Optional[list[str]],
+    attese: Optional[dict[int, float]] = None,
 ) -> Solution:
     """Da fasi e tempi assoluti alle traiettorie di ciascun carroponte."""
     segments_per_hoist = []
@@ -2144,6 +2197,12 @@ def _assembla(
         def quando(k1: int, k2: int) -> tuple[float, float]:
             """(partenza, arrivo) del rientro a vuoto dalla mossa k1 alla k2."""
             vuoto = data.empty_leg_seconds(k1 + 1, k2)
+            if attese is not None:
+                # c'e' una scelta gia' fatta -- dal solutore, o salvata nel
+                # file -- e si usa quella: e' l'unico modo perche' il
+                # ciclogramma riaperto sia quello che era stato verificato
+                partenza = finish[k1] + attese.get(k1, 0.0)
+                return partenza, partenza + vuoto
             bersaglio = lp[k2] + (T if k2 == riferimento else 0.0)
             if _aspetta_dove_ha_consegnato(z, k1, k2):
                 arrivo = max(bersaglio, finish[k1] + vuoto)
@@ -2160,13 +2219,20 @@ def _assembla(
         alto = z.hi if z.hi in lp else max(moves)
         arr_lo = quando(prima[basso], basso)[1]
         dep_hi = quando(alto, dopo[alto])[0]
+        # Le attese di QUESTA zona, o dal valore ricevuto o dalla regola
+        # predefinita. Nel piano ci finiscono comunque, cosi' chi salva il
+        # ciclogramma ha sempre il quarto grado di liberta' da scrivere.
+        att = {
+            k: quando(k, dopo[k])[0] - finish[k] for k in moves
+        }
         segments_per_hoist.append(
             _build_zone_trajectory(
                 data, z, order, lp, dep_hi, arr_lo, T, incoerenze,
-                attesa_alla_partenza=True,
+                attesa_alla_partenza=attese is None,
+                attese=None if attese is None else att,
             )
         )
-        plans.append(HoistPlan(z, order, lp, finish, dep_hi, arr_lo))
+        plans.append(HoistPlan(z, order, lp, finish, dep_hi, arr_lo, att))
 
     raw = {"origine": "costruita da build_solution"}
     if incoerenze is not None:
@@ -2183,15 +2249,24 @@ def _assembla(
 
 def estrai_gradi_di_liberta(
     data: ProblemData, solution: Solution
-) -> tuple[float, dict[int, float], dict[int, int]]:
-    """Estrae da una soluzione i tre soli valori che servono a ricostruirla:
-    takt time, fase di prelievo di ogni mossa, e periodi in piu' rispetto al
-    minimo trascorsi in ciascuna vasca.
+) -> tuple[float, dict[int, float], dict[int, int], dict[int, float]]:
+    """Estrae da una soluzione i soli valori che servono a ricostruirla: takt
+    time, fase di prelievo di ogni mossa, periodi in piu' rispetto al minimo
+    trascorsi in ciascuna vasca, e quanto ogni carroponte resta fermo dove ha
+    consegnato.
 
-    I periodi in piu' NON sono deducibili dalle fasi: il solutore puo'
-    benissimo scegliere di lasciare il pezzo in vasca un takt in piu' del
-    necessario, e la fase resta la stessa. Senza questo terzo valore, la
+    Nessuno dei due ultimi e' deducibile dalle fasi, ed e' proprio per questo
+    che stanno qui.
+
+    I periodi in piu': il solutore puo' benissimo lasciare il pezzo in vasca un
+    takt in piu' del necessario, e la fase resta la stessa. Senza, la
     ricostruzione tornerebbe al minimo e cambierebbe le permanenze.
+
+    Le soste: a parita' di tutto il resto il carroponte puo' ripartire subito e
+    aspettare a destinazione, oppure restare fermo dove ha consegnato e partire
+    all'ultimo momento. Sono traiettorie diverse, con collisioni diverse.
+    Ricostruire senza questo valore ha prodotto, su 50 soluzioni verificate
+    pulite, 14 ciclogrammi che collidevano -- uno con i carri sovrapposti.
 
     Il risultato e' pensato per essere passato a build_solution: e' lo stato
     modificabile di un ciclogramma.
@@ -2215,7 +2290,8 @@ def estrai_gradi_di_liberta(
         n_reale = round((at[k] - base) / T)
         if n_reale > n_min:
             extra[k] = n_reale - n_min
-    return T, local_pick, extra
+    attese = {k: v for p in solution.plans for k, v in p.attese.items()}
+    return T, local_pick, extra, attese
 
 
 def proposta_semplice(
@@ -2380,6 +2456,7 @@ def _build_zone_trajectory(
     T: float,
     incoerenze: Optional[list[str]] = None,
     attesa_alla_partenza: bool = False,
+    attese: Optional[dict[int, float]] = None,
 ) -> list[Segment]:
     """incoerenze: se e' una lista, i valori impossibili non sollevano piu'
     un'eccezione ma vengono descritti li' dentro e la traiettoria viene
@@ -2395,11 +2472,19 @@ def _build_zone_trajectory(
     arr_lo: istante [s] in cui il carroponte torna pronto alla PRIMA mossa
         del giro, per il prelievo di QUESTO ciclo +T.
 
-    attesa_alla_partenza: dove il carroponte passa il tempo che gli avanza
-        sul rientro a vuoto. False (predefinito) = parte appena consegnato e
-        aspetta a destinazione; True = aspetta dove ha consegnato e parte
-        all'ultimo momento utile. La traslazione e' a velocita' piena in
-        entrambi i casi -- cambia QUANDO avviene, non quanto dura.
+    attese[k]: quanto il carroponte resta fermo dove ha consegnato la mossa
+        k, prima di partire a vuoto. Quando c'e', decide da sola dove passa
+        il tempo morto e le due alternative qui sotto non si guardano: e' il
+        valore SCELTO dal solutore, e ricostruire la traiettoria con una
+        convenzione al posto suo darebbe un disegno diverso da quello
+        verificato. E' anche il motivo per cui va salvato nel file.
+
+    attesa_alla_partenza: usato solo quando `attese` non c'e'. Dove il
+        carroponte passa il tempo che gli avanza sul rientro a vuoto. False
+        (predefinito) = parte appena consegnato e aspetta a destinazione;
+        True = aspetta dove ha consegnato e parte all'ultimo momento utile.
+        La traslazione e' a velocita' piena in entrambi i casi -- cambia
+        QUANDO avviene, non quanto dura.
 
         NON e' una preferenza estetica. Il solutore deve tenere il valore
         predefinito, perche' il vincolo di non collisione e' costruito su
@@ -2462,7 +2547,14 @@ def _build_zone_trajectory(
         # fermo dove ha appena consegnato, oppure fermo dove deve andare
         target_pick = local_pick[nxt_k] + (T if nxt_k == order[0] else 0)
 
-        if attesa_alla_partenza:
+        if attese is not None:
+            # la scelta del solutore, letta e basta. Vale anche sugli archi di
+            # confine: dep_hi e arr_lo dicono la stessa cosa, ma non finiscono
+            # nel file salvato, e la traiettoria deve venire uguale anche
+            # quando si ricostruisce da quello che il file porta davvero.
+            depart_t = t1 + attese.get(k, 0.0)
+            arrive_t = depart_t + travel_e
+        elif attesa_alla_partenza:
             # Il disegno manuale non deve combaciare con nessun vincolo del
             # modello, quindi qui si sceglie ARCO PER ARCO dove far passare il
             # tempo morto, con la regola di `_aspetta_dove_ha_consegnato`. Gli

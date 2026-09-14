@@ -554,6 +554,10 @@ class Applicazione(tk.Tk):
         self.T_corrente = None
         self.permanenze = {}
         self.assegnazione = {}
+        # Dove ogni carroponte passa il tempo morto del rientro a vuoto,
+        # quando la scelta e' gia' stata fatta da qualcuno (il solutore, o il
+        # file da cui si riapre). None = decide la regola predefinita.
+        self.attese = None
         self.incoerenze = []
         self.origine = ""
         self.durata_calcolo = None
@@ -606,6 +610,7 @@ class Applicazione(tk.Tk):
             for k in range(1, d.n_moves)
         }
         self.assegnazione = dict(c["assegnazione"])
+        self.attese = dict(c["attese"]) if c.get("attese") else None
         self.carroponte_attivo = 0
         self.origine = "riletto dal file, gia' composto"
         self.modificato = False
@@ -732,6 +737,7 @@ class Applicazione(tk.Tk):
                     "n_carroponti": self.n_carroponti,
                     "permanenze": self.permanenze,
                     "assegnazione": self.assegnazione,
+                    "attese": self.attese,
                 },
             )
             png = os.path.splitext(percorso)[0] + ".png"
@@ -1110,6 +1116,11 @@ class Applicazione(tk.Tk):
         self.assegnazione = {
             k: h for h, z in enumerate(d.zones) for k in range(z.lo, z.hi + 1)
         }
+        # Dove il solutore ha deciso di far sostare ciascun carroponte. Senza
+        # questo la ricomposizione userebbe la regola predefinita e
+        # disegnerebbe una traiettoria DIVERSA da quella appena verificata --
+        # con collisioni diverse.
+        self.attese = {k: v for p in sol.plans for k, v in p.attese.items()}
         self.n_carroponti = len(d.zones)
         self.carroponte_attivo = 0
         self._annulla.clear()
@@ -1211,12 +1222,18 @@ class Applicazione(tk.Tk):
         if prima is not None:
             self._annulla.append(prima)
             self.modificato = True
+            # Le soste erano state scelte per il ciclogramma di PRIMA: con le
+            # fasi o l'assegnazione cambiate non descrivono piu' niente di
+            # sensato (si aspetterebbe piu' a lungo del tempo disponibile).
+            # Si torna alla regola predefinita, che si adatta da sola.
+            self.attese = None
         self.soluzione, self.dati, self.incoerenze = manuale.componi(
             self.config_linea.data,
             self.T_corrente,
             self.permanenze,
             self.assegnazione,
             self.n_carroponti,
+            attese=self.attese,
         )
         if self.verifica_viva:
             self.report = verify_solution(self.dati, self.soluzione)

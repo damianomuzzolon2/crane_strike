@@ -730,11 +730,25 @@ Riaprendolo il ciclogramma e' gia' li', **anche se lasciato a meta'**: i
 trasporti ancora da assegnare restano tali, e si riprende da quel punto. La
 scheda resta chiusa come sempre, e si preme `Modifica` per intervenire.
 
-Nel foglio ci sono i **tre gradi di liberta'** e nient'altro: takt time, tempo
-in vasca di ogni tappa, e quale carroponte fa ogni trasporto (piu' quanti
-carroponti hai a disposizione). Le traiettorie e gli istanti di prelievo non ci
+Nel foglio ci sono i **gradi di liberta'** e nient'altro: takt time, tempo in
+vasca di ogni tappa, quale carroponte fa ogni trasporto (piu' quanti carroponti
+hai a disposizione), e **quanto ogni carroponte resta fermo dove ha consegnato**
+prima di ripartire a vuoto. Le traiettorie e gli istanti di prelievo non ci
 sono, perche' sono conseguenze: riscriverli vorrebbe dire poterli rileggere in
 contrasto con i valori da cui derivano. Si ricostruiscono, e tornano identici.
+
+L'ultima colonna (`attesa_dopo_consegna_s`) e' l'eccezione che conferma la
+regola, ed e' arrivata dopo. Dove il carroponte passa il tempo morto **non** e'
+una conseguenza delle fasi: a parita' di tutto il resto puo' ripartire subito e
+aspettare a destinazione, oppure restare fermo e partire all'ultimo momento.
+Sono traiettorie diverse, con collisioni diverse. Finche' la scelta la faceva
+una convenzione scritta nel codice non c'era niente da salvare; da quando la fa
+il solutore, non salvarla significava riaprire il file e trovarsi un ciclogramma
+diverso da quello verificato — misurato su 50 soluzioni pulite: 14 collidevano
+dopo la riapertura, una con i due carri sovrapposti. La colonna e' facoltativa:
+se manca (file vecchi, ciclogrammi composti a mano) decide la regola
+predefinita, che e' aspettare dove si e' consegnato tranne che sulle vasche di
+confine.
 
 Il file di partenza **non viene toccato**: quello descrive l'impianto, e a
 riscriverlo si rischierebbe di perdere quello che openpyxl non sa riprodurre —
@@ -1656,7 +1670,7 @@ python test/esempio.py           # risoluzione reale + verifica + grafico
 ```
 
 Ognuno stampa cosa ha provato e finisce con `RISULTATO: n ok, m falliti`.
-Nessuna dipendenza da pytest. Stato attuale: **119, 94, 78, 55 e 112
+Nessuna dipendenza da pytest. Stato attuale: **119, 97, 78, 61 e 112
 asserzioni, zero fallimenti**.
 
 **La risoluzione CP-SAT e' eseguita e verificata end-to-end.** Sull'esempio
@@ -1670,7 +1684,7 @@ I cinque file rispondono a domande diverse e si completano:
   trovare?* Uno solo dei casi e' corretto, gli altri sono rotti di proposito
   (collisioni, permanenze, periodicita', fasi verticali, capienza, geometrie
   patologiche). Le soluzioni sono costruite a mano, quindi non serve OR-Tools.
-- `test_model.py` — 16 casi. *Il modello produce soluzioni fisicamente valide?*
+- `test_model.py` — 17 casi. *Il modello produce soluzioni fisicamente valide?*
   Risolve davvero e passa ogni risultato al verificatore.
 - `test_excel_io.py` — 24 casi. *Un file compilato male viene respinto con un
   messaggio utile, e i risultati escono corretti?* In ingresso: valori mancanti

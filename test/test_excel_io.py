@@ -147,6 +147,10 @@ def test_foglio_ciclogramma():
             "n_carroponti": 3,
             "permanenze": {1: 70.0, 2: 40.0, 3: 215.0, 4: 20.0, 5: 30.0},
             "assegnazione": {0: 0, 1: 0, 2: 0, 3: 1, 5: 1},
+            # chi non dichiara dove far sostare i carri se lo ritrova a None,
+            # cioe' "decidi tu": e' come si comportano i file scritti prima
+            # che la colonna esistesse
+            "attese": None,
         }
         fd, con_ciclo = tempfile.mkstemp(suffix=".xlsx")
         os.close(fd)
@@ -169,6 +173,28 @@ def test_foglio_ciclogramma():
                 and riletto.tempo_limite_s == cfg.tempo_limite_s,
                 "e la linea riscritta e' identica all'originale",
             )
+            # Le soste non sono una conseguenza delle fasi: se non tornassero
+            # indietro identiche, il ciclogramma riaperto sarebbe una
+            # traiettoria diversa da quella che era stata verificata.
+            con_soste = dict(ciclo, attese={0: 0.0, 1: 12.5, 2: 3.25, 3: 40.0})
+            scrivi_linea(con_ciclo, cfg, con_soste)
+            check(
+                leggi_problema(con_ciclo).ciclogramma == con_soste,
+                "anche le soste dopo la consegna vanno e tornano identiche",
+            )
+            # zero non e' "non so": vuol dire riparti subito, ed e' una scelta
+            check(
+                leggi_problema(con_ciclo).ciclogramma["attese"][0] == 0.0,
+                "una sosta di zero secondi resta zero, non diventa 'non detto'",
+            )
+            modifica(con_ciclo, FOGLIO_CICLOGRAMMA, "F5", -3.0)
+            msg = errore_leggendo(con_ciclo)
+            check(
+                f"{FOGLIO_CICLOGRAMMA}!F5" in msg and "negativa" in msg,
+                f"una sosta negativa viene respinta: \"{msg.splitlines()[-1][:60]}\"",
+            )
+            scrivi_linea(con_ciclo, cfg, ciclo)
+
             # Un foglio rotto non deve passare in silenzio: senza takt time il
             # ciclogramma non si ricostruisce, e ripartire da zero senza dirlo
             # sarebbe il modo peggiore di perdere il lavoro di ieri.

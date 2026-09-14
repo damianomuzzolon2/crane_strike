@@ -23,20 +23,41 @@ STRUTTURE = [
      "generazione."),
 
     # ==================================================================
-    ("h2", "I tre gradi di liberta', e perche' contarli"),
+    ("h2", "I gradi di liberta', e perche' contarli"),
     ("p",
      "Un ciclogramma sembra fatto di moltissime grandezze: istanti di "
      "prelievo, traiettorie, giri a vuoto, tempi di salita. Sono quasi tutte "
-     "CONSEGUENZE. I gradi di liberta' veri sono tre:"),
+     "CONSEGUENZE. I gradi di liberta' veri sono quattro:"),
     ("li", "il TAKT TIME: ogni quanto entra un pezzo in linea;"),
     ("li", "il TEMPO IN VASCA di ogni tappa, entro i limiti di processo;"),
-    ("li", "l'ASSEGNAZIONE: quale carroponte esegue quale trasporto."),
+    ("li", "l'ASSEGNAZIONE: quale carroponte esegue quale trasporto;"),
+    ("li",
+     "la SOSTA: quanto ogni carroponte resta fermo dove ha consegnato, prima "
+     "di partire a vuoto verso la mossa successiva."),
     ("p",
-     "Tutto il resto si ricalcola da questi tre. E' il fatto piu' importante "
+     "Tutto il resto si ricalcola da questi. E' il fatto piu' importante "
      "dell'intero progetto, perche' da li' discendono l'editor manuale (si "
-     "modificano tre cose, non un disegno), il formato di salvataggio (tre "
-     "valori, non le traiettorie) e la possibilita' stessa di verificare in "
-     "modo indipendente."),
+     "modificano dei valori, non un disegno), il formato di salvataggio "
+     "(quei valori, non le traiettorie) e la possibilita' stessa di "
+     "verificare in modo indipendente."),
+    ("q",
+     "PER MOLTO TEMPO SE NE SONO CONTATI TRE, E LA SOSTA NON C'ERA. Non "
+     "perche' non esistesse: perche' la decideva una convenzione scritta nel "
+     "codice -- 'riparte appena consegnato' -- e una convenzione non e' un "
+     "grado di liberta', e' una costante. Il guaio e' che il solutore una "
+     "parte di quella liberta' se l'era gia' presa: la variabile dep_hi gli "
+     "lasciava far sostare il carroponte sul confine alto, e nel salvataggio "
+     "quel valore non c'era. Si calcolava un ciclogramma, lo si verificava "
+     "pulito, lo si salvava, lo si riapriva -- e la traiettoria era un'altra, "
+     "perche' veniva ricostruita con la convenzione."),
+    ("q",
+     "QUANTO COSTAVA, MISURATO. Su 50 soluzioni verificate pulite, ricostruite "
+     "come fa il programma quando riapri il file: 15 cambiavano separazione "
+     "minima e 14 COLLIDEVANO, una con i due carri sovrapposti (0 mm invece "
+     "dei 1200 richiesti), dopo una sosta al confine di 374 secondi che il "
+     "file non aveva registrato. Rifatta la stessa prova salvando le soste: "
+     "0 su 54. Il quarto grado di liberta' non e' una funzionalita' in piu', "
+     "e' il nome di un difetto che non si riusciva a vedere."),
 
     # ==================================================================
     ("h2", "1. Tank -- la vasca"),
@@ -767,10 +788,10 @@ SOLVE = [
     # ==================================================================
     ("h2", "Che cosa fa solve(), in una pagina"),
     ("p",
-     "Dei tre gradi di liberta' di un ciclogramma, solve() ne riceve uno gia' "
-     "deciso -- l'assegnazione, cioe' le zone -- e cerca gli altri due: il "
-     "takt time, che minimizza, e il tempo che ogni pezzo passa in ciascuna "
-     "vasca."),
+     "Dei gradi di liberta' di un ciclogramma, solve() ne riceve uno gia' "
+     "deciso -- l'assegnazione, cioe' le zone -- e cerca gli altri: il takt "
+     "time, che minimizza, il tempo che ogni pezzo passa in ciascuna vasca, e "
+     "dove ogni carroponte passa il tempo morto del rientro a vuoto."),
     ("p", "Il modello si compone di quattro blocchi, nell'ordine del codice:"),
     ("li", "1) la CATENA DEL PEZZO: quando ogni pezzo viene prelevato da ogni "
            "vasca, con i limiti di permanenza del processo;"),
@@ -1337,12 +1358,22 @@ COSTRUZIONE = [
      "compone. E il risultato si passa al verificatore esattamente come una "
      "soluzione del solutore."),
     ("p",
-     "Le tre convenzioni elencate nel docstring sono le stesse della "
+     "Le convenzioni elencate nel docstring sono le stesse della "
      "ricostruzione delle traiettorie, e vanno lette come un contratto: il "
      "carroponte visita le mosse nell'ordine dei loro prelievi; il pezzo si "
-     "preleva al primo istante compatibile con la fase scelta; dal confine "
-     "alto si riparte appena consegnato, e il margine diventa attesa "
-     "all'arrivo."),
+     "preleva al primo istante compatibile con la fase scelta; e dove passa "
+     "il tempo morto lo dice `attese`, se c'e'."),
+    ("q",
+     "L'ULTIMA VOCE ERA UNA CONVENZIONE, ADESSO E' UN DATO. Diceva: dal "
+     "confine alto si riparte appena consegnato, e il margine diventa attesa "
+     "all'arrivo. Chi ricostruiva la applicava, e otteneva una traiettoria "
+     "diversa da quella che il solutore aveva scelto e che il verificatore "
+     "aveva approvato. Quando `attese` arriva valorizzato -- dal solutore, o "
+     "dal file in cui era stato salvato -- la convenzione non si guarda "
+     "nemmeno: si usa la scelta gia' fatta. Quando non c'e' (un ciclogramma "
+     "composto a mano, un file scritto prima che la colonna esistesse) si "
+     "ripiega sulla regola predefinita, che almeno non sosta sulle vasche di "
+     "confine."),
     ("p",
      "`tollerante` e' l'interruttore che spegne i rifiuti: con la lista delle "
      "incoerenze valorizzata, i valori impossibili vengono descritti invece "
@@ -1433,9 +1464,11 @@ COSTRUZIONE = [
     ("h2", "2. estrai_gradi_di_liberta -- il giro di ritorno"),
     ("c", "model.estrai_gradi_di_liberta"),
     ("p",
-     "Prende una soluzione e ne estrae i tre valori che bastano a "
-     "ricostruirla. Insieme a build_solution chiude il cerchio: si calcola, si "
-     "estrae, si modifica, si ricostruisce, si verifica."),
+     "Prende una soluzione e ne estrae i valori che bastano a ricostruirla. "
+     "Insieme a build_solution chiude il cerchio: si calcola, si estrae, si "
+     "modifica, si ricostruisce, si verifica. Il cerchio si chiude davvero "
+     "solo se non si perde niente per strada, ed e' esattamente qui che per "
+     "molto tempo si perdeva la sosta."),
     ("q",
      "IL TERZO VALORE NON E' DEDUCIBILE. E' il punto del docstring, e non e' "
      "ovvio: i periodi IN PIU' rispetto al minimo non si ricavano dalle fasi. "

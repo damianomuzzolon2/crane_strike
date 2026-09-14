@@ -321,9 +321,27 @@ LETTURA = [
      "ha.'"),
     ("c", "excel_io._leggi_ciclogramma"),
     ("p",
-     "Il foglio che rende il file RIAPRIBILE: contiene i tre gradi di liberta' "
-     "-- takt time, tempo in vasca di ogni tappa, chi fa cosa -- e da quelli il "
-     "ciclogramma si ricostruisce identico."),
+     "Il foglio che rende il file RIAPRIBILE: contiene i gradi di liberta' del "
+     "ciclogramma -- takt time, tempo in vasca di ogni tappa, chi fa cosa, e "
+     "dove ogni carroponte passa il tempo morto -- e da quelli il ciclogramma "
+     "si ricostruisce identico."),
+    ("q",
+     "L'ULTIMA COLONNA E' ARRIVATA DOPO, E SI LEGGE COME UNA CICATRICE. "
+     "Quanto il carroponte resta fermo dove ha consegnato non discende dalle "
+     "fasi: a parita' di tutto il resto puo' ripartire subito e aspettare a "
+     "destinazione, oppure restare fermo e partire all'ultimo momento. Sono "
+     "traiettorie diverse, con collisioni diverse. Finche' la scelta la "
+     "faceva una convenzione nel codice non c'era niente da salvare; da "
+     "quando la fa il solutore, non salvarla significava riaprire il file e "
+     "trovarsi un ciclogramma diverso da quello verificato -- misurato: 14 "
+     "casi su 50, uno con i due carri sovrapposti."),
+    ("q",
+     "ED E' FACOLTATIVA, PERCHE' DEVE ESSERLO. I file scritti prima che "
+     "esistesse non ce l'hanno, e un ciclogramma composto a mano puo' non "
+     "averla: colonna assente vuol dire 'decidi tu', e risponde la regola "
+     "predefinita. Notare che assente e' diverso da zero: zero e' una scelta "
+     "-- riparti subito -- e per questo la lettura restituisce None, non un "
+     "dizionario vuoto."),
     ("q",
      "IL SILENZIO SAREBBE LA COSA PEGGIORE. Il docstring lo dice: un foglio "
      "vuoto vale come assente, e va bene -- una linea senza ciclogramma e' "

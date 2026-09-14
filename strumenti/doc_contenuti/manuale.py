@@ -199,10 +199,10 @@ RIGA_PER_RIGA = [
     ("h3", "componi -- dal disegno al ciclogramma"),
     ("c", "manuale.componi"),
     ("p",
-     "E' la funzione che chiude il giro. Prende i tre gradi di liberta' -- "
-     "takt time, permanenze, assegnazione -- e ne ricava una Solution vera, "
-     "con le traiettorie ricostruite, chiamando lo stesso build_solution che "
-     "usa il solutore."),
+     "E' la funzione che chiude il giro. Prende i gradi di liberta' -- takt "
+     "time, permanenze, assegnazione, e le soste se qualcuno le ha gia' "
+     "scelte -- e ne ricava una Solution vera, con le traiettorie "
+     "ricostruite, chiamando lo stesso build_solution che usa il solutore."),
     ("p", "Tre argomenti di quella chiamata meritano attenzione:"),
     ("li", "status='MANUALE' -- la soluzione si dichiara per quello che e'. "
            "Non e' una decorazione: plotting.py e verify.py filtrano sugli "

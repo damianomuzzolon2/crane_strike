@@ -578,6 +578,7 @@ def _leggi_ciclogramma(ws, n_moves: int, errori: _Errori) -> Optional[dict]:
 
     permanenze: dict[int, float] = {}
     assegnazione: dict[int, int] = {}
+    attese: dict[int, float] = {}
     for riga in range(5, ws.max_row + 1):
         cella_k = ws.cell(riga, 1).value
         if cella_k is None or (isinstance(cella_k, str) and not cella_k.strip()):
@@ -619,6 +620,23 @@ def _leggi_ciclogramma(ws, n_moves: int, errori: _Errori) -> Optional[dict]:
                     )
                 else:
                     permanenze[k] = s
+        # Colonna facoltativa: i file scritti prima che esistesse non ce
+        # l'hanno, e un ciclogramma composto a mano puo' non averla. Assente
+        # vuol dire "decidi tu dove far aspettare il carro", ed e' la regola
+        # predefinita a rispondere.
+        attesa = ws.cell(riga, 6).value
+        if attesa is not None and not (isinstance(attesa, str) and not attesa.strip()):
+            a = _numero(attesa, FOGLIO_CICLOGRAMMA, f"F{riga}",
+                        "attesa dopo la consegna", errori)
+            if a is not None:
+                if a < 0:
+                    errori.aggiungi(
+                        FOGLIO_CICLOGRAMMA,
+                        f"F{riga}",
+                        f"attesa dopo la consegna negativa: {a}",
+                    )
+                else:
+                    attese[k] = a
     if takt is None:
         return None
     if not n_carroponti or n_carroponti < 1:
@@ -629,6 +647,10 @@ def _leggi_ciclogramma(ws, n_moves: int, errori: _Errori) -> Optional[dict]:
         "permanenze": permanenze,
         "assegnazione": assegnazione,
         "n_carroponti": n_carroponti,
+        # None (non {}) quando la colonna manca del tutto: un dizionario vuoto
+        # direbbe "nessuno aspetta", che e' una scelta, mentre qui la scelta
+        # non c'e' proprio e va lasciata fare alla regola predefinita.
+        "attese": attese or None,
     }
 
 
@@ -1335,13 +1357,23 @@ def _aggiungi_fogli_linea(
 
 
 def _scrivi_foglio_ciclogramma(wb, data, ciclogramma, intestazione, sfondo, nota):
-    """Il ciclogramma nei suoi tre gradi di liberta': takt time, tempo in
-    vasca di ogni tappa, e chi fa ogni trasporto.
+    """Il ciclogramma nei suoi gradi di liberta': takt time, tempo in vasca di
+    ogni tappa, chi fa ogni trasporto, e dove ogni carroponte passa il tempo
+    morto del rientro a vuoto.
 
     Non si scrivono gli istanti di prelievo ne' le traiettorie: sono
     conseguenze, e riscriverle vorrebbe dire poterle rileggere in contrasto
-    con quello da cui derivano. Da questi tre valori il ciclogramma si
-    ricostruisce identico."""
+    con quello da cui derivano.
+
+    L'ultima colonna e' l'eccezione che conferma la regola. Quanto il
+    carroponte resta fermo dove ha consegnato NON e' una conseguenza delle
+    fasi: a parita' di takt time, permanenze e assegnazione il carro puo'
+    ripartire subito e aspettare a destinazione, oppure restare fermo e
+    partire all'ultimo momento. Sono traiettorie diverse, con collisioni
+    diverse. Finche' la scelta la faceva una convenzione scritta nel codice
+    non c'era niente da salvare; da quando la fa il solutore, non salvarla
+    significherebbe riaprire il file e trovarsi un ciclogramma diverso da
+    quello che era stato verificato."""
     ws = wb.create_sheet(FOGLIO_CICLOGRAMMA)
     for riga, (nome, valore, spiega) in enumerate(
         (
@@ -1365,9 +1397,10 @@ def _scrivi_foglio_ciclogramma(wb, data, ciclogramma, intestazione, sfondo, nota
     # con un arrotondamento all'insu', quanti periodi interi il pezzo resta in
     # vasca. Un millesimo di troppo su una tappa al limite fa scattare un
     # periodo, e il ciclogramma riaperto non e' piu' quello salvato.
-    titoli = ["mossa", "da vasca", "a vasca", "carroponte", "tempo_in_vasca_s"]
+    titoli = ["mossa", "da vasca", "a vasca", "carroponte", "tempo_in_vasca_s",
+              "attesa_dopo_consegna_s"]
     for col, (titolo, larghezza) in enumerate(
-        zip(titoli, [8, 22, 22, 12, 18]), start=1
+        zip(titoli, [8, 22, 22, 12, 18, 24]), start=1
     ):
         cella = ws.cell(4, col)
         cella.value = titolo
@@ -1377,10 +1410,12 @@ def _scrivi_foglio_ciclogramma(wb, data, ciclogramma, intestazione, sfondo, nota
 
     permanenze = ciclogramma.get("permanenze") or {}
     assegnazione = ciclogramma.get("assegnazione") or {}
+    attese = ciclogramma.get("attese") or {}
     for k in range(data.n_moves):
         # append() parte dopo l'ultima riga scritta, cioe' dalla 5
         carro = assegnazione.get(k)
         sosta = permanenze.get(k)
+        attesa = attese.get(k)
         ws.append(
             [
                 k,
@@ -1388,6 +1423,7 @@ def _scrivi_foglio_ciclogramma(wb, data, ciclogramma, intestazione, sfondo, nota
                 data.route[k + 1].tank_id,
                 None if carro is None else carro + 1,
                 None if sosta is None else round(float(sosta), 9),
+                None if attesa is None else round(float(attesa), 9),
             ]
         )
 
