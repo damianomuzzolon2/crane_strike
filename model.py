@@ -96,6 +96,7 @@ from __future__ import annotations
 import dataclasses
 import itertools
 import math
+import threading
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -1206,6 +1207,66 @@ class Solution:
     actual_time: list[float] = field(default_factory=list)  # [s], una per mossa
 
 
+class Interruzione:
+    """La richiesta di FERMARE un calcolo, fatta da un altro thread.
+
+    Chi calcola la passa a `solve`, `solve_auto_zones` o `solve_auto_hoists`;
+    chi guarda lo schermo chiama `ferma()`. Una ricerca automatica puo' durare
+    decine di minuti, e senza questo l'unico modo di rinunciarci era chiudere
+    il programma.
+
+    Un calcolo si ferma in due momenti diversi, e servono due meccanismi:
+
+      - mentre si COSTRUISCE il modello, che e' Python e su una linea lunga
+        dura parecchi secondi: `solve` guarda `richiesta` a ogni carroponte e
+        a ogni confine, ed esce;
+      - mentre CP-SAT CERCA, che e' codice nativo e non guarda niente: li'
+        serve `StopSearch()` sul solutore in corsa, e per chiamarlo bisogna
+        averlo a portata di mano -- `solve` lo registra qui prima di lanciarlo.
+
+    Il lucchetto chiude la corsa fra i due: una richiesta che arriva fra
+    l'ultimo controllo e il lancio del solutore troverebbe un solutore non
+    ancora registrato, e andrebbe persa -- il calcolo durerebbe tutto il suo
+    limite di tempo. Registrare e fermare sotto lo stesso lucchetto garantisce
+    che o il solutore e' gia' registrato, e viene fermato, o la richiesta c'e'
+    gia', e il solutore non parte."""
+
+    def __init__(self) -> None:
+        self._richiesta = False
+        self._blocco = threading.Lock()
+        self._solutori: list = []
+
+    @property
+    def richiesta(self) -> bool:
+        return self._richiesta
+
+    def ferma(self) -> None:
+        """Da qualunque thread. Chiamarla piu' volte non fa danni."""
+        with self._blocco:
+            self._richiesta = True
+            for solutore in self._solutori:
+                solutore.StopSearch()
+
+    def _registra(self, solutore) -> bool:
+        """False se la richiesta c'e' gia': allora il solutore non va lanciato."""
+        with self._blocco:
+            if self._richiesta:
+                return False
+            self._solutori.append(solutore)
+            return True
+
+    def _libera(self, solutore) -> None:
+        with self._blocco:
+            if solutore in self._solutori:
+                self._solutori.remove(solutore)
+
+
+def _soluzione_interrotta() -> Solution:
+    """L'esito di un calcolo fermato prima di avere qualcosa in mano. UNKNOWN,
+    non INFEASIBLE: nessuno ha dimostrato che non si possa fare."""
+    return Solution(status="UNKNOWN", T=None, raw={"interrotto": True})
+
+
 # --------------------------------------------------------------------------
 # Costruzione e risoluzione del modello CP-SAT
 # --------------------------------------------------------------------------
@@ -1305,11 +1366,17 @@ def solve(
     time_limit_s: float = 20.0,
     log_search: bool = False,
     allow_unsafe_layout: bool = False,
+    interruzione: Optional[Interruzione] = None,
 ) -> Solution:
     """allow_unsafe_layout: se True salta il controllo di geometria delle zone.
     Serve solo per studio/debug: le soluzioni prodotte possono contenere
     collisioni reali che il modello non e' in grado di vedere (verify.py le
-    segnala)."""
+    segnala).
+
+    interruzione: vedi `Interruzione`. Se viene fermata durante la ricerca e
+    CP-SAT aveva gia' trovato una soluzione, la restituisce -- FEASIBLE, valida
+    ma non dimostrata ottima; altrimenti UNKNOWN. In tutti e due i casi
+    `raw["interrotto"]` e' True."""
     if data.zones is None:
         raise ValueError(
             "data.zones e' None: specifica le zone esplicitamente oppure usa "
@@ -1330,6 +1397,9 @@ def solve(
                 "la sequenza del percorso, oppure sposta il confine fra le zone "
                 "(solve_auto_zones scarta da solo le suddivisioni non valide)."
             )
+
+    if interruzione is not None and interruzione.richiesta:
+        return _soluzione_interrotta()
 
     # Import posticipato: cosi' il resto del modulo (dataclass, cinematica,
     # extraction, plotting) resta utilizzabile/testabile anche senza ortools
@@ -1443,6 +1513,11 @@ def solve(
     #    propria zona, con ordine di visita libero. ------------------------
     zone_data = []
     for h, z in enumerate(data.zones):
+        # La costruzione del modello e' Python, e su una linea lunga dura
+        # parecchi secondi: si guarda se qualcuno ha chiesto di fermare a ogni
+        # carroponte, e piu' sotto a ogni confine.
+        if interruzione is not None and interruzione.richiesta:
+            return _soluzione_interrotta()
         moves = list(range(z.lo, z.hi + 1))
         n_h = len(moves)
         lo_h, hi_h = z.lo, z.hi
@@ -1888,6 +1963,8 @@ def solve(
 
     n_sep_constraints = 0
     for h in range(data.n_hoists - 1):
+        if interruzione is not None and interruzione.richiesta:
+            return _soluzione_interrotta()
         zL, zR = zone_data[h], zone_data[h + 1]
         z_left, z_right = zL["z"], zR["z"]
         assert z_left.hi + 1 == z_right.lo, "le zone devono essere contigue"
@@ -1945,11 +2022,20 @@ def solve(
     solver.parameters.max_time_in_seconds = time_limit_s
     solver.parameters.log_search_progress = log_search
     solver.parameters.num_workers = 8
-    status = solver.Solve(model)
+    if interruzione is not None and not interruzione._registra(solver):
+        return _soluzione_interrotta()
+    try:
+        status = solver.Solve(model)
+    finally:
+        if interruzione is not None:
+            interruzione._libera(solver)
 
     status_name = solver.StatusName(status)
+    interrotto = interruzione is not None and interruzione.richiesta
     if status not in (cp_model.OPTIMAL, cp_model.FEASIBLE):
-        return Solution(status=status_name, T=None)
+        return Solution(
+            status=status_name, T=None, raw={"interrotto": True} if interrotto else {}
+        )
 
     T_seconds = data.to_seconds(solver.Value(Tv))
 
@@ -2028,6 +2114,8 @@ def solve(
         "clearance_step_mm": data.clearance_step_mm,
         "n_separation_constraints": n_sep_constraints,
     }
+    if interrotto:
+        raw["interrotto"] = True
     return Solution(
         status=status_name,
         T=T_seconds,
@@ -2743,6 +2831,7 @@ def solve_auto_zones(
     max_candidates: int = 5000,
     log_progress: bool = False,
     su_tentativo=None,
+    interruzione: Optional["Interruzione"] = None,
 ) -> tuple[Solution, Optional[list[HoistZone]]]:
     """Prova automaticamente tutte le suddivisioni contigue delle mosse in
     `n_hoists` zone (una per carroponte) e restituisce la soluzione con il
@@ -2757,6 +2846,13 @@ def solve_auto_zones(
     risoluzione, con l'indice contato da 1 e il totale gia' al netto dei
     prefiltri. Serve a chi mostra un avanzamento; gira nel thread del
     chiamante, quindi non deve toccare widget.
+
+    `interruzione`: vedi `Interruzione`. Se viene fermata non si provano
+    altre suddivisioni, e si restituisce la migliore trovata fino a li' --
+    valida, ma scelta fra QUELLE PROVATE, quindi non la migliore in assoluto.
+    Se non se n'era trovata nessuna l'esito e' UNKNOWN, non INFEASIBLE: le
+    suddivisioni mancanti non sono state dimostrate impossibili. In tutti e due
+    i casi `raw["interrotto"]` e' True.
     """
     n_moves = data.n_moves
     if n_hoists < 1:
@@ -2831,11 +2927,17 @@ def solve_auto_zones(
     per_stato: dict[str, int] = {}
 
     for indice, zones in enumerate(da_provare, start=1):
+        if interruzione is not None and interruzione.richiesta:
+            break
         if su_tentativo is not None:
             su_tentativo(n_hoists, indice, len(da_provare))
         candidate_data = dataclasses.replace(data, zones=zones)
         n_tried += 1
-        sol = solve(candidate_data, time_limit_s=time_limit_per_candidate)
+        sol = solve(
+            candidate_data,
+            time_limit_s=time_limit_per_candidate,
+            interruzione=interruzione,
+        )
         per_stato[sol.status] = per_stato.get(sol.status, 0) + 1
         if log_progress:
             zone_str = ", ".join(f"[{z.lo}-{z.hi}]" for z in zones)
@@ -2856,9 +2958,17 @@ def solve_auto_zones(
         # senso indagare quando nessuna funziona (vedi `diagnosi_zone`)
         "candidata_tipica": _piu_equilibrata(da_provare, travel_loaded_seconds),
     }
+    interrotto = interruzione is not None and interruzione.richiesta
+    if interrotto:
+        conti["interrotto"] = True
 
     if best_solution is None:
-        return Solution(status="INFEASIBLE", T=None, raw=conti), None
+        # Fermata a meta' senza niente in mano: le suddivisioni non provate
+        # non sono state dimostrate impossibili, e dire INFEASIBLE farebbe
+        # credere il contrario.
+        return Solution(
+            status="UNKNOWN" if interrotto else "INFEASIBLE", T=None, raw=conti
+        ), None
 
     best_solution.raw.update(conti)
     best_solution.raw["zones"] = best_zones
@@ -3199,6 +3309,7 @@ def solve_auto_hoists(
     max_candidates_per_hoist_count: int = 5000,
     log_progress: bool = False,
     su_tentativo=None,
+    interruzione: Optional["Interruzione"] = None,
 ) -> tuple[Solution, Optional[list[HoistZone]], Optional[int]]:
     """Cerca automaticamente sia il numero minimo di carroponti necessario
     sia le zone di ciascuno: prova n_hoists = min_hoists, min_hoists+1, ...,
@@ -3214,6 +3325,11 @@ def solve_auto_hoists(
     `su_tentativo(n_hoists, indice, totale)` viene passata a solve_auto_zones:
     vedi li'. Il totale riguarda il numero di carroponti in corso, non l'intera
     ricerca -- quanti carroponti serviranno non si sa finche' non si trova.
+
+    `interruzione`: vedi `Interruzione` e `solve_auto_zones`. Fermata, la
+    ricerca non passa al numero di carroponti successivo: restituisce quello
+    che ha trovato col numero in corso, oppure UNKNOWN con
+    `raw["interrotto"]`.
     """
     n_moves = data.n_moves
     max_hoists = min(max_hoists, n_moves)
@@ -3237,6 +3353,7 @@ def solve_auto_hoists(
                 max_candidates=max_candidates_per_hoist_count,
                 log_progress=log_progress,
                 su_tentativo=su_tentativo,
+                interruzione=interruzione,
             )
         except ValueError as e:
             # troppe suddivisioni possibili per questo n_hoists: lo segnalo
@@ -3274,6 +3391,17 @@ def solve_auto_hoists(
             sol.raw["hoist_sweep"] = sweep
             sol.raw["n_hoists"] = n_hoists
             return sol, zones, n_hoists
+        if sol.raw.get("interrotto"):
+            # Chi ha fermato non vuole che si provi un carroponte in piu'.
+            return (
+                Solution(
+                    status="UNKNOWN",
+                    T=None,
+                    raw={"hoist_sweep": sweep, "interrotto": True},
+                ),
+                None,
+                None,
+            )
 
     return Solution(status="INFEASIBLE", T=None, raw={"hoist_sweep": sweep}), None, None
 

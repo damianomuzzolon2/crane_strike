@@ -39,7 +39,13 @@ from matplotlib.figure import Figure
 from matplotlib.lines import Line2D
 
 from excel_io import leggi_problema, scrivi_modello, scrivi_risultati
-from model import diagnosi_zone, solve, solve_auto_hoists, solve_auto_zones
+from model import (
+    Interruzione,
+    diagnosi_zone,
+    solve,
+    solve_auto_hoists,
+    solve_auto_zones,
+)
 import manuale
 from plotting import (
     _HOIST_COLORS,
@@ -149,6 +155,10 @@ class Applicazione(tk.Tk):
         self.report = None
         self._coda: queue.Queue = queue.Queue()
         self._lavoro_in_corso = False
+        # Il modo di fermare il calcolo in corso: esiste solo mentre ce n'e'
+        # uno, e ogni calcolo ha la sua -- una richiesta rimasta da quello
+        # prima non deve fermare quello dopo appena parte.
+        self._interruzione: Interruzione | None = None
         self._inizio_lavoro = 0.0
         # Quanto e' durato il calcolo che ha prodotto il ciclogramma che si sta
         # guardando, in secondi. None quando non viene da un calcolo -- una
@@ -245,6 +255,13 @@ class Applicazione(tk.Tk):
             barra, text="Calcola auto", command=self._calcola_automatico
         )
         self.btn_auto.pack(side=tk.LEFT)
+        # Accanto a "Calcola auto", perche' e' il suo contrario: una ricerca
+        # automatica puo' durare decine di minuti, e prima l'unico modo di
+        # rinunciarci era chiudere il programma. Acceso solo mentre si calcola.
+        self.btn_ferma = ttk.Button(
+            barra, text="Ferma", command=self._ferma_calcolo, state=tk.DISABLED
+        )
+        self.btn_ferma.pack(side=tk.LEFT, padx=(6, 0))
         self.btn_proposta = ttk.Button(
             barra, text="Calcola man", command=self._componi_da_zero
         )
@@ -651,7 +668,7 @@ class Applicazione(tk.Tk):
         cfg = self.config_linea
         self._avvia_lavoro(
             "Cerco numero di carroponti e zone migliori...",
-            lambda: self._risolvi(cfg),
+            lambda interruzione: self._risolvi(cfg, interruzione),
         )
 
     def _segnala_tentativo(self, n_hoists: int, indice: int, totale: int):
@@ -662,11 +679,11 @@ class Applicazione(tk.Tk):
         _controlla_coda."""
         self._coda.put(("progresso", (n_hoists, indice, totale)))
 
-    def _risolvi(self, cfg):
+    def _risolvi(self, cfg, interruzione: Interruzione):
         """Gira nel thread di lavoro: niente widget qui dentro."""
         d = cfg.data
         if cfg.zone_manuali is not None:
-            sol = solve(d, time_limit_s=cfg.tempo_limite_s)
+            sol = solve(d, time_limit_s=cfg.tempo_limite_s, interruzione=interruzione)
             zone = cfg.zone_manuali
         else:
             sol, zone, _ = solve_auto_hoists(
@@ -674,8 +691,14 @@ class Applicazione(tk.Tk):
                 max_hoists=cfg.max_carroponti,
                 time_limit_per_candidate=cfg.tempo_limite_s,
                 su_tentativo=self._segnala_tentativo,
+                interruzione=interruzione,
             )
         if sol.status not in ("OPTIMAL", "FEASIBLE"):
+            if interruzione.richiesta:
+                # Niente diagnosi: sono altre risoluzioni, e chi ha premuto
+                # Ferma non vuole aspettarne altre. E niente da diagnosticare:
+                # la linea non e' stata dimostrata impossibile.
+                return ("interrotto", sol, None, None)
             self._diagnostica(d, sol)
             return ("nessuna", sol, None, None)
         dati = dataclasses.replace(d, zones=zone)
@@ -852,7 +875,12 @@ class Applicazione(tk.Tk):
     # ------------------------------------------------------------------
 
     def _avvia_lavoro(self, messaggio: str, funzione):
+        """Lancia `funzione(interruzione)` in un thread a parte. L'interruzione
+        e' nuova per ogni calcolo, e la riceve la funzione invece di leggerla
+        da `self`: il thread non deve dipendere da uno stato della finestra che
+        nel frattempo potrebbe cambiare."""
         self._lavoro_in_corso = True
+        interruzione = self._interruzione = Interruzione()
         # Si cronometra QUI, e non dentro il solutore: quello che interessa e'
         # quanto ha aspettato chi guarda lo schermo, che comprende tutti i
         # tentativi di solve_auto_hoists e la verifica finale. Il tempo che
@@ -879,12 +907,26 @@ class Applicazione(tk.Tk):
 
         def involucro():
             try:
-                self._coda.put(("fatto", funzione()))
+                self._coda.put(("fatto", funzione(interruzione)))
             except Exception:
                 self._coda.put(("eccezione", traceback.format_exc()))
 
         threading.Thread(target=involucro, daemon=True).start()
         self.after(80, self._controlla_coda)
+
+    def _ferma_calcolo(self):
+        """Pulsante 'Ferma'. Chiede lo stop e basta: il risultato arriva dalla
+        coda come quello di un calcolo finito, e lo gestisce _controlla_coda.
+
+        Non e' istantaneo. Se il solutore sta cercando si ferma in una frazione
+        di secondo; se si sta ancora costruendo il modello, finisce il pezzo in
+        corso. Per questo lo si dice nella barra di stato: un clic che non
+        sembra fare niente viene ripetuto."""
+        if not self._lavoro_in_corso or self._interruzione is None:
+            return
+        self._interruzione.ferma()
+        self._aggiorna_stato_pulsanti()
+        self._stato("Interruzione in corso...")
 
     def _mostra_avanzamento(self, n_hoists: int, indice: int, totale: int):
         """A che punto e' la ricerca, e quanto manca.
@@ -1033,7 +1075,19 @@ class Applicazione(tk.Tk):
             self._errore("Il calcolo si e' interrotto", carico)
             return
 
+        self._interruzione = None
         esito, sol, dati, report = carico
+        if esito == "interrotto":
+            # Fermato senza niente in mano. Quello che c'era prima RESTA: chi
+            # ha premuto Ferma ha rinunciato al calcolo nuovo, non al
+            # ciclogramma che stava guardando -- e cancellarlo gli farebbe
+            # pagare lo stop con il lavoro di prima.
+            self._aggiorna_stato_pulsanti()
+            self._stato(
+                f"Calcolo interrotto dopo {_durata_leggibile(durata)} - "
+                f"nessuna soluzione trovata fino a quel momento"
+            )
+            return
         if esito == "nessuna":
             self.soluzione = None
             self.durata_calcolo = None
@@ -1056,11 +1110,20 @@ class Applicazione(tk.Tk):
         self.soluzione, self.dati, self.report = sol, dati, report
         self.incoerenze = []
         self.durata_calcolo = durata
-        self.origine = (
-            "calcolo automatico (ottimo)"
-            if sol.status == "OPTIMAL"
-            else "calcolo automatico (soluzione valida, non dimostrata ottima)"
-        )
+        interrotto = bool(sol.raw.get("interrotto"))
+        if interrotto:
+            # Anche se l'ultima risoluzione ha detto OPTIMAL: e' ottima per le
+            # zone che ha provato, e le altre non sono state provate.
+            self.origine = (
+                "calcolo automatico interrotto (la migliore trovata prima "
+                "dello stop: valida, non dimostrata ottima)"
+            )
+        else:
+            self.origine = (
+                "calcolo automatico (ottimo)"
+                if sol.status == "OPTIMAL"
+                else "calcolo automatico (soluzione valida, non dimostrata ottima)"
+            )
         self.modificato = False
         # Un risultato del solutore si LEGGE. Per modificarlo si preme
         # "Modifica": cosi' non lo si altera per sbaglio, e quel pulsante
@@ -1081,8 +1144,14 @@ class Applicazione(tk.Tk):
         self._mostra_ciclogramma()
         self._aggiorna_stato_pulsanti()
         self._stato(
-            f"Ciclogramma pronto in {_durata_leggibile(durata)} - "
-            f"T = {sol.T:.2f} s" + self._esito_breve()
+            (
+                f"Calcolo interrotto dopo {_durata_leggibile(durata)} - "
+                f"migliore trovata finora: "
+                if interrotto
+                else f"Ciclogramma pronto in {_durata_leggibile(durata)} - "
+            )
+            + f"T = {sol.T:.2f} s"
+            + self._esito_breve()
         )
 
     # ------------------------------------------------------------------
@@ -1336,14 +1405,17 @@ class Applicazione(tk.Tk):
         n = max(1, min(self.n_carroponti, self.config_linea.data.n_moves))
         cfg = self.config_linea
 
-        def lavoro():
+        def lavoro(interruzione):
             sol, zone = solve_auto_zones(
                 cfg.data,
                 n_hoists=n,
                 time_limit_per_candidate=cfg.tempo_limite_s,
                 su_tentativo=self._segnala_tentativo,
+                interruzione=interruzione,
             )
             if sol.status not in ("OPTIMAL", "FEASIBLE"):
+                if interruzione.richiesta:
+                    return ("interrotto", sol, None, None)
                 return ("nessuna", sol, None, None)
             dati = dataclasses.replace(cfg.data, zones=zone)
             return ("ok", sol, dati, verify_solution(dati, sol))
@@ -2055,6 +2127,16 @@ class Applicazione(tk.Tk):
                 self.schede.select(0)
             self.schede.tab(1, state=tk.DISABLED)
         self.btn_auto.configure(state=stato)
+        # Ferma e' acceso solo mentre c'e' un calcolo da fermare, e si spegne
+        # appena lo si preme: il calcolo non si ferma all'istante -- finisce la
+        # costruzione del modello in corso, o il solutore deve accorgersene --
+        # e un pulsante che resta acceso inviterebbe a premerlo ancora.
+        in_corso = (
+            self._lavoro_in_corso
+            and self._interruzione is not None
+            and not self._interruzione.richiesta
+        )
+        self.btn_ferma.configure(state=tk.NORMAL if in_corso else tk.DISABLED)
         self.btn_proposta.configure(state=stato)
         # "Modifica" si abilita quando c'e' qualcosa da modificare, e basta:
         # non ha una sorgente da scegliere, perche' il ciclogramma corrente e'

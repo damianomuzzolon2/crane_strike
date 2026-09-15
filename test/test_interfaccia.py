@@ -1062,6 +1062,123 @@ def test_scheda_chiusa_durante_il_calcolo(percorso_linea):
         chiudi(app)
 
 
+def test_ferma_il_calcolo(percorso_linea):
+    print("\n[9-bis] il pulsante Ferma interrompe il calcolo automatico")
+    # Qui si prova il COLLEGAMENTO fra pulsante e calcolo, non CP-SAT: il
+    # solutore e' sostituito da uno finto che gira finche' qualcuno non lo
+    # ferma. Con quello vero la prova dipenderebbe da quanto ci mette la linea
+    # di esempio -- se finisse prima del clic non proverebbe niente. Che lo
+    # stop fermi davvero CP-SAT lo prova test_model.py.
+    import dataclasses
+    import interfaccia
+    from interfaccia import Applicazione
+    from model import Solution
+
+    app = Applicazione(percorso_linea)
+    originali = (interfaccia.solve_auto_hoists, interfaccia.solve)
+    ricevute = []
+    try:
+        for _ in range(50):
+            app.update()
+            if app.config_linea is not None:
+                break
+            time.sleep(0.02)
+        app._calcola_automatico()
+        check(pompa(app), "un primo calcolo vero, da tenere come ciclogramma di prima")
+        prima = app.soluzione
+        check(prima is not None, "e produce un ciclogramma")
+        if prima is None:
+            return
+        check(
+            str(app.btn_ferma["state"]) == "disabled",
+            "a calcolo finito Ferma e' spento: non c'e' niente da fermare",
+        )
+
+        esito = {"soluzione": None}
+
+        def aspetta_lo_stop(interruzione):
+            ricevute.append(interruzione)
+            scadenza = time.time() + 30.0
+            while not interruzione.richiesta and time.time() < scadenza:
+                time.sleep(0.02)
+            return esito["soluzione"]
+
+        def finto_auto(d, *a, interruzione=None, **k):
+            sol, zone = aspetta_lo_stop(interruzione)
+            return sol, zone, (len(zone) if zone else None)
+
+        def finto_solve(d, *a, interruzione=None, **k):
+            return aspetta_lo_stop(interruzione)[0]
+
+        interfaccia.solve_auto_hoists = finto_auto
+        interfaccia.solve = finto_solve
+
+        # -- fermato senza niente in mano -----------------------------------
+        esito["soluzione"] = (
+            Solution(status="UNKNOWN", T=None, raw={"interrotto": True}),
+            None,
+        )
+        app._calcola_automatico()
+        app.update()
+        check(
+            str(app.btn_ferma["state"]) == "normal",
+            "mentre il calcolo gira Ferma e' acceso",
+        )
+        inizio = time.time()
+        app._ferma_calcolo()
+        app.update()
+        check(
+            str(app.btn_ferma["state"]) == "disabled"
+            and "Interruzione" in app.etichetta_stato["text"],
+            f"premuto, si spegne e lo dice: \"{app.etichetta_stato['text']}\"",
+        )
+        check(pompa(app, secondi_max=10.0), "e il calcolo finisce")
+        check(
+            time.time() - inizio < 5.0,
+            f"subito, non allo scadere del tempo ({time.time() - inizio:.1f} s)",
+        )
+        check(
+            len(ricevute) == 1 and ricevute[0] is not None,
+            "il calcolo ha ricevuto la richiesta di stop",
+        )
+        check(
+            app.soluzione is prima,
+            "il ciclogramma di prima resta: si e' rinunciato al calcolo nuovo, "
+            "non a quello",
+        )
+        check(
+            "interrotto" in app.etichetta_stato["text"]
+            and str(app.btn_auto["state"]) == "normal"
+            and str(app.btn_ferma["state"]) == "disabled",
+            f"lo stato lo dice e i pulsanti tornano come prima: "
+            f"\"{app.etichetta_stato['text']}\"",
+        )
+
+        # -- fermato con una soluzione gia' trovata --------------------------
+        trovata = dataclasses.replace(prima, raw={**prima.raw, "interrotto": True})
+        esito["soluzione"] = (trovata, list(app.dati.zones))
+        app._calcola_automatico()
+        app.update()
+        app._ferma_calcolo()
+        check(pompa(app, secondi_max=10.0), "fermato di nuovo, finisce")
+        check(
+            app.soluzione is trovata and app.report is not None,
+            "la soluzione trovata prima dello stop viene mostrata e verificata",
+        )
+        check(
+            "interrotto" in app.origine and "non dimostrata ottima" in app.origine,
+            f"dicendo che non e' dimostrata ottima: \"{app.origine}\"",
+        )
+        check(
+            ricevute[1] is not ricevute[0],
+            "ogni calcolo ha la sua richiesta di stop: quella di prima non "
+            "ferma quello dopo",
+        )
+    finally:
+        interfaccia.solve_auto_hoists, interfaccia.solve = originali
+        chiudi(app)
+
+
 def test_ciclogramma_si_riprende(percorso_linea):
     print("\n[10] un ciclogramma composto a mano si salva e si riprende")
     from interfaccia import Applicazione
@@ -1259,6 +1376,7 @@ def main():
         test_composizione_da_zero(linea)
         test_da_zero_poi_automatico(linea)
         test_scheda_chiusa_durante_il_calcolo(linea)
+        test_ferma_il_calcolo(linea)
         test_ciclogramma_si_riprende(linea)
         test_simulazione_dal_pulsante(linea)
         test_file_illeggibile()

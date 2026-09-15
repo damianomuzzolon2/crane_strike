@@ -6,7 +6,7 @@ invarianti regge, e dove sono le trappole — comprese quelle in cui siamo gia'
 caduti, che sono la parte piu' utile.
 
 Stato al momento della scrittura: 16 file Python, 15.223 righe, cinque suite di
-test per **478 asserzioni** complessive.
+test per **498 asserzioni** complessive.
 
 ---
 
@@ -546,6 +546,7 @@ vista               # "ciclogramma" | "pettine"
 modifica_aperta     # se la scheda Ciclogramma e' aperta
 verifica_viva       # se il verdetto si aggiorna da solo
 _lavoro_in_corso    # il solutore sta girando
+_interruzione       # model.Interruzione del calcolo in corso, None se non ce n'e'
 ```
 
 **`_ricomponi()` e' il funnel di ogni modifica.** Cambio del takt, dei tempi in
@@ -561,6 +562,20 @@ finestra della simulazione viene aggiornata.
 Il lavoro pesante gira in un thread con una `queue.Queue`: `_avvia_lavoro`
 mette, `_controlla_coda` ritira con `after(80)`. Nel thread **non si tocca
 nessun widget**.
+
+**Fermare un calcolo.** `_avvia_lavoro` crea una `model.Interruzione` nuova per
+ogni lavoro e la passa come argomento alla funzione del thread; il pulsante
+`Ferma` chiama `ferma()` e basta. Il thread, fermato, mette il suo risultato in
+coda come un calcolo finito: la fine di un calcolo ha un solo percorso. Dentro
+`model` lo stop agisce in due punti: `solve` guarda `richiesta` a ogni
+carroponte e a ogni confine mentre costruisce il modello (Python), e registra il
+`CpSolver` presso l'`Interruzione` perche' `ferma()` possa chiamare
+`StopSearch()` mentre CP-SAT cerca (codice nativo). Registrazione e stop stanno
+sotto lo stesso lucchetto, altrimenti una richiesta arrivata fra l'ultimo
+controllo e il lancio andrebbe persa. Misurato: risposta fra 0,1 e 0,5 s. Un
+calcolo fermato e' **UNKNOWN con `raw["interrotto"]`, mai INFEASIBLE**: non ha
+dimostrato niente, e l'interfaccia non deve lanciare la diagnosi ne' cancellare
+il ciclogramma che c'era.
 
 ### 9.1 Le due viste, e perche' si modifica solo su una
 
@@ -747,7 +762,7 @@ lascia il pulsante vuoto.
 
 ---
 
-## 11. I test — 478 asserzioni, cinque suite
+## 11. I test — 498 asserzioni, cinque suite
 
 Nessun pytest: ogni file si lancia da solo, stampa cosa ha provato e restituisce
 un codice d'uscita.
@@ -757,8 +772,8 @@ un codice d'uscita.
 | `test/test_verify.py` | 119 | — | il verificatore trova davvero quello che deve? |
 | `test/test_excel_io.py` | 97 | — | un file compilato male viene respinto con un messaggio utile? |
 | `test/test_simulazione.py` | 78 | — | la simulazione mostra il ciclogramma che c'e'? |
-| `test/test_model.py` | 72 | OR-Tools | il modello produce soluzioni fisicamente valide? |
-| `test/test_interfaccia.py` | 112 | OR-Tools + grafica | l'interfaccia si comporta come deve? |
+| `test/test_model.py` | 78 | OR-Tools | il modello produce soluzioni fisicamente valide? |
+| `test/test_interfaccia.py` | 126 | OR-Tools + grafica | l'interfaccia si comporta come deve? |
 
 > `test_model.py` risolve davvero, con limiti di tempo dell'ordine del minuto.
 > Su una macchina occupata un caso puo' scadere e restituire `UNKNOWN`: e'

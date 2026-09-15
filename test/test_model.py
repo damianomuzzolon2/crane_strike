@@ -1127,6 +1127,106 @@ def test_frecce_delle_corse_verticali():
     )
 
 
+def test_ferma_il_calcolo():
+    print()
+    print("[9-quinquies] un calcolo si puo' fermare")
+    # Una ricerca automatica puo' durare decine di minuti. Fermarla deve
+    # essere questione di un attimo, sia mentre CP-SAT cerca -- codice nativo,
+    # che si ferma solo con StopSearch -- sia fra un tentativo e l'altro. E
+    # l'esito di uno stop NON deve sembrare un verdetto: UNKNOWN, mai
+    # INFEASIBLE.
+    import threading
+
+    from model import Interruzione, solve_auto_zones
+
+    # Una linea su cui CP-SAT non chiude in pochi secondi: dieci mosse con
+    # gli svincoli. Misurata: con 30 s di limite restituisce UNKNOWN.
+    n = 10
+    base = linea(
+        n, 2000, [HoistZone(0, n // 2 - 1), HoistZone(n // 2, n - 1)],
+        dwell=(30, 300), capacity=3, lift_height=1500,
+        kin_lift_empty=Kinematics(v_max=250, a_max=150),
+        kin_lift_loaded=Kinematics(v_max=200, a_max=150),
+        engage_time=2.0, disengage_time=1.0, takt_min=25.0, takt_max=400.0,
+    )
+    data = con_ostacoli(base, svincolo=700.0)
+
+    # -- mentre CP-SAT cerca ------------------------------------------------
+    fermata = Interruzione()
+    ritardo = 4.0  # oltre la costruzione del modello, che dura ~2 s
+    timer = threading.Timer(ritardo, fermata.ferma)
+    timer.start()
+    t0 = time.perf_counter()
+    sol = solve(data, time_limit_s=120.0, interruzione=fermata)
+    durata = time.perf_counter() - t0
+    timer.cancel()
+    check(
+        ritardo <= durata < ritardo + 3.0,
+        f"fermato a {ritardo:.0f} s su un limite di 120, risponde dopo "
+        f"{durata:.1f} s",
+    )
+    check(
+        sol.raw.get("interrotto") is True and sol.status in ("UNKNOWN", "FEASIBLE"),
+        f"e dice di essere stato interrotto, senza dichiarare niente di "
+        f"impossibile ({sol.status})",
+    )
+    if sol.status == "FEASIBLE":
+        # se CP-SAT aveva gia' una soluzione la restituisce, e dev'essere buona
+        r = verify_solution(data, sol)
+        check(r.ok, "la soluzione trovata prima dello stop supera la verifica")
+
+    # -- fermato prima ancora di partire ------------------------------------
+    gia_fermata = Interruzione()
+    gia_fermata.ferma()
+    t0 = time.perf_counter()
+    sol = solve(data, time_limit_s=120.0, interruzione=gia_fermata)
+    check(
+        sol.status == "UNKNOWN" and sol.raw.get("interrotto")
+        and time.perf_counter() - t0 < 0.5,
+        "una richiesta gia' fatta non lascia nemmeno costruire il modello",
+    )
+    tentativi = []
+    sol, zone, n_car = solve_auto_hoists(
+        data, max_hoists=3, time_limit_per_candidate=5.0,
+        su_tentativo=lambda *a: tentativi.append(a), interruzione=gia_fermata,
+    )
+    check(
+        sol.status == "UNKNOWN" and sol.raw.get("interrotto")
+        and zone is None and not tentativi
+        and len(sol.raw.get("hoist_sweep", [])) == 1,
+        f"la ricerca automatica non prova niente e non passa a un carroponte "
+        f"in piu' ({len(tentativi)} tentativi, "
+        f"{len(sol.raw.get('hoist_sweep', []))} numeri di carroponti)",
+    )
+
+    # -- fra un tentativo e l'altro -----------------------------------------
+    # Lo stop arriva all'inizio del secondo tentativo: quello non deve
+    # risolvere niente, e il terzo non deve nemmeno cominciare.
+    piccola = linea(4, 2500, None, takt_max=120.0)
+    fermata = Interruzione()
+
+    def al_secondo(n_h, indice, totale):
+        tentativi_zone.append(indice)
+        if indice == 2:
+            fermata.ferma()
+
+    tentativi_zone = []
+    sol, zone = solve_auto_zones(
+        piccola, n_hoists=2, time_limit_per_candidate=10.0,
+        su_tentativo=al_secondo, interruzione=fermata,
+    )
+    check(
+        tentativi_zone == [1, 2] and sol.raw.get("n_tried") == 2,
+        f"fermata al secondo tentativo, il terzo non parte "
+        f"(avviati {tentativi_zone})",
+    )
+    check(
+        sol.raw.get("interrotto") is True
+        and (sol.status != "INFEASIBLE"),
+        f"e l'esito non e' un verdetto di impossibilita' ({sol.status})",
+    )
+
+
 def main():
     print("=" * 72)
     print("TEST END-TO-END DEL MODELLO (richiede OR-Tools)")
@@ -1151,6 +1251,7 @@ def main():
     test_dove_sosta_il_carro()
     test_pezzo_in_vasca()
     test_frecce_delle_corse_verticali()
+    test_ferma_il_calcolo()
     print("\n" + "=" * 72)
     print(f"RISULTATO: {_n_pass} ok, {_n_fail} falliti  ({time.perf_counter() - t0:.0f}s)")
     print("=" * 72)

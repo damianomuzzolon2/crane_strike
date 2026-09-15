@@ -383,6 +383,40 @@ STRUTTURE = [
      "`status` non e' una lista chiusa. Oltre agli stati del solutore ci sono "
      "'MANUALE' e 'PROPOSTA', ed e' il motivo per cui plotting.py e verify.py "
      "filtrano elencando gli stati da RIFIUTARE invece di quelli da accettare."),
+
+    ("h3", "Interruzione -- fermare un calcolo da un altro thread"),
+    ("c", "model.Interruzione"),
+    ("p",
+     "La richiesta di fermare un calcolo. L'interfaccia ne crea una a ogni "
+     "'Calcola auto', la passa al thread che calcola, e il pulsante Ferma "
+     "chiama ferma(). Una ricerca automatica puo' durare decine di minuti, e "
+     "prima l'unico modo di rinunciarci era chiudere il programma."),
+    ("p",
+     "Il docstring spiega perche' servono DUE meccanismi. Mentre si costruisce "
+     "il modello si e' in Python, e basta guardare `richiesta` ogni tanto: "
+     "solve lo fa a ogni carroponte e a ogni confine. Mentre CP-SAT cerca si e' "
+     "in codice nativo, che non guarda niente: li' serve StopSearch() sul "
+     "solutore in corsa, e per chiamarlo bisogna averlo -- solve lo registra "
+     "con _registra prima di lanciarlo e lo toglie con _libera dopo."),
+    ("q",
+     "IL LUCCHETTO NON E' PRUDENZA GENERICA. Chiude una corsa precisa: una "
+     "richiesta che arriva dopo l'ultimo controllo di `richiesta` ma prima che "
+     "il solutore sia registrato non troverebbe nessuno da fermare, e il "
+     "calcolo durerebbe tutto il suo limite di tempo. Con registrazione e "
+     "stop sotto lo stesso lucchetto le possibilita' sono due sole: il "
+     "solutore e' gia' in lista e viene fermato, oppure la richiesta c'e' gia' "
+     "e _registra risponde False, e il solutore non parte."),
+    ("p",
+     "Misurato su due linee con svincoli, fermando sia durante la costruzione "
+     "sia durante la ricerca: solve risponde fra 0,1 e 0,5 secondi dopo lo "
+     "stop."),
+    ("c", "model._soluzione_interrotta"),
+    ("q",
+     "UNKNOWN, NON INFEASIBLE. Un calcolo fermato non ha dimostrato niente, e "
+     "INFEASIBLE e' una dimostrazione: l'interfaccia la tratterebbe come tale, "
+     "lanciando la diagnosi e consigliando di cambiare la linea. Il segno di "
+     "riconoscimento e' `raw['interrotto']`, che solve_auto_zones e "
+     "solve_auto_hoists guardano per non passare al tentativo successivo."),
 ]
 
 
@@ -1303,6 +1337,14 @@ SOLVE = [
      "Se lo stato non e' OPTIMAL o FEASIBLE si restituisce una Solution vuota "
      "col solo stato. Non si solleva: 'non c'e' soluzione' e' una risposta "
      "legittima, e chi chiama deve poterla distinguere da un errore."),
+    ("p",
+     "Prima di Solve il solutore si registra presso l'Interruzione, se c'e', e "
+     "si toglie in un finally: anche se Solve sollevasse, un solutore finito "
+     "non deve restare in lista. Se la richiesta era gia' arrivata _registra "
+     "risponde False e non si parte nemmeno. Dopo, `interrotto` finisce in "
+     "raw sia quando non c'e' soluzione sia quando c'e': una soluzione "
+     "trovata prima dello stop e' valida, ma chi la mostra deve sapere che "
+     "non e' stata dimostrata ottima."),
     ("c", "model.solve", "    segments_per_hoist = []", "    raw = {"),
     ("p",
      "L'ordine di visita si ricostruisce SEGUENDO gli archi scelti: si parte "

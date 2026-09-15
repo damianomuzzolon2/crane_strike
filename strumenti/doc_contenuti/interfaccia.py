@@ -254,6 +254,36 @@ CALCOLO = [
      "linea che prova quattro numeri di carroponti direbbe una frazione del "
      "vero. L'orologio e' MONOTONO, cosi' non salta se cambia l'ora di "
      "sistema."),
+    ("p",
+     "Ogni lavoro riceve un'Interruzione NUOVA, passata come argomento alla "
+     "funzione invece di essere letta da self nel thread: una richiesta di "
+     "stop rimasta dal calcolo precedente non deve fermare quello nuovo appena "
+     "parte, e il thread non deve dipendere da uno stato della finestra che "
+     "nel frattempo potrebbe cambiare."),
+
+    ("h3", "Fermare il calcolo"),
+    ("c", "interfaccia.Applicazione._ferma_calcolo"),
+    ("p",
+     "Il pulsante Ferma chiede lo stop e basta. Non tocca la soluzione, non "
+     "chiude niente e non aspetta: il thread di lavoro, fermato, restituisce "
+     "il suo risultato nella coda come un calcolo finito, e lo gestisce "
+     "_controlla_coda. Cosi' c'e' un solo percorso per la fine di un calcolo, "
+     "e non due da tenere d'accordo."),
+    ("p",
+     "Quel risultato puo' essere di due tipi. Se al momento dello stop c'era "
+     "gia' una soluzione valida, la si mostra e la si verifica come le altre, "
+     "ma l'origine lo dice: 'la migliore trovata prima dello stop: valida, non "
+     "dimostrata ottima' -- anche se l'ultima risoluzione aveva detto OPTIMAL, "
+     "perche' e' ottima per le zone provate e le altre non lo sono state. Se "
+     "non c'era niente, l'esito e' 'interrotto' e il ciclogramma che si stava "
+     "guardando RESTA: chi ferma rinuncia al calcolo nuovo, non al lavoro di "
+     "prima. _risolvi in quel caso salta anche la diagnosi, che sarebbero "
+     "altre risoluzioni da aspettare su una linea che nessuno ha dimostrato "
+     "impossibile."),
+    ("p",
+     "Lo stop non e' istantaneo -- misurato, fra 0,1 e 0,5 secondi -- e per "
+     "questo il pulsante si spegne subito e la barra scrive 'Interruzione in "
+     "corso...': un clic che non sembra fare niente viene ripetuto."),
 
     ("h3", "L'avanzamento: quanto manca"),
     ("p",
