@@ -23,6 +23,13 @@ from model import ProblemData, Solution, Segment
 # traiettoria. L'unica altra distinzione utile e' se il pezzo e' appeso o no,
 # ed e' affidata al tratteggio; lo spessore e' uguale per tutti.
 _LARGHEZZA = 2.2
+# Il pezzo fermo in vasca: spesso come le traiettorie, ma GRIGIO. Col colore
+# del carroponte che ce l'aveva lasciato, nelle vasche di confine un pezzo
+# lasciato da un carro e ripreso dall'altro aveva il colore di uno solo dei
+# due, e le righe colorate si confondevano con le traiettorie. Il grigio non
+# e' quello del pettine (#9a9a9a), che nella vista Modifica vuol dire "ancora
+# da assegnare", e nemmeno quello delle righe delle vasche (#dddddd).
+_COLORE_PEZZO = "#b8b8b8"
 
 _STYLE = {
     # Tutti i tratti sono LINEA CONTINUA, che il carroponte sia carico o
@@ -142,6 +149,53 @@ def eventi_del_trasporto(
     ]
 
 
+def pezzi_in_vasca(
+    data: ProblemData, solution: Solution
+) -> list[tuple[int, float, float]]:
+    """Quando il pezzo sta in ogni vasca intermedia.
+
+    Una tupla per stazione: (stazione, entrata, uscita). L'ENTRATA
+    e' l'immersione del trasporto che ce lo porta, l'USCITA l'aggancio di
+    quello che lo riprende: gli stessi due pallini che il ciclogramma marca
+    sulle traiettorie, calcolati da `eventi_del_trasporto`, cosi' la linea del
+    pezzo comincia e finisce esattamente su di loro.
+
+    I tempi vengono da `actual_time`, che e' ASSOLUTO, e non dai segmenti, che
+    sono noti solo modulo T: un pezzo che resta in vasca piu' di un takt time
+    sarebbe altrimenti indistinguibile da uno che ci resta pochi secondi. Per
+    la stessa ragione l'uscita puo' cadere oltre T, o l'intervallo durare piu'
+    di un periodo -- tocca a chi disegna ripeterlo.
+
+    Una vasca compare solo se almeno uno dei due trasporti -- quello che ci
+    porta il pezzo o quello che lo riprende -- e' di un carroponte. Nel
+    ciclogramma di una composizione a mano ancora a meta' i trasporti non
+    assegnati non si vedono, e la sosta fra due di loro non deve vedersi
+    nemmeno lei: sarebbe un pezzo che nessuno ha portato li'.
+
+    Carico e scarico sono esclusi: li' il pezzo non viene depositato da un
+    carroponte, o non viene ripreso."""
+    at = solution.actual_time
+    if len(at) != data.n_moves:
+        return []
+    assegnate = {
+        seg.move
+        for segs in solution.segments_per_hoist
+        for seg in segs
+        if seg.kind == "loaded" and seg.move is not None
+    }
+    fuori = []
+    for s in range(1, data.n_moves):
+        if s - 1 not in assegnate and s not in assegnate:
+            continue
+        entrata = eventi_del_trasporto(
+            data, s - 1, at[s - 1],
+            data.station_position(s - 1), data.station_position(s),
+        )[3][0]
+        uscita = at[s] + _aggancio_dall_inizio_presa(data, s)
+        fuori.append((s, entrata, uscita))
+    return fuori
+
+
 def math_sign(v: float) -> float:
     return 1.0 if v >= 0 else -1.0
 
@@ -259,6 +313,46 @@ def plot_cyclogram(
                     zorder=5,
                 )
 
+    # -- i pezzi in vasca ---------------------------------------------------
+    # Una linea grigia, spessa come le traiettorie, dal pallino
+    # dell'immersione a quello dell'aggancio. Dice dove sta il pezzo mentre
+    # nessun carro lo tiene, che dalle sole traiettorie non si vede: il carro
+    # se ne va, e la vasca resta una riga come tutte le altre.
+    #
+    # Grigia e non del colore di un carroponte: il colore dice di chi e' una
+    # traiettoria, e il pezzo in vasca non e' di nessuno -- nelle vasche di
+    # confine lo lascia un carro e lo riprende l'altro.
+    #
+    # Sotto le traiettorie: quando il carro resta fermo sopra la vasca la sua
+    # linea copre quella del pezzo, ed e' giusto cosi' -- li' si guarda il
+    # carro.
+    #
+    # L'intervallo si ripete ogni T. Se dura piu' di un periodo le copie si
+    # accavallano sulla stessa riga: sono pezzi diversi nella stessa vasca a
+    # capienza multipla, e la riga piena dice proprio che la vasca non si
+    # svuota mai. Un disegno solo, con i NaN a separare i tratti, tagliato alla
+    # fine dell'ultimo ciclo, dove finiscono le traiettorie.
+    fine = n_cycles * T
+    linea_t, linea_x = [], []
+    for s, entrata, uscita in pezzi_in_vasca(data, solution):
+        y = data.station_position(s)
+        m = int(np.floor(-uscita / T))
+        while entrata + m * T < fine:
+            a, b = max(entrata + m * T, 0.0), min(uscita + m * T, fine)
+            if b > a:
+                linea_t.extend([a, b, np.nan])
+                linea_x.extend([y, y, np.nan])
+            m += 1
+    if linea_t:
+        ax.plot(
+            linea_t,
+            linea_x,
+            color=_COLORE_PEZZO,
+            linewidth=_LARGHEZZA,
+            solid_capstyle="butt",
+            zorder=1,
+        )
+
     # -- linee verticali di separazione fra cicli ---------------------------
     for cycle in range(n_cycles + 1):
         ax.axvline(cycle * T, color="#999999", linewidth=1, linestyle=":", zorder=0)
@@ -269,13 +363,22 @@ def plot_cyclogram(
     ax.set_xlim(0.0, n_cycles * T * 1.01)
 
     # -- legenda --------------------------------------------------------
-    # Solo i carroponti. Le due voci sul tipo di tratto -- "con il pezzo",
-    # "senza pezzo" -- descrivevano il tratteggio, che non c'e' piu'.
+    # I carroponti, e la linea grigia del pezzo. Le due voci sul tipo di
+    # tratto -- "con il pezzo", "senza pezzo" -- descrivevano il tratteggio,
+    # che non c'e' piu'. Quella del pezzo invece resta: una riga di vasca
+    # grigia non si spiega da sola come un pallino su una traiettoria.
     legend_elems = []
     for h in range(data.n_hoists):
         legend_elems.append(
             Patch(
                 color=_HOIST_COLORS[h % len(_HOIST_COLORS)], label=f"Carroponte {h+1}"
+            )
+        )
+    if linea_t:
+        legend_elems.append(
+            Line2D(
+                [0], [0], color=_COLORE_PEZZO, linewidth=_LARGHEZZA,
+                label="pezzo in vasca",
             )
         )
     ax.legend(handles=legend_elems, loc="upper right", fontsize=8, framealpha=0.9)

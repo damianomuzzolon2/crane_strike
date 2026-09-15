@@ -6,7 +6,7 @@ invarianti regge, e dove sono le trappole — comprese quelle in cui siamo gia'
 caduti, che sono la parte piu' utile.
 
 Stato al momento della scrittura: 16 file Python, 15.223 righe, cinque suite di
-test per **467 asserzioni** complessive.
+test per **472 asserzioni** complessive.
 
 ---
 
@@ -561,13 +561,14 @@ nessun widget**.
 
 | vista | quando | cosa |
 | --- | --- | --- |
-| ciclogramma | `Calcola auto`, `Fine modifica` | traiettorie dei carroponti, 2 cicli |
+| ciclogramma | `Calcola auto`, `Fine modifica` | traiettorie dei carroponti, 2 cicli, e il pezzo fermo in vasca come linea grigia (`plotting.pezzi_in_vasca`) |
 | modifica | `Calcola man`, `Modifica` | percorso dei pezzi in **grigio** + giro dei carroponti sopra |
 
 Si modifica sempre sulla seconda, e non e' una preferenza: nel ciclogramma nudo
-si disegnano solo le traiettorie, quindi un trasporto **non assegnato non
-compare affatto** — pur restando cliccabile, perche' `_tratti_trasporto()` lo
-calcola comunque. Invisibile e cliccabile insieme e' la combinazione peggiore.
+si disegnano solo le traiettorie e le soste in vasca dei pezzi, quindi un
+trasporto **non assegnato non compare affatto** — pur restando cliccabile,
+perche' `_tratti_trasporto()` lo calcola comunque. Invisibile e cliccabile
+insieme e' la combinazione peggiore.
 
 ### 9.2 Clic e trascinamento
 
@@ -741,7 +742,7 @@ lascia il pulsante vuoto.
 
 ---
 
-## 11. I test — 467 asserzioni, cinque suite
+## 11. I test — 472 asserzioni, cinque suite
 
 Nessun pytest: ogni file si lancia da solo, stampa cosa ha provato e restituisce
 un codice d'uscita.
@@ -751,7 +752,7 @@ un codice d'uscita.
 | `test/test_verify.py` | 119 | — | il verificatore trova davvero quello che deve? |
 | `test/test_excel_io.py` | 97 | — | un file compilato male viene respinto con un messaggio utile? |
 | `test/test_simulazione.py` | 78 | — | la simulazione mostra il ciclogramma che c'e'? |
-| `test/test_model.py` | 61 | OR-Tools | il modello produce soluzioni fisicamente valide? |
+| `test/test_model.py` | 66 | OR-Tools | il modello produce soluzioni fisicamente valide? |
 | `test/test_interfaccia.py` | 112 | OR-Tools + grafica | l'interfaccia si comporta come deve? |
 
 > `test_model.py` risolve davvero, con limiti di tempo dell'ordine del minuto.

@@ -82,7 +82,7 @@ OR-Tools installato.
 | file | righe | contenuto |
 | --- | ---: | --- |
 | `excel_io.py` | 1742 | Tutto l'Excel: `scrivi_modello()` genera il file da compilare, `leggi_problema()` lo rilegge raccogliendo **tutti** gli errori di compilazione con foglio e cella, `scrivi_risultati()` produce il file dei risultati -- che e' anche un file di ingresso, col ciclogramma dentro, per poterlo riaprire, diviso in due meta' (`Input` e `Output`) dietro due cartelli colorati. |
-| `plotting.py` | 231 | `plot_cyclogram()`: disegna il ciclogramma (posizione lungo la rotaia contro tempo) con il profilo cinematico vero, non con segmenti diritti, e i punti sugli istanti in cui succede qualcosa (aggancio, sgancio, partenza, arrivo). |
+| `plotting.py` | 389 | `plot_cyclogram()`: disegna il ciclogramma (posizione lungo la rotaia contro tempo) con il profilo cinematico vero, non con segmenti diritti, i punti sugli istanti in cui succede qualcosa (aggancio, sgancio, partenza, arrivo) e il pezzo fermo in vasca come linea grigia. |
 | `simulazione.py` | 1388 | La **simulazione**: la linea vista di fronte, in movimento. `Simulazione` e' la parte che conta e non importa tkinter — dato un istante dice dove sta ogni carroponte (posizione, quota del gancio, cosa sta facendo) e ogni pezzo; `FinestraSimulazione` e' solo la finestra che la anima. Non calcola niente di nuovo: legge `segments_per_hoist` e `actual_time` della soluzione, cioe' gli stessi oggetti che disegnano il ciclogramma. |
 
 ### Programmi da lanciare
@@ -325,9 +325,21 @@ ci sono i punti sugli eventi la linea si segue meglio intera. Se il carroponte
 sia carico si legge dal verso -- sale la linea col pezzo e la ridiscende a
 vuoto -- e dal foglio `Movimenti`, che lo scrive tratto per tratto.
 
-Niente altro. Un colore per ogni tipo di tratto rendeva il grafico un
-arcobaleno in cui non si riusciva piu' a seguire un carroponte dall'inizio alla
-fine, che e' l'unica cosa per cui serve un ciclogramma.
+Un colore per ogni tipo di tratto rendeva il grafico un arcobaleno in cui non
+si riusciva piu' a seguire un carroponte dall'inizio alla fine, che e' l'unica
+cosa per cui serve un ciclogramma.
+
+L'unica aggiunta e' il **pezzo in vasca**: una linea **grigia**, spessa come
+le traiettorie, sulla riga della vasca, dal pallino dell'immersione a quello
+dell'aggancio. Quando il carro deposita e se ne va, la riga resta grigia finche'
+un carro non torna a riprendere il pezzo; quando invece il carro resta li'
+fermo, la sua linea copre quella grigia. Se la permanenza e' piu' lunga del
+takt time la riga e' grigia di continuo: nella vasca c'e' sempre almeno un
+pezzo. E' grigia e non del colore di un carroponte perche' il pezzo in vasca
+non e' di nessuno: nelle vasche di confine lo lascia un carro e lo riprende
+l'altro, e col colore di uno dei due si confondeva con le traiettorie. Carico
+e scarico non hanno la linea, perche' li' il pezzo non viene lasciato da un
+carroponte o non viene ripreso.
 
 ### Ingrandire
 
@@ -1670,7 +1682,7 @@ python test/esempio.py           # risoluzione reale + verifica + grafico
 ```
 
 Ognuno stampa cosa ha provato e finisce con `RISULTATO: n ok, m falliti`.
-Nessuna dipendenza da pytest. Stato attuale: **119, 97, 78, 61 e 112
+Nessuna dipendenza da pytest. Stato attuale: **119, 97, 78, 66 e 112
 asserzioni, zero fallimenti**.
 
 **La risoluzione CP-SAT e' eseguita e verificata end-to-end.** Sull'esempio
@@ -1684,7 +1696,7 @@ I cinque file rispondono a domande diverse e si completano:
   trovare?* Uno solo dei casi e' corretto, gli altri sono rotti di proposito
   (collisioni, permanenze, periodicita', fasi verticali, capienza, geometrie
   patologiche). Le soluzioni sono costruite a mano, quindi non serve OR-Tools.
-- `test_model.py` — 17 casi. *Il modello produce soluzioni fisicamente valide?*
+- `test_model.py` — 18 casi. *Il modello produce soluzioni fisicamente valide?*
   Risolve davvero e passa ogni risultato al verificatore.
 - `test_excel_io.py` — 24 casi. *Un file compilato male viene respinto con un
   messaggio utile, e i risultati escono corretti?* In ingresso: valori mancanti

@@ -926,6 +926,116 @@ def test_dove_sosta_il_carro():
     )
 
 
+def test_pezzo_in_vasca():
+    print()
+    print("[9-ter] la linea grigia del pezzo in vasca")
+    # Sul ciclogramma il pezzo fermo in vasca e' una linea grigia, spessa come
+    # le traiettorie, dall'immersione all'aggancio. Deve
+    # cominciare e finire ESATTAMENTE sui pallini delle traiettorie, e deve
+    # reggere un pezzo che resta in vasca piu' di un takt time: dai soli
+    # segmenti, noti modulo T, quel caso non si distinguerebbe da una sosta
+    # di pochi secondi.
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    import numpy as np
+    from plotting import (
+        _COLORE_PEZZO,
+        _HOIST_COLORS,
+        eventi_del_trasporto,
+        pezzi_in_vasca,
+        plot_cyclogram,
+    )
+
+    data = linea(
+        4, 2500, [HoistZone(0, 1), HoistZone(2, 3)],
+        # permanenza minima piu' lunga del takt time massimo: in ogni vasca
+        # c'e' sempre piu' di un pezzo, ed e' il caso che il modulo T sbaglia
+        dwell=(130, 400), capacity=4, takt_min=20.0, takt_max=120.0,
+    )
+    sol, r = risolvi_e_verifica(data, "linea con permanenze lunghe")
+    if r is None:
+        check(False, sol.status + ": niente da disegnare")
+        return
+    T = sol.T
+    pezzi = pezzi_in_vasca(data, sol)
+    check(
+        [s for s, _, _ in pezzi] == list(range(1, data.n_moves)),
+        f"una linea per ogni vasca intermedia, carico e scarico esclusi "
+        f"({[s for s, _, _ in pezzi]})",
+    )
+    if not pezzi:
+        return
+    check(
+        all(u - e > T for _, e, u in pezzi),
+        f"e ognuna dura piu' di un takt time, come le permanenze "
+        f"(T = {T:.1f} s, durate {[round(u - e, 1) for _, e, u in pezzi]})",
+    )
+
+    # comincia e finisce sui pallini delle traiettorie, modulo T
+    trasporto = {
+        s.move: s
+        for segs in sol.segments_per_hoist
+        for s in segs
+        if s.kind == "loaded" and s.move is not None
+    }
+
+    def dal_carro(k):
+        s = trasporto[k]
+        return eventi_del_trasporto(
+            data, k, s.t_start - data.pick_time_at(k), s.x_start, s.x_end
+        )
+
+    def modulo(a, b):
+        return min((a - b) % T, (b - a) % T)
+
+    scarti = [
+        max(modulo(e, dal_carro(s - 1)[3][0]), modulo(u, dal_carro(s)[0][0]))
+        for s, e, u in pezzi
+    ]
+    check(
+        max(scarti) < 1e-6,
+        f"la linea parte dall'immersione e arriva all'aggancio "
+        f"(scarto massimo {max(scarti):.1e} s)",
+    )
+    # Il grigio esiste per non confondersi: con nessun carroponte, con le
+    # righe delle vasche, e con il grigio che nella vista Modifica vuol dire
+    # "ancora da assegnare".
+    from interfaccia import _GRIGIO
+
+    check(
+        _COLORE_PEZZO not in set(_HOIST_COLORS) | {"#dddddd", _GRIGIO},
+        f"il grigio del pezzo ({_COLORE_PEZZO}) non e' il colore di nient'altro",
+    )
+
+    # e il disegno la mostra davvero, a ogni periodo
+    fig = plot_cyclogram(data, sol, n_cycles=2)
+    grigie = [l for l in fig.axes[0].lines if l.get_color() == _COLORE_PEZZO]
+
+    def coperto(y, t):
+        for l in grigie:
+            xs, ys = l.get_xdata(), l.get_ydata()
+            for i in range(0, len(xs) - 1, 3):
+                if ys[i] == y and xs[i] <= t <= xs[i + 1]:
+                    return True
+        return False
+
+    mancanti = [
+        (s, round(t, 1))
+        for s, e, u in pezzi
+        for t in np.linspace(0.0, 2 * T, 41)
+        if (t - e) % T <= (u - e) - 1e-6
+        and not coperto(data.station_position(s), t)
+    ]
+    plt.close(fig)
+    check(
+        not mancanti,
+        f"su due cicli la linea copre ogni istante in cui il pezzo e' in vasca "
+        f"(scoperti: {mancanti[:5]})",
+    )
+
+
 def main():
     print("=" * 72)
     print("TEST END-TO-END DEL MODELLO (richiede OR-Tools)")
@@ -948,6 +1058,7 @@ def main():
     test_vasca_ripetuta()
     test_ricostruzione_fedele()
     test_dove_sosta_il_carro()
+    test_pezzo_in_vasca()
     print("\n" + "=" * 72)
     print(f"RISULTATO: {_n_pass} ok, {_n_fail} falliti  ({time.perf_counter() - t0:.0f}s)")
     print("=" * 72)

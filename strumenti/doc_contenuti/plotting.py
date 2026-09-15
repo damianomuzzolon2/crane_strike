@@ -1,7 +1,7 @@
 """
 Il testo dei documenti di plotting.py.
 
-Sei fra funzioni e metodi, ma il modulo e' interessante piu' per le scelte di
+Otto funzioni, ma il modulo e' interessante piu' per le scelte di
 disegno che per il codice: buona parte dei suoi commenti racconta cose che
 sono state PROVATE e tolte. Questo documento le riprende, perche' sono la
 parte che non si ricava rileggendo il codice.
@@ -66,6 +66,17 @@ RIGA_PER_RIGA = [
      "tratti con il pezzo (loaded, pick, release, quota) stanno sopra a quelli "
      "a vuoto: quando due linee si sovrappongono, quella che conta e' quella "
      "che porta il pezzo."),
+    ("p",
+     "_COLORE_PEZZO e' l'unico colore che non e' di un carroponte: la linea "
+     "del pezzo fermo in vasca, spiegata nel paragrafo 4. Il commento dice "
+     "anche da quali grigi deve restare distinto -- quello del pettine, che "
+     "nella vista Modifica vuol dire 'ancora da assegnare', e quello delle "
+     "righe delle vasche -- e il test [9-ter] lo controlla."),
+    ("p",
+     "Prima era una linea sottile del colore del carro che aveva lasciato il "
+     "pezzo. Nelle vasche di confine, dove il pezzo lo lascia un carro e lo "
+     "riprende l'altro, il colore era di uno solo dei due, e le righe colorate "
+     "si confondevano con le traiettorie: il colore deve dire UNA cosa sola."),
     ("q",
      "IL DIZIONARIO _STYLE DEVE AVERE UNA VOCE PER OGNI KIND. La riga che "
      "disegna fa `**_STYLE[seg.kind]`: un tipo di segmento nuovo che non sia "
@@ -195,6 +206,34 @@ RIGA_PER_RIGA = [
      "Due righe quasi identiche che dicono cose diverse, ed e' esattamente il "
      "tipo di dettaglio che una rilettura distratta uniforma per sbaglio."),
 
+    ("h3", "pezzi_in_vasca -- dove sta il pezzo quando nessuno lo tiene"),
+    ("c", "plotting.pezzi_in_vasca"),
+    ("p",
+     "Per ogni vasca intermedia restituisce tre cose: la stazione, l'istante "
+     "in cui il pezzo entra e quello in cui esce. Entrata e uscita sono l'immersione del trasporto che lo "
+     "porta e l'aggancio di quello che lo riprende: gli stessi due pallini "
+     "disegnati sulle traiettorie, presi da eventi_del_trasporto e da "
+     "_aggancio_dall_inizio_presa, cosi' la linea grigia comincia e finisce "
+     "esattamente sotto di loro."),
+    ("q",
+     "I TEMPI VENGONO DA actual_time, NON DAI SEGMENTI. I segmenti sono "
+     "istanti entro un ciclo, noti solo modulo T: un pezzo che resta in vasca "
+     "130 secondi con un takt time di 34 sembrerebbe restarci 28, e la riga "
+     "resterebbe vuota proprio nelle vasche in cui non si svuota mai. "
+     "actual_time e' la catena ASSOLUTA del pezzo di riferimento, e la "
+     "compilano sia il solutore sia la ricostruzione di una composizione "
+     "manuale. Il test [9-ter] prova esattamente questo guasto, e lo vede."),
+    ("p",
+     "Una vasca compare solo se almeno uno dei due trasporti che la toccano e' "
+     "di un carroponte. Quali lo siano si ricava dai tratti a carico -- per la "
+     "stessa ragione per cui da li' si ricavano gli eventi: c'e' sempre, ed e' "
+     "uno per mossa. In una composizione a mano ancora a meta' i trasporti "
+     "non assegnati non si vedono, e la sosta fra due di loro sarebbe un pezzo "
+     "che nessuno ha portato li'."),
+    ("p",
+     "Carico e scarico sono esclusi dal ciclo: nella prima il pezzo non e' "
+     "stato depositato da un carroponte, dall'ultima non viene ripreso."),
+
     # ==================================================================
     ("h2", "3. Le due funzioni di servizio"),
     ("c", "plotting.math_sign"),
@@ -288,7 +327,7 @@ RIGA_PER_RIGA = [
 
     ("h3", "Le traiettorie, ripetute"),
     ("c", "plotting.plot_cyclogram", "        for cycle in range(n_cycles):",
-     "    # -- linee verticali"),
+     "    # -- i pezzi in vasca"),
     ("p",
      "Il ciclo esterno sono i periodi: gli stessi segmenti vengono ridisegnati "
      "traslati di T, 2T e cosi' via. Non si ricalcola niente -- e' letteralmente "
@@ -299,17 +338,46 @@ RIGA_PER_RIGA = [
      "noti che sono calcolati UNA volta sola, fuori dal ciclo dei periodi: "
      "calcolarli dentro avrebbe rifatto lo stesso lavoro n_cycles volte."),
 
+    ("h3", "I pezzi in vasca"),
+    ("c", "plotting.plot_cyclogram", "    # -- i pezzi in vasca",
+     "    # -- linee verticali"),
+    ("p",
+     "Sulla riga di ogni vasca intermedia, una linea grigia spessa come le "
+     "traiettorie, dall'immersione all'aggancio. Gli intervalli li da' "
+     "pezzi_in_vasca; qui si ripetono ogni T, si tagliano alla fine "
+     "dell'ultimo ciclo e finiscono tutti in un disegno solo, separati da NaN."),
+    ("p",
+     "La ripetizione parte dal periodo m = floor(-uscita / T), cioe' dal primo "
+     "la cui copia finisce dopo lo zero: un pezzo entrato 'prima' dell'inizio "
+     "del disegno -- nel ciclo precedente, o in quello prima ancora se la "
+     "permanenza e' lunga -- e' ancora in vasca all'istante zero, e la sua "
+     "linea deve comparire a sinistra. Partire da m = 0 lascerebbe scoperto "
+     "l'inizio del grafico proprio nelle vasche con i tempi piu' lunghi."),
+    ("p",
+     "Le copie di un intervallo piu' lungo di T si accavallano sulla stessa "
+     "riga, e va bene: sono pezzi diversi in una vasca a capienza multipla, e "
+     "la riga sempre piena dice che quella vasca non si svuota mai."),
+    ("q",
+     "ZORDER 1, SOTTO LE TRAIETTORIE. Quando il carro resta fermo sopra la "
+     "vasca col pezzo dentro, la sua linea copre quella grigia. Non e' "
+     "una perdita: la linea del pezzo serve a dire dov'e' il pezzo quando "
+     "nessun carro e' li' a mostrarlo."),
+
     ("h3", "Assi, confini fra cicli, legenda"),
     ("c", "plotting.plot_cyclogram", "    # -- linee verticali", "    if save_path:"),
     ("p",
      "Le linee verticali punteggiate segnano i confini fra un periodo e il "
      "successivo. Sono n_cycles + 1 perche' servono anche i due estremi."),
     ("p",
-     "La legenda elenca solo i carroponti. Il commento ricorda che c'erano "
-     "anche due voci sul tipo di tratto -- 'con il pezzo', 'senza pezzo' -- "
-     "che descrivevano il tratteggio: tolto quello, spiegavano una distinzione "
+     "La legenda elenca i carroponti e, se ce n'e' almeno una, la linea "
+     "grigia del pezzo in vasca. Il commento ricorda che c'erano anche due "
+     "voci sul tipo di tratto -- 'con il pezzo', 'senza pezzo' -- che "
+     "descrivevano il tratteggio: tolto quello, spiegavano una distinzione "
      "che il disegno non fa piu'. Una legenda che nomina cose invisibili e' "
      "peggio di nessuna legenda."),
+    ("p",
+     "La voce del pezzo invece resta, perche' una riga di vasca grigia non si "
+     "spiega da sola come un pallino su una traiettoria."),
     ("p",
      "L'ultima riga sostituisce il lettore di coordinate con la funzione del "
      "paragrafo 3."),
