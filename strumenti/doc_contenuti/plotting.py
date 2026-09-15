@@ -1,7 +1,7 @@
 """
 Il testo dei documenti di plotting.py.
 
-Otto funzioni, ma il modulo e' interessante piu' per le scelte di
+Nove funzioni, ma il modulo e' interessante piu' per le scelte di
 disegno che per il codice: buona parte dei suoi commenti racconta cose che
 sono state PROVATE e tolte. Questo documento le riprende, perche' sono la
 parte che non si ricava rileggendo il codice.
@@ -235,6 +235,45 @@ RIGA_PER_RIGA = [
      "stato depositato da un carroponte, dall'ultima non viene ripreso."),
 
     # ==================================================================
+    ("h3", "corse_verticali -- le frecce su e giu'"),
+    ("c", "plotting.corse_verticali"),
+    ("p",
+     "Per UN carroponte restituisce dove il gancio sale o scende: l'istante a "
+     "meta' della corsa, la posizione lungo la rotaia e il verso. Il "
+     "ciclogramma ci mette sopra una freccetta, perche' i tratti in cui il "
+     "gancio lavora sono piatti come un'attesa e senza la freccia non si "
+     "distinguono."),
+    ("q",
+     "IL VERSO E' UN DATO, MAI UNA DEDUZIONE. Per presa e rilascio lo dicono "
+     "le fasi: ogni LiftPhase ha quota iniziale e finale, e basta confrontarle. "
+     "Per le corse a vuoto sugli svincoli lo porta scritto il segmento, nel "
+     "campo Segment.sale, che riempie chi costruisce il rientro. Dedurlo dai "
+     "tratti vicini -- 'dopo un rilascio il gancio e' in basso, quindi sale' "
+     "-- e' il tipo di macchina a stati che nella simulazione sbagliava tutto "
+     "sulle postazioni senza corsa, ed e' ambiguo quando una delle due corse "
+     "manca."),
+    ("p",
+     "I tempi della presa si contano dal suo inizio, ricavato dal tratto a "
+     "carico sottraendo pick_time_at(k); quelli del rilascio dall'arrivo, che "
+     "e' la fine del tratto a carico. E' la stessa scelta di "
+     "eventi_del_trasporto, per la stessa ragione: presa e rilascio possono "
+     "essere spezzati in piu' tratti da una zona di cambio quota, il tratto a "
+     "carico no."),
+    ("p",
+     "La posizione e' quella della fase quando la fase la dichiara -- in una "
+     "zona di cambio quota le salite avvengono sul punto di cambio quota, non "
+     "sopra la vasca -- e altrimenti quella della stazione. Le fasi senza "
+     "durata o senza dislivello -- aggancio, sgancio, sgocciolamento, una "
+     "vasca con corsa zero -- non producono frecce."),
+    ("q",
+     "COME SI SA CHE IL VERSO E' GIUSTO. Il test [9-quater] non ricalcola il "
+     "verso con un secondo metodo: controlla che su ogni giro le frecce si "
+     "ALTERNINO, perche' un gancio non puo' salire due volte senza essere "
+     "sceso. Su una linea con svincoli e senza zone di cambio quota e' una "
+     "legge fisica, e un verso invertito -- sulle fasi o sui tratti a vuoto -- "
+     "la rompe: e' stato provato."),
+
+    # ==================================================================
     ("h2", "3. Le due funzioni di servizio"),
     ("c", "plotting.math_sign"),
     ("p",
@@ -304,6 +343,14 @@ RIGA_PER_RIGA = [
      "Restano quattro punti per trasporto: aggancio, sgancio, partenza e "
      "arrivo di ogni traslazione. Tutti con lo stesso simbolo e senza voce in "
      "legenda."),
+    ("p",
+     "In fondo al blocco si preparano anche le FRECCE delle corse verticali, "
+     "da corse_verticali, divise per verso. Anche loro senza voce in legenda: "
+     "una freccia in su sopra un tratto piatto si spiega da sola. Vengono "
+     "disegnate con una trasformazione spostata di 9 punti tipografici verso "
+     "l'alto (offset_copy), non di un numero di millimetri sull'asse: cosi' "
+     "restano appena sopra la linea a qualunque ingrandimento, invece di "
+     "staccarsene zoomando o finirci sopra allargando."),
     ("q",
      "GLI EVENTI SI RICAVANO DAL TRATTO A CARICO. La condizione e' "
      "`seg.kind == 'loaded'`, non 'pick' o 'release'. La ragione e' che presa "

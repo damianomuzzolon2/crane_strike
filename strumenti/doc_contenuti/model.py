@@ -1526,6 +1526,14 @@ COSTRUZIONE = [
      "lunghezza nulla -- verrebbe campionato come un movimento che non c'e' -- "
      "ne' un'attesa: e' un movimento, e la simulazione deve poterlo mostrare "
      "per quello che e'."),
+    ("p",
+     "Ogni `lift_empty` porta anche il VERSO, nel campo `sale`: vero per la "
+     "tratta 1 di tratte_rientro, la salita sullo svincolo di partenza, falso "
+     "per la 3, la discesa su quello di arrivo. E' l'unico punto in cui lo si "
+     "sa per certo. Dopo, dai soli segmenti, bisognerebbe dedurlo dai tratti "
+     "vicini, e se una delle due corse manca -- una vasca senza corsa, la cui "
+     "tratta ha durata zero e viene saltata -- quella che resta non dice da "
+     "sola da che parte va. Lo usa il ciclogramma per le frecce su e giu'."),
     ("c", "model._segmenti_fasi"),
     ("p",
      "I tratti disegnabili di una presa o di un rilascio. Il caso normale e' "

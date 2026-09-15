@@ -82,7 +82,7 @@ OR-Tools installato.
 | file | righe | contenuto |
 | --- | ---: | --- |
 | `excel_io.py` | 1742 | Tutto l'Excel: `scrivi_modello()` genera il file da compilare, `leggi_problema()` lo rilegge raccogliendo **tutti** gli errori di compilazione con foglio e cella, `scrivi_risultati()` produce il file dei risultati -- che e' anche un file di ingresso, col ciclogramma dentro, per poterlo riaprire, diviso in due meta' (`Input` e `Output`) dietro due cartelli colorati. |
-| `plotting.py` | 389 | `plot_cyclogram()`: disegna il ciclogramma (posizione lungo la rotaia contro tempo) con il profilo cinematico vero, non con segmenti diritti, i punti sugli istanti in cui succede qualcosa (aggancio, sgancio, partenza, arrivo) e il pezzo fermo in vasca come linea grigia. |
+| `plotting.py` | 470 | `plot_cyclogram()`: disegna il ciclogramma (posizione lungo la rotaia contro tempo) con il profilo cinematico vero, non con segmenti diritti, i punti sugli istanti in cui succede qualcosa (aggancio, sgancio, partenza, arrivo), le frecce su e giu' sulle corse verticali del gancio e il pezzo fermo in vasca come linea grigia. |
 | `simulazione.py` | 1388 | La **simulazione**: la linea vista di fronte, in movimento. `Simulazione` e' la parte che conta e non importa tkinter — dato un istante dice dove sta ogni carroponte (posizione, quota del gancio, cosa sta facendo) e ogni pezzo; `FinestraSimulazione` e' solo la finestra che la anima. Non calcola niente di nuovo: legge `segments_per_hoist` e `actual_time` della soluzione, cioe' gli stessi oggetti che disegnano il ciclogramma. |
 
 ### Programmi da lanciare
@@ -308,6 +308,13 @@ qualcosa, cioe' l'**aggancio** e lo **sgancio** del telaio e la **partenza** e
 l'**arrivo** di ogni traslazione. Sono tutti uguali e non hanno una voce in
 legenda, perche' cosa sia ciascuno lo dice gia' la traiettoria: se li' la linea
 diventa obliqua il carroponte parte, se resta piatta il telaio cambia mano.
+
+Sopra i tratti piatti in cui il gancio **sale** o **scende** c'e' una piccola
+**freccia** del colore del carroponte, a meta' della corsa: ↑ sul sollevamento
+del telaio, ↓ sull'immersione, e lo stesso sulle salite e discese a vuoto sugli
+svincoli e su quelle delle zone di cambio quota. Un tratto piatto altrimenti e'
+uguale a un'attesa: la freccia dice che li' il carro e' fermo lungo la rotaia
+ma il gancio sta lavorando, e in che verso.
 
 Fra un pallino e l'altro si legge quanto e' durata ogni cosa. Lo spazio fra
 l'arrivo e lo sgancio, per esempio, e' l'immersione del telaio: tempo in cui il
@@ -1682,7 +1689,7 @@ python test/esempio.py           # risoluzione reale + verifica + grafico
 ```
 
 Ognuno stampa cosa ha provato e finisce con `RISULTATO: n ok, m falliti`.
-Nessuna dipendenza da pytest. Stato attuale: **119, 97, 78, 66 e 112
+Nessuna dipendenza da pytest. Stato attuale: **119, 97, 78, 72 e 112
 asserzioni, zero fallimenti**.
 
 **La risoluzione CP-SAT e' eseguita e verificata end-to-end.** Sull'esempio
@@ -1696,7 +1703,7 @@ I cinque file rispondono a domande diverse e si completano:
   trovare?* Uno solo dei casi e' corretto, gli altri sono rotti di proposito
   (collisioni, permanenze, periodicita', fasi verticali, capienza, geometrie
   patologiche). Le soluzioni sono costruite a mano, quindi non serve OR-Tools.
-- `test_model.py` — 18 casi. *Il modello produce soluzioni fisicamente valide?*
+- `test_model.py` — 19 casi. *Il modello produce soluzioni fisicamente valide?*
   Risolve davvero e passa ogni risultato al verificatore.
 - `test_excel_io.py` — 24 casi. *Un file compilato male viene respinto con un
   messaggio utile, e i risultati escono corretti?* In ingresso: valori mancanti

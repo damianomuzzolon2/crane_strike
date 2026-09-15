@@ -1166,6 +1166,12 @@ class Segment:
     # ricavano corsa verticale e sgocciolamento. Dedurlo dalla posizione
     # sbaglierebbe appena due vasche stessero alla stessa quota.
     move: Optional[int] = None
+    # Per i soli tratti 'lift_empty': True se il gancio SALE sullo svincolo,
+    # False se scende. Lo sa solo chi costruisce il rientro -- la prima corsa
+    # verticale e' la salita, la seconda la discesa -- e dedurlo dopo dai
+    # tratti vicini ha casi ambigui: se una delle due corse manca perche' la
+    # vasca non ne ha, quella che resta non dice da sola da che parte va.
+    sale: Optional[bool] = None
 
 
 @dataclass
@@ -2360,7 +2366,7 @@ def _segmenti_rientro(
         return [Segment("empty", t0, t1, xa, xb, data.kin_empty)]
 
     segs, t = [], t0
-    for xa, xb, durata in tratte:
+    for i, (xa, xb, durata) in enumerate(tratte):
         if durata <= 0:
             continue
         fine = t + durata
@@ -2370,8 +2376,11 @@ def _segmenti_rientro(
         # 'lift_empty': il gancio scarico sale o scende sullo svincolo.
         # Orizzontalmente e' fermo, come un'attesa, ma va distinto -- e' un
         # movimento, e la simulazione deve poterlo mostrare per quello che e'.
+        # Il verso lo dice la posizione nella sequenza di `tratte_rientro`:
+        # la tratta 1 sale sullo svincolo di partenza, la 3 scende su quello
+        # di arrivo.
         segs.append(
-            Segment("lift_empty", t, fine, xa, xb, None)
+            Segment("lift_empty", t, fine, xa, xb, None, sale=(i == 1))
             if xa == xb
             else Segment("empty", t, fine, xa, xb, data.kin_empty)
         )

@@ -6,7 +6,7 @@ invarianti regge, e dove sono le trappole — comprese quelle in cui siamo gia'
 caduti, che sono la parte piu' utile.
 
 Stato al momento della scrittura: 16 file Python, 15.223 righe, cinque suite di
-test per **472 asserzioni** complessive.
+test per **478 asserzioni** complessive.
 
 ---
 
@@ -161,6 +161,11 @@ della mossa `k` e' sulla stazione `k`, il rilascio sulla `k+1`) senza indovinare
 dalla posizione, cosa che sbaglierebbe appena due vasche stessero alla stessa
 quota o la stessa vasca comparisse due volte nella ricetta — entrambi casi
 ammessi.
+`sale` e' valorizzato solo per `lift_empty`: `True` se il gancio scarico sale
+sullo svincolo, `False` se scende. Lo scrive `_segmenti_rientro`, che sa quale
+delle tratte di `tratte_rientro` e' la salita (la 1) e quale la discesa (la 3);
+dedurlo dopo dai tratti vicini e' ambiguo quando una delle due corse manca. Lo
+legge `plotting.corse_verticali` per le frecce del ciclogramma.
 
 ### 4.2 Le durate: **un solo punto in cui sono definite**
 
@@ -742,7 +747,7 @@ lascia il pulsante vuoto.
 
 ---
 
-## 11. I test — 472 asserzioni, cinque suite
+## 11. I test — 478 asserzioni, cinque suite
 
 Nessun pytest: ogni file si lancia da solo, stampa cosa ha provato e restituisce
 un codice d'uscita.
@@ -752,7 +757,7 @@ un codice d'uscita.
 | `test/test_verify.py` | 119 | — | il verificatore trova davvero quello che deve? |
 | `test/test_excel_io.py` | 97 | — | un file compilato male viene respinto con un messaggio utile? |
 | `test/test_simulazione.py` | 78 | — | la simulazione mostra il ciclogramma che c'e'? |
-| `test/test_model.py` | 66 | OR-Tools | il modello produce soluzioni fisicamente valide? |
+| `test/test_model.py` | 72 | OR-Tools | il modello produce soluzioni fisicamente valide? |
 | `test/test_interfaccia.py` | 112 | OR-Tools + grafica | l'interfaccia si comporta come deve? |
 
 > `test_model.py` risolve davvero, con limiti di tempo dell'ordine del minuto.

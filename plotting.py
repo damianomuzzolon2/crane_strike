@@ -13,6 +13,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
 from matplotlib.patches import Patch
+from matplotlib.transforms import offset_copy
 
 from kinematics import position_profile
 from model import ProblemData, Solution, Segment
@@ -149,6 +150,53 @@ def eventi_del_trasporto(
     ]
 
 
+def corse_verticali(
+    data: ProblemData, segs: list[Segment]
+) -> list[tuple[float, float, bool]]:
+    """Dove il gancio sale o scende, sulla traiettoria di UN carroponte.
+
+    Una tupla per corsa: (istante a meta' corsa, posizione, sale). Sono tre
+    le fonti, e in tutte il verso e' un DATO, non una deduzione:
+
+      - la PRESA e il RILASCIO di ogni mossa: le fasi (`pick_phases`,
+        `release_phases`) dicono quota iniziale e finale di ciascun movimento.
+        Il sollevamento del telaio sale, l'immersione scende; con una zona di
+        cambio quota ci sono anche le salite e le discese intermedie, e la
+        posizione e' quella della fase -- il punto di cambio quota, non la
+        vasca;
+      - le corse a vuoto sugli SVINCOLI: i tratti 'lift_empty', che il verso
+        lo portano scritto (`Segment.sale`).
+
+    I tempi della presa si contano dall'inizio, ricavato dal tratto a carico
+    come per `eventi_del_trasporto`, e quelli del rilascio dall'arrivo: il
+    tratto a carico c'e' sempre ed e' uno per mossa, mentre presa e rilascio
+    possono essere spezzati da una zona di cambio quota.
+
+    Le fasi senza durata o senza dislivello -- aggancio, sgancio,
+    sgocciolamento, o una vasca senza corsa -- non sono corse, e non ci
+    sono."""
+    fuori = []
+    for seg in segs:
+        if seg.kind == "loaded" and seg.move is not None:
+            k = seg.move
+            for fasi, t, stazione in (
+                (data.pick_phases(k), seg.t_start - data.pick_time_at(k), k),
+                (data.release_phases(k + 1), seg.t_end, k + 1),
+            ):
+                for f in fasi:
+                    if f.duration > 0 and f.z_end != f.z_start:
+                        x = (
+                            f.x_start
+                            if f.x_start is not None
+                            else data.station_position(stazione)
+                        )
+                        fuori.append((t + f.duration / 2, x, f.z_end > f.z_start))
+                    t += f.duration
+        elif seg.kind == "lift_empty" and seg.sale is not None:
+            fuori.append(((seg.t_start + seg.t_end) / 2, seg.x_start, seg.sale))
+    return fuori
+
+
 def pezzi_in_vasca(
     data: ProblemData, solution: Solution
 ) -> list[tuple[int, float, float]]:
@@ -267,6 +315,7 @@ def plot_cyclogram(
     # Marcare invece OGNI cambio di fase avrebbe riempito la linea di punti --
     # fine discesa, fine aggancio, fine sollevamento, fine sgocciolamento -- e
     # a quel punto non si sarebbe piu' visto niente.
+    sopra = offset_copy(ax.transData, fig=ax.figure, y=9.0, units="points")
     for h, segs in enumerate(solution.segments_per_hoist):
         color = _HOIST_COLORS[h % len(_HOIST_COLORS)]
         eventi_t, eventi_x = [], []
@@ -294,6 +343,21 @@ def plot_cyclogram(
                 # partenze.
                 eventi_t.extend([seg.t_start, seg.t_end])
                 eventi_x.extend([seg.x_start, seg.x_end])
+        # Le corse verticali: una freccetta APPENA SOPRA il tratto piatto in
+        # cui il gancio sale o scende, a meta' della corsa. Sul disegno quei
+        # tratti sono piatti come un'attesa -- il carroponte e' fermo lungo la
+        # rotaia -- e senza la freccia non si distingue un gancio che lavora da
+        # un carro che aspetta. Sopra la linea e non sopra il punto, spostata
+        # di qualche punto tipografico: a qualunque ingrandimento resta
+        # attaccata al tratto senza coprirlo.
+        corse = corse_verticali(data, segs)
+        frecce = {
+            simbolo: (
+                [t for t, _, sale in corse if sale is verso],
+                [x for _, x, sale in corse if sale is verso],
+            )
+            for simbolo, verso in ((r"$\uparrow$", True), (r"$\downarrow$", False))
+        }
         for cycle in range(n_cycles):
             offset = cycle * T
             for seg in segs:
@@ -312,6 +376,18 @@ def plot_cyclogram(
                     markeredgewidth=0.9,
                     zorder=5,
                 )
+            for simbolo, (frecce_t, frecce_x) in frecce.items():
+                if frecce_t:
+                    ax.plot(
+                        [t + offset for t in frecce_t],
+                        frecce_x,
+                        linestyle="none",
+                        marker=simbolo,
+                        markersize=8.0,
+                        color=color,
+                        transform=sopra,
+                        zorder=5,
+                    )
 
     # -- i pezzi in vasca ---------------------------------------------------
     # Una linea grigia, spessa come le traiettorie, dal pallino

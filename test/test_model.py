@@ -1036,6 +1036,97 @@ def test_pezzo_in_vasca():
     )
 
 
+def test_frecce_delle_corse_verticali():
+    print()
+    print("[9-quater] le frecce su e giu' delle corse verticali")
+    # Sul ciclogramma i tratti in cui il gancio sale o scende sono piatti come
+    # un'attesa: la freccetta sopra dice che li' il gancio lavora, e in che
+    # verso. Il verso dev'essere quello VERO, e c'e' un modo di saperlo senza
+    # fidarsi di chi l'ha calcolato: il gancio di un carroponte non puo' salire
+    # due volte di fila senza essere sceso nel mezzo. Su una linea senza zone
+    # di cambio quota -- dove la presa ha una salita sola e il rilascio una
+    # discesa sola -- le frecce di ogni giro devono ALTERNARSI.
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    from plotting import corse_verticali, plot_cyclogram
+
+    base = linea(
+        4, 5000, [HoistZone(0, 1), HoistZone(2, 3)],
+        dwell=(30, 300), capacity=3, lift_height=1500,
+        kin_lift_empty=Kinematics(v_max=250, a_max=150),
+        kin_lift_loaded=Kinematics(v_max=200, a_max=150),
+        engage_time=2.0, disengage_time=1.0, takt_min=25.0, takt_max=400.0,
+    )
+    # con gli svincoli, cosi' ci sono anche le corse a vuoto
+    data = con_ostacoli(base, svincolo=1200.0)
+    sol, r = risolvi_e_verifica(data, "linea con svincoli")
+    if r is None:
+        check(False, sol.status + ": niente da disegnare")
+        return
+
+    tutte = []
+    for h, segs in enumerate(sol.segments_per_hoist):
+        corse = sorted(corse_verticali(data, segs))
+        tutte.append(corse)
+        versi = [sale for _, _, sale in corse]
+        alterna = bool(versi) and all(
+            versi[i] != versi[(i + 1) % len(versi)] for i in range(len(versi))
+        )
+        check(
+            alterna,
+            f"carroponte {h + 1}: su e giu' si alternano per tutto il giro "
+            f"({''.join('^' if v else 'v' for v in versi)})",
+        )
+
+        # ogni freccia sta sopra un tratto fermo in cui il gancio lavora
+        fuori_posto = [
+            (round(t, 1), x)
+            for t, x, _ in corse
+            if not any(
+                s.kind in ("pick", "release", "lift_empty")
+                and s.t_start - 1e-6 <= t <= s.t_end + 1e-6
+                and abs(s.x_start - x) < 1e-6
+                for s in segs
+            )
+        ]
+        check(
+            not fuori_posto,
+            f"carroponte {h + 1}: ogni freccia cade su una presa, un rilascio o "
+            f"una corsa a vuoto (fuori posto: {fuori_posto[:3]})",
+        )
+
+    # Il test deve passare davvero dagli svincoli, o l'alternanza non avrebbe
+    # provato il verso dei tratti 'lift_empty'.
+    a_vuoto = [
+        s.sale
+        for segs in sol.segments_per_hoist
+        for s in segs
+        if s.kind == "lift_empty"
+    ]
+    check(
+        True in a_vuoto and False in a_vuoto,
+        f"fra le frecce ci sono corse a vuoto in salita e in discesa "
+        f"({a_vuoto.count(True)} su, {a_vuoto.count(False)} giu')",
+    )
+
+    # e il disegno le mostra tutte, a ogni ciclo, del colore del carro
+    fig = plot_cyclogram(data, sol, n_cycles=2)
+    disegnate = sum(
+        len(l.get_xdata())
+        for l in fig.axes[0].lines
+        if l.get_marker() in (r"$\uparrow$", r"$\downarrow$")
+    )
+    plt.close(fig)
+    attese = 2 * sum(len(c) for c in tutte)
+    check(
+        disegnate == attese,
+        f"sul ciclogramma ci sono tutte le frecce, due cicli per due "
+        f"({disegnate} su {attese})",
+    )
+
+
 def main():
     print("=" * 72)
     print("TEST END-TO-END DEL MODELLO (richiede OR-Tools)")
@@ -1059,6 +1150,7 @@ def main():
     test_ricostruzione_fedele()
     test_dove_sosta_il_carro()
     test_pezzo_in_vasca()
+    test_frecce_delle_corse_verticali()
     print("\n" + "=" * 72)
     print(f"RISULTATO: {_n_pass} ok, {_n_fail} falliti  ({time.perf_counter() - t0:.0f}s)")
     print("=" * 72)
