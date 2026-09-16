@@ -541,6 +541,22 @@ FINESTRA = [
      "franco sopra la rotaia. Cosi' il disegno resta proporzionato sia su una "
      "linea con corse di 800 mm sia su una con corse di 3 metri."),
     ("p",
+     "Dove la linea le DICHIARA, pero', si usano le misure vere: la larghezza "
+     "di ogni vasca (`Tank.larghezza`), la larghezza del pezzo e il rapporto "
+     "fra l'altezza del pezzo e quella della vasca. Sono gli unici dati del "
+     "progetto che non servono a calcolare niente -- esistono per il disegno e "
+     "basta -- e sono facoltativi: senza, restano le convenzioni di sempre, "
+     "cioe' vasche tutte larghe il 62% del passo e un telaio grande una "
+     "frazione fissa dell'altezza."),
+    ("q",
+     "LE LARGHEZZE SI USANO COM'E', LE ALTEZZE NO. In orizzontale l'asse e' "
+     "gia' in millimetri veri, quindi una vasca larga 2600 si disegna larga "
+     "2600. In verticale il disegno non e' in scala -- e' la frazione di "
+     "discesa riportata su una profondita' comune, per la ragione spiegata "
+     "sotto -- e una quota in millimetri non ci si puo' mettere. Dell'altezza "
+     "si usa quindi il RAPPORTO fra pezzo e vasca: quanto il pezzo riempie la "
+     "vasca sul disegno e' quanto la riempie davvero."),
+    ("p",
      "_CORSA_PREDEFINITA copre il caso in cui nessuna vasca dichiari una "
      "corsa: senza, il grafico avrebbe altezza zero e non si vedrebbe niente. "
      "E' uno dei casi degeneri che test_simulazione prova apposta."),
@@ -572,6 +588,23 @@ FINESTRA = [
      "dentro la postazione, funi che ci passano attraverso -- si sarebbe "
      "ripresentato su qualunque postazione con una rulliera piu' bassa. Ora e' "
      "una regola sola per tutti i casi."),
+    ("c", "simulazione.FinestraSimulazione._misura_il_pezzo"),
+    ("p",
+     "Il telaio e' un MARKER e non un rettangolo in coordinate della linea: "
+     "cosi' tutti i pezzi in lavorazione stanno in un oggetto grafico solo, "
+     "che e' la ragione per cui la simulazione resta fluida con venti pezzi in "
+     "linea. Il prezzo e' che un marker si misura in PUNTI TIPOGRAFICI, non in "
+     "millimetri."),
+    ("p",
+     "Convertire non e' una moltiplicazione sola perche' i due assi hanno "
+     "scale diversissime -- venti metri in orizzontale contro un metro e mezzo "
+     "in verticale -- e un marker e' un simbolo unico: la larghezza in punti "
+     "da' la DIMENSIONE del marker, e il rapporto fra le due misure da' la "
+     "FORMA, schiacciando i vertici del simbolo in verticale."),
+    ("p",
+     "Si rifa' a ogni fotogramma, non una volta sola: la scala cambia quando "
+     "si ridimensiona la finestra, e un simbolo calcolato all'apertura "
+     "resterebbe della misura di allora. Costa due moltiplicazioni."),
     ("c", "simulazione.FinestraSimulazione._appoggio"),
     ("p",
      "Il basamento che regge una postazione. Esiste perche' un piano che "

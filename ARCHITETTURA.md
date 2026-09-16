@@ -6,7 +6,7 @@ invarianti regge, e dove sono le trappole — comprese quelle in cui siamo gia'
 caduti, che sono la parte piu' utile.
 
 Stato al momento della scrittura: 16 file Python, 15.223 righe, cinque suite di
-test per **500 asserzioni** complessive.
+test per **511 asserzioni** complessive.
 
 ---
 
@@ -172,6 +172,15 @@ della mossa `k` e' sulla stazione `k`, il rilascio sulla `k+1`) senza indovinare
 dalla posizione, cosa che sbaglierebbe appena due vasche stessero alla stessa
 quota o la stessa vasca comparisse due volte nella ricetta — entrambi casi
 ammessi.
+**Dati di solo disegno.** `Tank.larghezza`, `Tank.altezza`,
+`ProblemData.larghezza_pezzo` e `ProblemData.altezza_pezzo` sono gli unici campi
+che **nessun calcolo legge**: li usa solo `simulazione.py`, per disegnare in
+proporzione invece che con misure convenzionali. Sono facoltativi (`None` =
+non dichiarato) e `__post_init__` rifiuta solo lo zero e il negativo. Se aggiungi
+altri dati di questo tipo, tienili facoltativi e fuori da `model`/`verify`:
+il giorno in cui un disegno diventa un vincolo, due moduli che non c'entrano
+niente cominciano a dipendere da un dato che nessuno ha misurato.
+
 `sale` e' valorizzato solo per `lift_empty`: `True` se il gancio scarico sale
 sullo svincolo, `False` se scende. Lo scrive `_segmenti_rientro`, che sa quale
 delle tratte di `tratte_rientro` e' la salita (la 1) e quale la discesa (la 3);
@@ -773,7 +782,7 @@ lascia il pulsante vuoto.
 
 ---
 
-## 11. I test — 500 asserzioni, cinque suite
+## 11. I test — 511 asserzioni, cinque suite
 
 Nessun pytest: ogni file si lancia da solo, stampa cosa ha provato e restituisce
 un codice d'uscita.
@@ -781,8 +790,8 @@ un codice d'uscita.
 | file | asserzioni | richiede | domanda a cui risponde |
 | --- | ---: | --- | --- |
 | `test/test_verify.py` | 119 | — | il verificatore trova davvero quello che deve? |
-| `test/test_excel_io.py` | 97 | — | un file compilato male viene respinto con un messaggio utile? |
-| `test/test_simulazione.py` | 78 | — | la simulazione mostra il ciclogramma che c'e'? |
+| `test/test_excel_io.py` | 102 | — | un file compilato male viene respinto con un messaggio utile? |
+| `test/test_simulazione.py` | 84 | — | la simulazione mostra il ciclogramma che c'e'? |
 | `test/test_model.py` | 78 | OR-Tools | il modello produce soluzioni fisicamente valide? |
 | `test/test_interfaccia.py` | 128 | OR-Tools + grafica | l'interfaccia si comporta come deve? |
 

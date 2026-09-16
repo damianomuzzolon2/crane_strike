@@ -1249,7 +1249,22 @@ class FinestraSimulazione(tk.Toplevel):
         else:
             passo = 2000.0
         larghezza = 0.62 * passo
-        margine = max(larghezza, d.hoist_extent_pos, d.hoist_extent_neg)
+        # Quanto e' larga ogni posizione sul disegno. La vasca puo' dirlo
+        # (`Tank.larghezza`, in millimetri veri: l'asse orizzontale e' gia' in
+        # millimetri, quindi si usa com'e'); dove non lo dice resta la
+        # larghezza convenzionale, che e' una frazione del passo fra le vasche.
+        # Indicizzata per POSIZIONE e non per vasca, perche' due tappe possono
+        # stare alla stessa quota e il disegno e' fatto di posizioni.
+        self.larghezze: dict[float, float] = {}
+        for y in quote:
+            dichiarate = [
+                t.larghezza
+                for t in d.tanks.values()
+                if abs(t.position - y) < 1e-6 and t.larghezza
+            ]
+            self.larghezze[y] = max(dichiarate) if dichiarate else larghezza
+        larghezza_max = max(self.larghezze.values())
+        margine = max(larghezza_max, d.hoist_extent_pos, d.hoist_extent_neg)
         sinistra, destra = quote[0] - margine, quote[-1] + margine
 
         # La trave sta poco sopra la quota di trasporto, non in cima al
@@ -1260,7 +1275,12 @@ class FinestraSimulazione(tk.Toplevel):
         self.altezza_rotaia = 0.07 * h_max
         self.raggio_ruota = 0.04 * h_max
         self.altezza_carro = 0.20 * h_max
-        self.larghezza_gancio = 0.20 * larghezza
+        # Il bilancino e' largo quanto il pezzo che ci si appende, quando il
+        # pezzo si sa quanto e' largo: e' cosi' che e' fatto. Senza, resta la
+        # frazione convenzionale della larghezza di una vasca.
+        self.larghezza_gancio = (
+            0.5 * d.larghezza_pezzo if d.larghezza_pezzo else 0.20 * larghezza
+        )
         # bordo_vasca si calcola piu' sotto, quando si sa a che quota finisce
         # il telaio immerso: l'orlo lo segue.
         # Le vasche sono tutte della STESSA profondita', e fonde abbastanza da
@@ -1287,14 +1307,19 @@ class FinestraSimulazione(tk.Toplevel):
         # In cambio i pezzi in vasca stanno tutti in fila alla stessa altezza,
         # e le vasche si confrontano a colpo d'occhio.
         self.quota_immersione = 0.70 * self.fondo_vasca
-        # Quanto si spostano di lato i pezzi che dividono la stessa vasca.
-        self.passo_corsia = 0.42 * larghezza
-        # Quanto e' alto un telaio nel disegno. Non e' un dato dell'impianto --
-        # del telaio non si sa nulla -- ma il simbolo con cui lo si disegna e'
-        # grande 22 punti e PENDE dal bilancino, quindi occupa questa fetta di
-        # disegno sotto la quota che gli si assegna. Serve a posare il telaio
-        # SOPRA un piano di carico invece che dentro.
-        self.altezza_telaio = 0.11 * h_max
+        # Quanto si spostano di lato i pezzi che dividono la stessa vasca. Si
+        # prende la vasca PIU' STRETTA fra quelle disegnate: lo spostamento e'
+        # uno solo per tutta la linea -- un pezzo che trasla non sta in nessuna
+        # vasca -- e tarato sulla piu' larga i pezzi sborderebbero dalle altre.
+        #
+        # Lo comanda la VASCA, non il pezzo, anche quando il pezzo dichiara la
+        # sua larghezza: e' la vasca a dire quanto spazio c'e'. Legandolo al
+        # pezzo -- per farne stare due affiancati senza sovrapporsi -- i telai
+        # uscivano dalle vasche appena il pezzo era largo, che e' peggio del
+        # difetto che si voleva togliere. Due pezzi larghi in una vasca stretta
+        # restano sovrapposti, ed e' quello che dicono i dati: in quella vasca
+        # non ci stanno.
+        self.passo_corsia = 0.42 * min(self.larghezze.values())
         # L'ORLO SEGUE IL TELAIO. Il fondo resta dov'e' -- la vasca e' fonda,
         # e il telaio ci galleggia dentro senza appoggiarsi -- ma l'orlo scende
         # fin quasi alla quota del telaio immerso, cosi' il pezzo si vede
@@ -1303,6 +1328,27 @@ class FinestraSimulazione(tk.Toplevel):
         # dentro un telaio piccolo in fondo: tutto bagno vuoto, e le proporzioni
         # non dicevano piu' niente.
         self.bordo_vasca = self.quota_immersione + 0.05 * h_max
+        # Quanto e' alto un telaio nel disegno. PENDE dal bilancino, quindi
+        # occupa questa fetta di disegno sotto la quota che gli si assegna, e
+        # serve anche a posare il telaio SOPRA un piano di carico invece che
+        # dentro.
+        #
+        # In verticale il disegno non e' in millimetri -- e' la frazione di
+        # discesa riportata su una profondita' comune, vedi `_quota_disegnata`
+        # -- quindi l'altezza del pezzo non ci si puo' mettere com'e'. Quello
+        # che si puo' usare e' il RAPPORTO fra pezzo e vasca: quanto il pezzo
+        # riempie la vasca sul disegno e' quanto la riempie davvero. Il tetto
+        # a 0,9 serve a lasciare visibile un filo di bagno anche quando il
+        # pezzo la occupa quasi tutta.
+        altezze = [t.altezza for t in d.tanks.values() if t.altezza]
+        if d.altezza_pezzo and altezze:
+            self.altezza_telaio = min(0.9, d.altezza_pezzo / max(altezze)) * (
+                self.bordo_vasca - self.fondo_vasca
+            )
+        else:
+            # Senza i dati: la misura convenzionale di prima, che e' poi circa
+            # un quarto della profondita' disegnata.
+            self.altezza_telaio = 0.11 * h_max
 
         # -- il capannone: pavimento e colonne che reggono la rotaia -----
         self.assi.add_patch(
@@ -1334,10 +1380,12 @@ class FinestraSimulazione(tk.Toplevel):
         # posizione sulla rotaia -> quota di disegno del piano di appoggio
         self.quote_postazioni: dict[float, float] = {}
         pelo_x, pelo_y = [], []
-        bordo_x, bordo_y = 0.045 * larghezza, 0.02 * h_max
+        bordo_y = 0.02 * h_max
         livello = self.bordo_vasca - 0.06 * h_max  # pelo libero, sotto il bordo
         estremi = {0, d.n_stations - 1}
         for y in quote:
+            larghezza_qui = self.larghezze[y]
+            bordo_x = 0.045 * larghezza_qui
             qui = [
                 i
                 for i in range(d.n_stations)
@@ -1379,11 +1427,11 @@ class FinestraSimulazione(tk.Toplevel):
                 # permette di controllarlo senza andare a frugare fra le patch
                 self.quote_postazioni[y] = cima
                 spessore = 0.16 * h_max
-                self._appoggio(y, larghezza, cima - spessore, pavimento)
+                self._appoggio(y, larghezza_qui, cima - spessore, pavimento)
                 self.assi.add_patch(
                     Rectangle(
-                        (y - larghezza / 2, cima - spessore),
-                        larghezza,
+                        (y - larghezza_qui / 2, cima - spessore),
+                        larghezza_qui,
                         spessore,
                         facecolor="#dfe4e8",
                         edgecolor="#9aa3ab",
@@ -1396,8 +1444,8 @@ class FinestraSimulazione(tk.Toplevel):
             # la vasca: pareti e fondo, disegnati come un contenitore vuoto
             self.assi.add_patch(
                 Rectangle(
-                    (y - larghezza / 2, self.fondo_vasca),
-                    larghezza,
+                    (y - larghezza_qui / 2, self.fondo_vasca),
+                    larghezza_qui,
                     profonda + self.bordo_vasca,
                     facecolor=_COLORE_VASCA,
                     edgecolor=_BORDO_VASCA,
@@ -1408,8 +1456,8 @@ class FinestraSimulazione(tk.Toplevel):
             # il bagno dentro, che arriva poco sotto il bordo
             self.assi.add_patch(
                 Rectangle(
-                    (y - larghezza / 2 + bordo_x, self.fondo_vasca + bordo_y),
-                    larghezza - 2 * bordo_x,
+                    (y - larghezza_qui / 2 + bordo_x, self.fondo_vasca + bordo_y),
+                    larghezza_qui - 2 * bordo_x,
                     livello + profonda - bordo_y,
                     facecolor=_COLORE_BAGNO,
                     edgecolor="none",
@@ -1418,7 +1466,9 @@ class FinestraSimulazione(tk.Toplevel):
             )
             # il pelo libero, appena mosso: e' quello che fa leggere il bagno
             # come un liquido invece che come un rettangolo colorato
-            xs = np.linspace(y - larghezza / 2 + bordo_x, y + larghezza / 2 - bordo_x, 24)
+            xs = np.linspace(
+                y - larghezza_qui / 2 + bordo_x, y + larghezza_qui / 2 - bordo_x, 24
+            )
             pelo_x.extend(list(xs) + [np.nan])
             pelo_y.extend(
                 list(livello + 0.012 * h_max * np.sin(np.linspace(0, 3 * np.pi, 24)))
@@ -1473,6 +1523,7 @@ class FinestraSimulazione(tk.Toplevel):
         self.assi.add_line(self.pezzi_disegnati)
 
         self.assi.set_xlim(sinistra, destra)
+        self._misura_il_pezzo()
         # Sopra la rotaia si lascia aria per la legenda: sovrapposta ai
         # carroponti coprirebbe proprio quello che si sta guardando.
         cima_carro = (
@@ -1520,6 +1571,41 @@ class FinestraSimulazione(tk.Toplevel):
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", UserWarning)
             self.figura.tight_layout()
+
+    def _misura_il_pezzo(self):
+        """Ridimensiona il simbolo del telaio alle misure vere del pezzo.
+
+        Il telaio e' un MARKER, non un rettangolo in coordinate della linea:
+        tutti i pezzi in lavorazione stanno cosi' in un oggetto grafico solo.
+        Un marker pero' si misura in punti tipografici, e i due assi hanno
+        scale diversissime -- venti metri in orizzontale contro un metro e
+        mezzo in verticale -- quindi le due misure vanno convertite ciascuna
+        con la sua scala: la larghezza da' la dimensione del marker, il
+        rapporto fra le due da' la forma del simbolo.
+
+        Si rifa' a ogni fotogramma perche' la scala cambia quando la finestra
+        viene ridimensionata; costa un paio di moltiplicazioni.
+
+        Senza `larghezza_pezzo` dichiarata non si tocca niente: resta il
+        simbolo di misura convenzionale, quello di prima."""
+        d = self.dati
+        if not d.larghezza_pezzo:
+            return
+        punti_per_pixel = 72.0 / self.figura.get_dpi()
+        (x0, y0), (x1, y1) = self.assi.transData.transform([(0.0, 0.0), (1.0, 1.0)])
+        larghezza_pt = d.larghezza_pezzo * abs(x1 - x0) * punti_per_pixel
+        altezza_pt = self.altezza_telaio * abs(y1 - y0) * punti_per_pixel
+        if larghezza_pt <= 0 or altezza_pt <= 0:
+            return
+        self.pezzi_disegnati.set_markersize(larghezza_pt)
+        # I vertici del simbolo vanno da -0,5 a 0,5 in orizzontale e da -1 a 0
+        # in verticale, e vengono moltiplicati per la dimensione del marker:
+        # schiacciandoli in verticale di questo rapporto, il telaio esce alto
+        # quanto deve.
+        verticale = altezza_pt / larghezza_pt
+        self.pezzi_disegnati.set_marker(
+            Path(_TELAIO.vertices * np.array([1.0, verticale]), _TELAIO.codes)
+        )
 
     def _appoggio(self, x: float, larghezza: float, fondo: float, pavimento: float):
         """Il basamento che regge una postazione, che altrimenti resterebbe
@@ -1761,6 +1847,7 @@ class FinestraSimulazione(tk.Toplevel):
 
         # il telaio PENDE dal punto in cui lo si mette, e il punto e' la quota
         # del gancio: cosi' si appoggia da solo sul bilancino
+        self._misura_il_pezzo()
         self.pezzi_disegnati.set_data(
             [self._ascissa(p) for p in istante.pezzi],
             [self._quota(p) for p in istante.pezzi],

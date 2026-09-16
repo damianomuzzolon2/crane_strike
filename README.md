@@ -442,9 +442,40 @@ Cosa c'e' da guardare:
   quell'istante, con il nome della vasca: `discesa del gancio in SGRASSO`,
   `sgocciolamento in ZINCATURA`, `rientro a vuoto`.
 
-Le vasche sono **tutte uguali** e i telai immersi stanno **tutti alla stessa
-altezza**, sospesi nel bagno: sul fondo non ci si appoggiano mai, perche' non
-ci si appoggiano nemmeno davvero.
+I telai immersi stanno **tutti alla stessa altezza**, sospesi nel bagno: sul
+fondo non ci si appoggiano mai, perche' non ci si appoggiano nemmeno davvero.
+
+### Dare al disegno le misure vere
+
+Di quanto si vede nella simulazione, il programma conosce solo le posizioni
+lungo la rotaia, le corse verticali e l'ingombro dei carroponti. Larghezza e
+altezza delle vasche, e quanto e' grosso il pezzo, non entrano in nessun
+calcolo — e senza, il disegno se le inventa: vasche tutte larghe uguali (una
+frazione del passo fra una e l'altra) e un telaio di dimensione convenzionale.
+
+Si possono dichiarare, e servono **soltanto a disegnare**:
+
+| dove | dato | cosa cambia |
+| --- | --- | --- |
+| foglio `Vasche`, colonna `larghezza_mm` | quanto e' larga la vasca lungo la rotaia | la vasca viene disegnata larga cosi', in millimetri veri: una vasca doppia si vede doppia |
+| foglio `Vasche`, colonna `altezza_mm` | quanto e' alta la vasca | insieme all'altezza del pezzo dice **quanto il pezzo la riempie** |
+| `Parametri`, `larghezza_pezzo_mm` | larghezza del pezzo appeso | il telaio disegnato e' largo cosi', e il bilancino pure |
+| `Parametri`, `altezza_pezzo_mm` | altezza del pezzo appeso | quanto il telaio scende dentro la vasca |
+
+Tutte e quattro sono **facoltative**: lasciandole vuote il disegno resta quello
+di prima, e il calcolo non cambia in nessun caso — il modello e il verificatore
+non le guardano nemmeno.
+
+In verticale il disegno non e' in scala (vedi sotto: si disegna la *frazione*
+di discesa, non i millimetri), quindi `altezza_mm` e `altezza_pezzo_mm` non
+vengono usate come quote: conta il loro **rapporto**, cioe' quanta parte della
+vasca il pezzo occupa. In orizzontale invece l'asse e' in millimetri veri, e le
+larghezze si usano cosi' come sono.
+
+Quanto i pezzi che dividono una vasca si scostano l'uno dall'altro lo decide la
+**vasca**, non il pezzo: e' lei a dire quanto spazio c'e'. Se due pezzi larghi
+stanno in una vasca stretta, sul disegno si vedono **sovrapposti** — ed e'
+quello che dicono i dati, perche' li' non ci stanno.
 
 **L'orlo della vasca segue il telaio.** Il fondo resta fondo — il telaio ci
 galleggia sopra — ma il bordo sta poco piu' su della quota a cui il telaio si
@@ -1699,7 +1730,7 @@ python test/esempio.py           # risoluzione reale + verifica + grafico
 ```
 
 Ognuno stampa cosa ha provato e finisce con `RISULTATO: n ok, m falliti`.
-Nessuna dipendenza da pytest. Stato attuale: **119, 97, 78, 78 e 128
+Nessuna dipendenza da pytest. Stato attuale: **119, 102, 84, 78 e 128
 asserzioni, zero fallimenti**.
 
 **La risoluzione CP-SAT e' eseguita e verificata end-to-end.** Sull'esempio
@@ -1715,12 +1746,12 @@ I cinque file rispondono a domande diverse e si completano:
   patologiche). Le soluzioni sono costruite a mano, quindi non serve OR-Tools.
 - `test_model.py` — 20 casi. *Il modello produce soluzioni fisicamente valide?*
   Risolve davvero e passa ogni risultato al verificatore.
-- `test_excel_io.py` — 24 casi. *Un file compilato male viene respinto con un
+- `test_excel_io.py` — 27 casi. *Un file compilato male viene respinto con un
   messaggio utile, e i risultati escono corretti?* In ingresso: valori mancanti
   o non numerici, vasche inesistenti o duplicate, righe riordinate, parametri
   sbagliati, zone incomplete, e un file della vecchia versione in metri. In uscita: struttura dei fogli, corrispondenza
   fra tratti e vasche, somma delle durate pari al takt time.
-- `test_simulazione.py` — 11 casi. *La simulazione mostra il ciclogramma che
+- `test_simulazione.py` — 15 casi. *La simulazione mostra il ciclogramma che
   c'e', o una sua approssimazione?* Il controllo che conta e' incrociato: su un
   ciclogramma coerente, ogni pezzo appeso deve stare **esattamente** dove sta
   il gancio di un carroponte che lo tiene, e viceversa — su millecinquecento

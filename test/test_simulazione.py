@@ -1110,6 +1110,121 @@ def test_cambio_quota():
         radice.destroy()
 
 
+def test_misure_dichiarate():
+    """Larghezza e altezza di vasche e pezzo non servono a calcolare niente:
+    servono a disegnare. Il controllo e' che finiscano DAVVERO nel disegno --
+    in millimetri veri dove l'asse e' in millimetri, e come rapporto dove non
+    lo e' -- e che senza di loro non cambi niente rispetto a prima."""
+    print("\n[14] le misure dichiarate finiscono nel disegno")
+    import dataclasses
+
+    from simulazione import FinestraSimulazione
+
+    base = dati_prova()
+    # Larghezze DIVERSE fra loro: con misure tutte uguali, prendere la vasca
+    # sbagliata darebbe comunque il risultato giusto.
+    # Larghe abbastanza da tenere dentro i due pezzi che il ciclogramma ci
+    # mette: in una vasca troppo stretta i pezzi si sovrappongono e sporgono,
+    # ed e' giusto cosi' -- e' quello che dicono i dati -- ma non e' quello che
+    # si sta provando qui.
+    misure = {"SGRASSO": (2400.0, 1500.0), "RISCIACQUO": (2800.0, 1000.0)}
+    tanks = {
+        nome: (
+            dataclasses.replace(t, larghezza=misure[nome][0], altezza=misure[nome][1])
+            if nome in misure
+            else t
+        )
+        for nome, t in base.tanks.items()
+    }
+    con = dataclasses.replace(
+        base, tanks=tanks, larghezza_pezzo=1200.0, altezza_pezzo=750.0
+    )
+    radice = tk.Tk()
+    radice.withdraw()
+    try:
+        sol, dati = proposta_semplice(con)
+        f = FinestraSimulazione(radice, dati, sol)
+        f.update()
+        larghezze = {
+            dati.tanks[n].position: round(f.larghezze[dati.tanks[n].position])
+            for n in misure
+        }
+        check(
+            larghezze == {dati.tanks[n].position: round(misure[n][0]) for n in misure},
+            f"ogni vasca e' larga quanto dichiara ({larghezze})",
+        )
+        # I pezzi devono restare DENTRO la vasca che li contiene. Lo
+        # spostamento fra i posti e' comandato dalla vasca apposta: legandolo
+        # alla larghezza del pezzo, i telai uscivano dalle vasche.
+        fuori = []
+        for passo in range(60):
+            istante = f.sim.istantanea(f.sim.durata * passo / 59.0)
+            for p in istante.pezzi:
+                if p.appeso or p.vasca not in misure:
+                    continue
+                centro = dati.tanks[p.vasca].position
+                scarto = abs(f._ascissa(p) - centro) + 1200.0 / 2
+                if scarto > misure[p.vasca][0] / 2 + 1e-6:
+                    fuori.append((p.vasca, round(scarto - misure[p.vasca][0] / 2)))
+        check(
+            not fuori,
+            f"nessun pezzo esce dalla vasca in cui sta ({fuori[:3]})",
+        )
+        # E lo spostamento lo comanda la VASCA: un pezzo piu' largo non allarga
+        # lo spazio disponibile. Legandolo al pezzo, i telai uscivano dalle
+        # vasche -- il difetto che il controllo qui sopra ha trovato.
+        largo = dataclasses.replace(con, larghezza_pezzo=2000.0)
+        sol_l, dati_l = proposta_semplice(largo)
+        q = FinestraSimulazione(radice, dati_l, sol_l)
+        q.update()
+        check(
+            abs(q.passo_corsia - f.passo_corsia) < 1e-9,
+            f"lo spostamento fra i posti non cambia col pezzo, perche' lo "
+            f"decide la vasca ({q.passo_corsia:.0f} contro {f.passo_corsia:.0f} mm)",
+        )
+        q.destroy()
+        # In verticale conta il RAPPORTO: il pezzo riempie la vasca sul disegno
+        # quanto la riempie davvero.
+        profonda = f.bordo_vasca - f.fondo_vasca
+        check(
+            abs(f.altezza_telaio / profonda - 750.0 / 1500.0) < 1e-9,
+            f"il telaio riempie la vasca quanto il pezzo riempie la sua "
+            f"({f.altezza_telaio / profonda:.3f} contro {750.0 / 1500.0:.3f})",
+        )
+        # e il simbolo disegnato, riportato in millimetri, e' il pezzo vero
+        punti_per_pixel = 72.0 / f.figura.get_dpi()
+        (x0, y0), (x1, y1) = f.assi.transData.transform([(0.0, 0.0), (1.0, 1.0)])
+        simbolo = f.pezzi_disegnati.get_marker()
+        misura = f.pezzi_disegnati.get_markersize()
+        ys = simbolo.vertices[:, 1]
+        larghezza_mm = misura / (abs(x1 - x0) * punti_per_pixel)
+        altezza_mm = misura * (ys.max() - ys.min()) / (abs(y1 - y0) * punti_per_pixel)
+        check(
+            abs(larghezza_mm - 1200.0) < 1.0
+            and abs(altezza_mm - f.altezza_telaio) < 1e-6,
+            f"il simbolo del telaio misura quanto il pezzo "
+            f"({larghezza_mm:.0f} mm di larghezza, {altezza_mm:.0f} di altezza)",
+        )
+        f.destroy()
+
+        # -- e senza le misure si torna alle convenzioni di prima -----------
+        sol_s, dati_s = proposta_semplice(base)
+        g = FinestraSimulazione(radice, dati_s, sol_s)
+        g.update()
+        corse = [dati_s.lift_height_at(i) for i in range(dati_s.n_stations)]
+        check(
+            len(set(round(v, 6) for v in g.larghezze.values())) == 1
+            and abs(g.altezza_telaio - 0.11 * max(corse)) < 1e-9
+            and g.pezzi_disegnati.get_markersize() == 22,
+            f"senza misure: vasche tutte uguali, telaio convenzionale "
+            f"({sorted({round(v) for v in g.larghezze.values()})}, "
+            f"{g.altezza_telaio:.0f})",
+        )
+        g.destroy()
+    finally:
+        radice.destroy()
+
+
 def main() -> int:
     d = dati_prova()
     test_fasi_verticali(d)
@@ -1127,6 +1242,7 @@ def main() -> int:
     try:
         test_finestra(d)
         test_disegno_casi_limite()
+        test_misure_dichiarate()
     except tk.TclError as e:
         print(f"  --   ambiente grafico non disponibile, salto la finestra ({e})")
     print("\n" + "=" * 72)

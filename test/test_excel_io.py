@@ -1097,6 +1097,71 @@ def test_ordine_svincoli():
         os.unlink(p)
 
 
+def test_misure_di_disegno():
+    print("\n[27] larghezza e altezza di vasche e pezzo: facoltative, e solo "
+          "per il disegno")
+
+    def riga_parametro(percorso: str, nome: str) -> int:
+        from openpyxl import load_workbook
+
+        ws = load_workbook(percorso)[FOGLIO_PARAMETRI]
+        for riga in range(2, ws.max_row + 1):
+            if _testo_cella(ws.cell(riga, 1).value) == nome:
+                return riga
+        raise AssertionError(f"parametro '{nome}' non trovato nel modello")
+
+    p = modello_temporaneo()
+    try:
+        d = leggi_problema(p).data
+        z = d.tanks["ZINCATURA"]
+        check(
+            (z.larghezza, z.altezza) == (2600.0, 1600.0)
+            and (d.larghezza_pezzo, d.altezza_pezzo) == (1400.0, 900.0),
+            f"le misure del modello si rileggono (vasca {z.larghezza:.0f}x"
+            f"{z.altezza:.0f}, pezzo {d.larghezza_pezzo:.0f}x{d.altezza_pezzo:.0f})",
+        )
+        # Vuoto vuol dire "non lo so", non zero: carico e scarico non sono
+        # vasche e nel modello restano in bianco.
+        check(
+            d.tanks["CARICO"].larghezza is None and d.tanks["CARICO"].altezza is None,
+            "una cella vuota resta None, e non diventa un rettangolo alto zero",
+        )
+        # Sono FACOLTATIVE: svuotandole tutte il file resta valido, e la linea
+        # e' la stessa -- il calcolo non le guarda.
+        for cella in ("I3", "J3"):
+            modifica(p, FOGLIO_VASCHE, cella, None)
+        for nome in ("larghezza_pezzo_mm", "altezza_pezzo_mm"):
+            modifica(p, FOGLIO_PARAMETRI, f"B{riga_parametro(p, nome)}", None)
+        msg = errore_leggendo(p)
+        vuoto = leggi_problema(p).data if not msg else None
+        check(
+            not msg
+            and vuoto.tanks["SGRASSO"].larghezza is None
+            and vuoto.larghezza_pezzo is None
+            and vuoto.pick_time_at(1) == d.pick_time_at(1),
+            f"lasciandole vuote il file vale lo stesso, e i tempi non cambiano "
+            f"({msg[:60]})",
+        )
+
+        # Sbagliate invece si dicono: una vasca larga -100 non e' un disegno
+        # diverso, e' una cella sbagliata.
+        modifica(p, FOGLIO_VASCHE, "I3", -100)
+        msg = errore_leggendo(p)
+        check(
+            "larghezza" in msg and "SGRASSO" in msg,
+            f"una larghezza negativa viene respinta dicendo quale vasca: "
+            f"\"{msg[:90]}\"",
+        )
+        modifica(p, FOGLIO_VASCHE, "I3", "due metri")
+        msg = errore_leggendo(p)
+        check(
+            f"{FOGLIO_VASCHE}!I3" in msg,
+            f"e un testo al posto del numero dice la cella: \"{msg[:70]}\"",
+        )
+    finally:
+        os.unlink(p)
+
+
 def main():
     print("=" * 72)
     print("TEST DI LETTURA E SCRITTURA EXCEL (richiede openpyxl, non OR-Tools)")
@@ -1127,6 +1192,7 @@ def main():
     test_tempi_verticali()
     test_cambio_quota()
     test_ordine_svincoli()
+    test_misure_di_disegno()
     print("\n" + "=" * 72)
     print(f"RISULTATO: {_n_pass} ok, {_n_fail} falliti")
     print("=" * 72)

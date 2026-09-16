@@ -235,6 +235,12 @@ LETTURA = [
      "insieme prima di costruire il problema."),
     ("c", "excel_io._leggi_vasche", "        # Se il gancio SCARICO", None),
     ("p",
+     "In coda si leggono `larghezza_mm` e `altezza_mm`, le due colonne che "
+     "servono solo a disegnare la simulazione. Vuote non sono un difetto e non "
+     "producono nessun messaggio: di parecchie linee il disegno non ce l'ha "
+     "nessuno, e il calcolo non le usa comunque. Scritte male si': un testo in "
+     "quelle celle viene segnalato come in tutte le altre."),
+    ("p",
      "L'ultima colonna, con valore predefinito 1: il gancio scarico puo' "
      "passare basso sopra questa vasca. Il commento dice perche' il "
      "predefinito e' quello -- 'e' come sono fatte quasi tutte' -- e quindi la "

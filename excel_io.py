@@ -123,6 +123,22 @@ _PARAMETRI = {
         "Infittirlo (100, 50) se una linea con vasche vicine esce INFEASIBLE "
         "o il takt time sembra troppo alto; costa solo tempo di calcolo",
     ),
+    "larghezza_pezzo_mm": (
+        "mm",
+        False,
+        None,
+        "quanto e' largo il pezzo appeso al telaio. SOLO PER LA SIMULAZIONE: "
+        "non entra in nessun calcolo, serve a disegnarlo in proporzione alle "
+        "vasche invece che di una misura convenzionale. Vuoto = come prima",
+    ),
+    "altezza_pezzo_mm": (
+        "mm",
+        False,
+        None,
+        "quanto e' alto il pezzo appeso al telaio. Solo per la simulazione, "
+        "come larghezza_pezzo_mm: insieme all'altezza delle vasche dice "
+        "quanto il pezzo le riempie",
+    ),
     "max_carroponti": (
         "-",
         False,
@@ -341,6 +357,8 @@ def leggi_problema(percorso_file: str) -> Configurazione:
             clearance_step_mm=par["passo_controllo_distanza_mm"],
             cambio_quota_carico=cambio_quota["carico"],
             cambio_quota_scarico=cambio_quota["scarico"],
+            larghezza_pezzo=par["larghezza_pezzo_mm"],
+            altezza_pezzo=par["altezza_pezzo_mm"],
         )
     except ValueError as e:
         # le validazioni di ProblemData sono gia' scritte per un umano:
@@ -465,6 +483,19 @@ def _leggi_vasche(ws, errori: _Errori) -> dict[str, Tank]:
                 errori,
                 intero=True,
             )
+        # Larghezza e altezza della vasca: FACOLTATIVE, e servono solo alla
+        # simulazione, che senza si inventa delle proporzioni. Vuote non sono
+        # un difetto -- di parecchie linee non si ha il disegno -- quindi qui
+        # non si segnala niente: si legge se c'e'.
+        ingombro = {}
+        for colonna, lettera, quale in ((9, "I", "larghezza"), (10, "J", "altezza")):
+            cella = ws.cell(riga, colonna).value
+            if cella is None or (isinstance(cella, str) and not cella.strip()):
+                ingombro[quale] = None
+                continue
+            ingombro[quale] = _numero(
+                cella, FOGLIO_VASCHE, f"{lettera}{riga}", f"{quale} della vasca", errori
+            )
         if pos is None or posti is None or corsa is None or sgocciolamento is None:
             continue
         if basso is None:
@@ -478,6 +509,8 @@ def _leggi_vasche(ws, errori: _Errori) -> dict[str, Tank]:
             svincolo_pos=svincoli["positivo"],
             svincolo_neg=svincoli["negativo"],
             gancio_basso=bool(basso),
+            larghezza=ingombro["larghezza"],
+            altezza=ingombro["altezza"],
         )
     if not tanks:
         errori.aggiungi(FOGLIO_VASCHE, "A2", "nessuna vasca definita")
@@ -824,15 +857,21 @@ def _righe_esempio():
     """La linea di zincatura d'esempio, nella forma in cui va scritta sui
     fogli. E' la linea con cui si comincia: si lancia subito e la si modifica
     pezzo per pezzo."""
+    # id, posizione, posti, corsa, sgocciolamento, i due svincoli, gancio
+    # basso, e infine larghezza e altezza della vasca. Le tre colonne di mezzo
+    # restano vuote: la linea d'esempio non ha ostacoli. Larghezza e altezza
+    # ci sono perche' servono solo a disegnare, e vederle compilate dice a chi
+    # apre il modello che si possono compilare -- carico e scarico no, che non
+    # sono vasche.
     vasche = [
         # carico e scarico non sono bagni: nessuna corsa, nessuno scolo
-        ("CARICO", 0, 1, 0, 0),
-        ("SGRASSO", 2500, 1, 800, 2),
-        ("RISCIACQUO_1", 5500, 1, 800, 2),
-        ("ZINCATURA", 9500, 2, 1100, 8),
-        ("RISCIACQUO_2", 13000, 1, 800, 2),
-        ("PASSIVAZIONE", 16500, 1, 800, 3),
-        ("SCARICO", 20000, 1, 0, 0),
+        ("CARICO", 0, 1, 0, 0, None, None, None, None, None),
+        ("SGRASSO", 2500, 1, 800, 2, None, None, None, 1800, 1200),
+        ("RISCIACQUO_1", 5500, 1, 800, 2, None, None, None, 1800, 1200),
+        ("ZINCATURA", 9500, 2, 1100, 8, None, None, None, 2600, 1600),
+        ("RISCIACQUO_2", 13000, 1, 800, 2, None, None, None, 1800, 1200),
+        ("PASSIVAZIONE", 16500, 1, 800, 3, None, None, None, 1800, 1200),
+        ("SCARICO", 20000, 1, 0, 0, None, None, None, None, None),
     ]
     percorso = [
         ("CARICO", 0, 0),
@@ -861,6 +900,8 @@ def _righe_esempio():
         "tempo_sgancio_s": 1,
         "risoluzione_tick_per_s": 100,
         "passo_controllo_distanza_mm": 200,
+        "larghezza_pezzo_mm": 1400,
+        "altezza_pezzo_mm": 900,
         "max_carroponti": 4,
         "tempo_limite_per_tentativo_s": 15,
     }
@@ -889,6 +930,8 @@ def _righe_da_configurazione(cfg: Configurazione):
             t.svincolo_neg,
             t.svincolo_pos,
             1 if t.gancio_basso else 0,
+            t.larghezza,
+            t.altezza,
         )
         for t in d.tanks.values()
     ]
@@ -911,6 +954,8 @@ def _righe_da_configurazione(cfg: Configurazione):
         "tempo_sgancio_s": d.disengage_time,
         "risoluzione_tick_per_s": d.time_scale,
         "passo_controllo_distanza_mm": d.clearance_step_mm,
+        "larghezza_pezzo_mm": d.larghezza_pezzo,
+        "altezza_pezzo_mm": d.altezza_pezzo,
         "max_carroponti": cfg.max_carroponti,
         "tempo_limite_per_tentativo_s": cfg.tempo_limite_s,
     }
@@ -1287,8 +1332,10 @@ def _aggiungi_fogli_linea(
             "svincolo_negativo_mm",
             "svincolo_positivo_mm",
             "traslazione_con_gancio_basso",
+            "larghezza_mm",
+            "altezza_mm",
         ],
-        [22, 14, 8, 20, 20, 22, 22, 28],
+        [22, 14, 8, 20, 20, 22, 22, 28, 14, 14],
     )
     for riga in vasche:
         ws.append(list(riga))

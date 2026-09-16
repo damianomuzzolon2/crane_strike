@@ -62,6 +62,14 @@ STRUTTURE = [
     # ==================================================================
     ("h2", "1. Tank -- la vasca"),
     ("c", "model.Tank"),
+    ("q",
+     "LE ULTIME DUE NON SERVONO A CALCOLARE NIENTE. `larghezza` e `altezza` "
+     "della vasca -- come `larghezza_pezzo` e `altezza_pezzo` in ProblemData "
+     "-- le guarda solo la simulazione, per disegnare in proporzione invece "
+     "che con misure convenzionali. Sono facoltative, e una linea che non le "
+     "dichiara si risolve e si verifica esattamente come prima. Il controllo "
+     "in __post_init__ rifiuta solo lo zero o il negativo, che non sarebbero "
+     "un disegno diverso ma un rettangolo invisibile."),
     ("p",
      "Immutabile (frozen), e ogni campo porta con se' la ragione per cui sta "
      "li'. Vale la pena leggerli in ordine, perche' raccontano tre "

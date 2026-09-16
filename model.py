@@ -157,6 +157,17 @@ class Tank:
     # pagare salita e discesa anche dove non serviva. Per vasca, un rientro che
     # non scavalca nessun ostacolo resta basso e non paga niente.
     gancio_basso: bool = field(default=True, kw_only=True)
+    # Ingombro della vasca [mm]: quanto e' larga lungo la rotaia e quanto e'
+    # alta. SERVONO SOLO A DISEGNARE -- la simulazione, e nient'altro: il
+    # modello non le guarda, il verificatore nemmeno, e una linea senza queste
+    # due misure si risolve esattamente come prima. Sono facoltative per questo.
+    #
+    # Il disegno, senza, si inventa delle proporzioni: le vasche larghe il 62%
+    # del passo fra una e l'altra e tutte della stessa profondita'. E' una
+    # convenzione onesta finche' nessuno ha dichiarato niente, e una linea in
+    # cui le vasche sono davvero diverse fra loro si vede male.
+    larghezza: Optional[float] = field(default=None, kw_only=True)
+    altezza: Optional[float] = field(default=None, kw_only=True)
 
 
 @dataclass(frozen=True)
@@ -332,6 +343,13 @@ class ProblemData:
     # soluzioni buone che prima venivano scartate, mai accettarne di
     # pericolose. Costa un modello piu' grande: le verifiche sono D/passo.
     clearance_step_mm: float = 200.0
+    # Ingombro del PEZZO appeso al telaio [mm]. Come `Tank.larghezza` e
+    # `Tank.altezza`: servono solo alla simulazione, che senza disegna un
+    # telaio di dimensione convenzionale. Il modello non sa cosa sia un pezzo
+    # -- sa quanto dura portarlo -- e queste due misure non entrano in nessun
+    # vincolo.
+    larghezza_pezzo: Optional[float] = None
+    altezza_pezzo: Optional[float] = None
     # Le due ZONE DI CAMBIO QUOTA, se l'impianto le ha (vedi ZonaCambioQuota).
     # Una serve il CARICO -- la prima tappa del percorso -- e sta fra il carico
     # e la prima vasca; l'altra serve lo SCARICO e sta fra l'ultima vasca e lo
@@ -370,6 +388,27 @@ class ProblemData:
             if t.drain_time < 0:
                 raise ValueError(
                     f"drain_time della vasca '{t.id}' deve essere >= 0"
+                )
+            # Misure di solo disegno, ma una vasca larga zero o alta zero non
+            # e' un disegno diverso: e' un rettangolo che non si vede. Chi la
+            # scrive ha sbagliato cella, e vale la pena dirlo subito.
+            for quale, valore in (
+                ("larghezza", t.larghezza), ("altezza", t.altezza)
+            ):
+                if valore is not None and valore <= 0:
+                    raise ValueError(
+                        f"{quale} della vasca '{t.id}' deve essere > 0 "
+                        f"(lasciala vuota se non la conosci: serve solo a "
+                        f"disegnare la simulazione)"
+                    )
+        for quale, valore in (
+            ("larghezza_pezzo", self.larghezza_pezzo),
+            ("altezza_pezzo", self.altezza_pezzo),
+        ):
+            if valore is not None and valore <= 0:
+                raise ValueError(
+                    f"{quale} deve essere > 0 (lascialo vuoto se non lo "
+                    f"conosci: serve solo a disegnare la simulazione)"
                 )
         serve_cinematica = any(t.lift_height > 0 for t in self.tanks.values())
         if serve_cinematica and self.kin_lift_loaded is None:
