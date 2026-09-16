@@ -1125,6 +1125,10 @@ class FinestraSimulazione(tk.Toplevel):
         self.assi = self.figura.add_subplot(111)
         self.tela = FigureCanvasTkAgg(self.figura, master=self)
         self.tela.get_tk_widget().pack(side=tk.TOP, fill=tk.BOTH, expand=True)
+        # Ridimensionando la finestra cambia la scala dei due assi, e con lei
+        # la misura in punti del telaio: va rifatta anche a riproduzione ferma,
+        # quando nessun fotogramma lo farebbe.
+        self.tela.mpl_connect("resize_event", self._ridimensionata)
 
         comandi = ttk.Frame(self, padding=(10, 6))
         comandi.pack(fill=tk.X)
@@ -1523,7 +1527,6 @@ class FinestraSimulazione(tk.Toplevel):
         self.assi.add_line(self.pezzi_disegnati)
 
         self.assi.set_xlim(sinistra, destra)
-        self._misura_il_pezzo()
         # Sopra la rotaia si lascia aria per la legenda: sovrapposta ai
         # carroponti coprirebbe proprio quello che si sta guardando.
         cima_carro = (
@@ -1571,6 +1574,12 @@ class FinestraSimulazione(tk.Toplevel):
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", UserWarning)
             self.figura.tight_layout()
+        # Il simbolo del telaio si misura SOLO ADESSO, a scena finita: prima i
+        # limiti verticali e il tight_layout non ci sono ancora, e la scala che
+        # la misura usa e' sbagliata. Chiamata piu' in alto -- subito dopo
+        # set_xlim, com'era -- il telaio usciva della misura sbagliata e ci
+        # restava finche' la riproduzione era ferma.
+        self._misura_il_pezzo()
 
     def _misura_il_pezzo(self):
         """Ridimensiona il simbolo del telaio alle misure vere del pezzo.
@@ -1583,8 +1592,12 @@ class FinestraSimulazione(tk.Toplevel):
         con la sua scala: la larghezza da' la dimensione del marker, il
         rapporto fra le due da' la forma del simbolo.
 
-        Si rifa' a ogni fotogramma perche' la scala cambia quando la finestra
-        viene ridimensionata; costa un paio di moltiplicazioni.
+        Va rifatta quando la scala cambia: a scena finita (`_prepara_scena`,
+        dopo il tight_layout), quando la finestra viene ridimensionata
+        (`_ridimensionata`) e a ogni fotogramma. Costa un paio di
+        moltiplicazioni. Chiamarla prima che la scena sia finita da' una misura
+        sbagliata, ed e' successo: il telaio usciva largo 1119 mm invece di
+        1200 e restava cosi' finche' la riproduzione era ferma.
 
         Senza `larghezza_pezzo` dichiarata non si tocca niente: resta il
         simbolo di misura convenzionale, quello di prima."""
@@ -1606,6 +1619,14 @@ class FinestraSimulazione(tk.Toplevel):
         self.pezzi_disegnati.set_marker(
             Path(_TELAIO.vertices * np.array([1.0, verticale]), _TELAIO.codes)
         )
+
+    def _ridimensionata(self, _evento):
+        """La finestra ha cambiato dimensione: il telaio va rimisurato, e il
+        disegno aggiornato, anche se la riproduzione e' ferma."""
+        if getattr(self, "sim", None) is None or not hasattr(self, "pezzi_disegnati"):
+            return
+        self._misura_il_pezzo()
+        self.tela.draw_idle()
 
     def _appoggio(self, x: float, larghezza: float, fondo: float, pavimento: float):
         """Il basamento che regge una postazione, che altrimenti resterebbe

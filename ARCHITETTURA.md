@@ -6,7 +6,7 @@ invarianti regge, e dove sono le trappole — comprese quelle in cui siamo gia'
 caduti, che sono la parte piu' utile.
 
 Stato al momento della scrittura: 16 file Python, 15.223 righe, cinque suite di
-test per **511 asserzioni** complessive.
+test per **515 asserzioni** complessive.
 
 ---
 
@@ -302,8 +302,12 @@ scrivere un secondo posto che decide se un rientro passa alto, fermati.
 
 Gli svincoli si dichiarano **per tutte le vasche o per nessuna** (almeno uno
 per vasca): qualunque vasca puo' essere il capo di un rientro che deve passare
-alto. Un ostacolo **agli estremi** della linea viene rifiutato: li' non c'e'
-niente da scavalcare, e quello che serve e' una zona di cambio quota (§4.5).
+alto. Anche **carico e scarico** possono essere ostacoli: vuol dire che li' il
+gancio SCARICO non puo' salire o scendere dov'e', e lo fa sul suo svincolo,
+mentre il telaio si prende e si posa al centro come sempre. Non va confuso con
+una zona di cambio quota (§4.5), che cambia il giro anche col pezzo appeso.
+Fino a una versione precedente un ostacolo agli estremi veniva rifiutato,
+sull'idea sbagliata che li' non ci fosse niente da evitare.
 
 ### 4.5 Le zone di cambio quota
 
@@ -782,14 +786,14 @@ lascia il pulsante vuoto.
 
 ---
 
-## 11. I test — 511 asserzioni, cinque suite
+## 11. I test — 515 asserzioni, cinque suite
 
 Nessun pytest: ogni file si lancia da solo, stampa cosa ha provato e restituisce
 un codice d'uscita.
 
 | file | asserzioni | richiede | domanda a cui risponde |
 | --- | ---: | --- | --- |
-| `test/test_verify.py` | 119 | — | il verificatore trova davvero quello che deve? |
+| `test/test_verify.py` | 123 | — | il verificatore trova davvero quello che deve? |
 | `test/test_excel_io.py` | 102 | — | un file compilato male viene respinto con un messaggio utile? |
 | `test/test_simulazione.py` | 84 | — | la simulazione mostra il ciclogramma che c'e'? |
 | `test/test_model.py` | 78 | OR-Tools | il modello produce soluzioni fisicamente valide? |

@@ -34,7 +34,9 @@ from model import (
     Tank,
     ZonaCambioQuota,
     _build_zone_trajectory,
+    proposta_semplice,
     solve,
+    tratte_rientro,
     zone_layout_conflicts,
 )
 from model import build_solution as costruisci
@@ -77,8 +79,8 @@ def _con_ostacoli(data, nomi=None):
     svincoli: e' il modo di dire, adesso che il flag e' per vasca, quello che
     prima diceva `empty_hook_travels_low=False`.
 
-    Carico e scarico restano liberi: agli estremi della linea non c'e' niente
-    da scavalcare, e il programma rifiuta di dichiararli ostacoli."""
+    Carico e scarico restano liberi: qui servono ostacoli IN MEZZO. Che carico
+    e scarico possano esserlo lo prova `test_ostacolo_allo_scarico`."""
     quote = sorted(t.position for t in data.tanks.values())
     tanks = {}
     for nome, t in data.tanks.items():
@@ -1457,6 +1459,75 @@ def test_cambio_quota_validazione():
         )
 
 
+def test_ostacolo_allo_scarico():
+    """Carico e scarico possono essere OSTACOLI: il gancio scarico non puo'
+    salire o scendere dov'e', e lo fa sul suo svincolo.
+
+    Veniva rifiutato, con l'idea che agli estremi della linea non ci fosse
+    niente da scavalcare e servisse una zona di cambio quota. Ma la zona di
+    cambio quota cambia il giro anche col pezzo appeso; qui il telaio si posa
+    al centro come sempre, ed e' solo il gancio vuoto a dover andare di lato.
+    E' un impianto vero: e' arrivato da una linea di produzione."""
+    print("\n[24] lo scarico dichiarato ostacolo: il gancio vuoto sale sullo svincolo")
+    base = make_data(
+        positions=[0, 5000, 10000, 15000],
+        dwells=[(0, 0), (30, 90), (30, 90), (0, 0)],
+        zones=[HoistZone(0, 2)],
+        lift_height=1000.0,
+        kin_lift_empty=KIN_LIFT_EMPTY,
+        kin_lift_loaded=KIN_LIFT_LOADED,
+    )
+    ultima_x = 15000
+    tanks = {
+        nome: dataclasses.replace(
+            t,
+            # gli svincoli vanno dichiarati per tutte le vasche o per nessuna
+            svincolo_pos=t.position + 900 if t.position < ultima_x else None,
+            svincolo_neg=t.position - 900 if t.position > 0 else None,
+            gancio_basso=t.position != ultima_x,
+        )
+        for nome, t in base.tanks.items()
+    }
+    try:
+        data = dataclasses.replace(base, tanks=tanks)
+        errore = ""
+    except ValueError as e:
+        data, errore = None, str(e)
+    check(data is not None, f"una linea con lo scarico ostacolo si accetta ({errore[:80]})")
+    if data is None:
+        return
+
+    ultima = data.n_stations - 1
+    tratte = tratte_rientro(data, ultima, 0)
+    verticali = [(da, s) for da, a, s in tratte if da == a]
+    check(
+        data.serve_alto(ultima, 0)
+        and tratte[0][:2] == (15000, 14100)
+        and verticali
+        and verticali[0] == (14100, data.empty_lift_seconds(ultima)),
+        f"lasciando lo scarico il gancio va allo svincolo e sale li', non sul "
+        f"posto ({[(round(da), round(a)) for da, a, _ in tratte]})",
+    )
+    check(
+        not data.serve_alto(2, 1),
+        "un rientro che non tocca lo scarico resta basso: l'ostacolo vale solo li'",
+    )
+    # E la traiettoria costruita lo fa davvero: una salita a gancio scarico
+    # sullo svincolo dello scarico.
+    sol, dati = proposta_semplice(data)
+    salite = [
+        s
+        for segs in sol.segments_per_hoist
+        for s in segs
+        if s.kind == "lift_empty" and s.sale and abs(s.x_start - 14100) < 1e-6
+    ]
+    check(
+        bool(salite),
+        f"nella traiettoria c'e' la salita a vuoto sullo svincolo dello scarico "
+        f"({len(salite)})",
+    )
+
+
 def main():
     print("=" * 72)
     print("TEST DEL VERIFICATORE (verify.py) -- non richiede OR-Tools")
@@ -1478,6 +1549,7 @@ def main():
     test_vasca_ripetuta()
     test_fasi_verticali()
     test_svincoli()
+    test_ostacolo_allo_scarico()
     test_cambio_quota()
     test_cambio_quota_validazione()
     test_fase_su_multiplo_esatto()

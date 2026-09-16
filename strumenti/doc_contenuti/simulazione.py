@@ -602,9 +602,23 @@ FINESTRA = [
      "da' la DIMENSIONE del marker, e il rapporto fra le due misure da' la "
      "FORMA, schiacciando i vertici del simbolo in verticale."),
     ("p",
-     "Si rifa' a ogni fotogramma, non una volta sola: la scala cambia quando "
-     "si ridimensiona la finestra, e un simbolo calcolato all'apertura "
-     "resterebbe della misura di allora. Costa due moltiplicazioni."),
+     "Si rifa' ogni volta che la scala puo' essere cambiata: a scena finita, "
+     "a ogni ridimensionamento della finestra (_ridimensionata) e a ogni "
+     "fotogramma. Costa due moltiplicazioni."),
+    ("q",
+     "A SCENA FINITA, NON PRIMA. La prima versione la chiamava subito dopo "
+     "set_xlim, quando i limiti verticali e il tight_layout non c'erano "
+     "ancora: la scala era sbagliata e il telaio usciva largo 1119 mm invece "
+     "di 1200. Finche' la simulazione girava non si vedeva, perche' il "
+     "fotogramma dopo lo correggeva; a riproduzione ferma restava sbagliato. "
+     "L'ha trovato test_simulazione, il giorno in cui il test e' stato "
+     "corretto per fermare la riproduzione."),
+    ("c", "simulazione.FinestraSimulazione._ridimensionata"),
+    ("p",
+     "Collegata all'evento resize_event della tela. Il controllo iniziale "
+     "serve perche' l'evento puo' arrivare prima che la scena sia pronta: "
+     "all'apertura la tela prende la sua dimensione mentre la finestra si sta "
+     "ancora costruendo."),
     ("c", "simulazione.FinestraSimulazione._appoggio"),
     ("p",
      "Il basamento che regge una postazione. Esiste perche' un piano che "

@@ -1258,6 +1258,15 @@ le paga lo **spostamento a vuoto**, che e' quando avvengono davvero.
 > un unico parametro della linea, dichiarare un solo passaggio difficile
 > costringeva *ogni* rientro dell'impianto a salire e riscendere.
 
+Anche il **carico** e lo **scarico** si possono dichiarare ostacolo, con il loro
+svincolo. Vuol dire che li' il gancio **scarico** non puo' salire o scendere
+dov'e': dopo aver posato il telaio sullo scarico il carroponte va sullo
+svincolo, sale li' e riparte alto (e per arrivare al carico scende sullo
+svincolo e trasla basso fino al centro). Il telaio si prende e si posa al
+centro come sempre. Non e' la stessa cosa di una **zona di cambio quota** (piu'
+sotto), che cambia il giro anche col pezzo appeso: se a non poter cambiare
+quota sopra lo scarico e' solo il gancio vuoto, basta l'ostacolo.
+
 `v_max_sollevamento_vuoto_mm_s` e `a_max_sollevamento_vuoto_mm_s2` servono solo
 se c'e' almeno una vasca ostacolo: senza ostacoli quelle corse non le fa
 nessuno, e i due parametri si possono lasciare in bianco.
@@ -1730,7 +1739,7 @@ python test/esempio.py           # risoluzione reale + verifica + grafico
 ```
 
 Ognuno stampa cosa ha provato e finisce con `RISULTATO: n ok, m falliti`.
-Nessuna dipendenza da pytest. Stato attuale: **119, 102, 84, 78 e 128
+Nessuna dipendenza da pytest. Stato attuale: **123, 102, 84, 78 e 128
 asserzioni, zero fallimenti**.
 
 **La risoluzione CP-SAT e' eseguita e verificata end-to-end.** Sull'esempio
@@ -1740,7 +1749,7 @@ soluzione senza errori.
 
 I cinque file rispondono a domande diverse e si completano:
 
-- `test_verify.py` — 22 casi. *Il verificatore trova davvero quello che deve
+- `test_verify.py` — 28 casi. *Il verificatore trova davvero quello che deve
   trovare?* Uno solo dei casi e' corretto, gli altri sono rotti di proposito
   (collisioni, permanenze, periodicita', fasi verticali, capienza, geometrie
   patologiche). Le soluzioni sono costruite a mano, quindi non serve OR-Tools.

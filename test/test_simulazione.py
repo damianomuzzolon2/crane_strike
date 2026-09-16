@@ -66,8 +66,9 @@ def check(condition: bool, description: str):
 
 def dati_prova(gancio_basso: bool = True) -> ProblemData:
     """gancio_basso=False: le vasche di mezzo diventano OSTACOLI, con i loro
-    svincoli. Carico e scarico restano liberi -- agli estremi della linea non
-    c'e' niente da scavalcare, e il programma rifiuta di dichiararli ostacoli."""
+    svincoli. Carico e scarico restano liberi: qui si provano gli ostacoli in
+    mezzo alla linea (che carico e scarico possano esserlo lo prova
+    test_verify.py)."""
     ultima = VASCHE[-1][1]
     tanks = {}
     for nome, pos, corsa, scolo in VASCHE:
@@ -1144,6 +1145,13 @@ def test_misure_dichiarate():
     try:
         sol, dati = proposta_semplice(con)
         f = FinestraSimulazione(radice, dati, sol)
+        # Ferma, come in tutti gli altri test: la finestra parte animandosi da
+        # sola, e con due finestre aperte che si ridisegnano ogni pochi
+        # millisecondi la coda degli eventi non si svuota mai -- `update()`
+        # non torna piu' e la suite resta appesa, con la simulazione che
+        # ricomincia da capo all'infinito. E' successo, proprio qui.
+        if f._in_moto:
+            f.avvia_o_ferma()
         f.update()
         larghezze = {
             dati.tanks[n].position: round(f.larghezze[dati.tanks[n].position])
@@ -1176,6 +1184,8 @@ def test_misure_dichiarate():
         largo = dataclasses.replace(con, larghezza_pezzo=2000.0)
         sol_l, dati_l = proposta_semplice(largo)
         q = FinestraSimulazione(radice, dati_l, sol_l)
+        if q._in_moto:
+            q.avvia_o_ferma()
         q.update()
         check(
             abs(q.passo_corsia - f.passo_corsia) < 1e-9,
@@ -1210,8 +1220,10 @@ def test_misure_dichiarate():
         # -- e senza le misure si torna alle convenzioni di prima -----------
         sol_s, dati_s = proposta_semplice(base)
         g = FinestraSimulazione(radice, dati_s, sol_s)
+        if g._in_moto:
+            g.avvia_o_ferma()
         g.update()
-        corse = [dati_s.lift_height_at(i) for i in range(dati_s.n_stations)]
+        corse =[dati_s.lift_height_at(i) for i in range(dati_s.n_stations)]
         check(
             len(set(round(v, 6) for v in g.larghezze.values())) == 1
             and abs(g.altezza_telaio - 0.11 * max(corse)) < 1e-9

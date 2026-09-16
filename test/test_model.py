@@ -102,8 +102,9 @@ def con_ostacoli(data, svincolo=1200.0):
     """La linea con le vasche di MEZZO dichiarate ostacolo e i loro svincoli.
 
     E' come si dice adesso, col flag per vasca, quello che prima era
-    `empty_hook_travels_low=False`. Carico e scarico restano liberi: agli
-    estremi non c'e' niente da scavalcare, e il programma li rifiuta.
+    `empty_hook_travels_low=False`. Carico e scarico restano liberi: qui si
+    prova la linea con gli ostacoli in mezzo (che carico e scarico possano
+    esserlo lo prova test_verify.py).
     """
     import dataclasses
 

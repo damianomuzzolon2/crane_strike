@@ -527,20 +527,21 @@ class ProblemData:
             for t in self.tanks.values()
             if t.svincolo_pos is not None or t.svincolo_neg is not None
         ]
-        # Una vasca ostacolo agli ESTREMI della linea non ha senso: li' il
-        # carroponte non deve scavalcare niente, deve solo salire e scendere --
-        # ed e' esattamente quello che descrive una zona di cambio quota.
-        for stazione, verso in ((0, "carico"), (len(self.route) - 1, "scarico")):
-            if not self.tanks[self.route[stazione].tank_id].gancio_basso:
-                raise ValueError(
-                    f"la stazione di {verso} "
-                    f"('{self.route[stazione].tank_id}') e' dichiarata come "
-                    f"ostacolo (traslazione_con_gancio_basso = 0), ma sta a un "
-                    f"estremo della linea e non c'e' niente da scavalcarci. Se "
-                    f"il carroponte li' non puo' cambiare quota dov'e', quello "
-                    f"che serve e' una ZONA DI CAMBIO QUOTA (foglio "
-                    f"CambioQuota), non un ostacolo."
-                )
+        # Carico e scarico POSSONO essere ostacoli. Qui c'era un rifiuto, con
+        # l'idea che agli estremi della linea non ci fosse niente da scavalcare
+        # e che servisse una zona di cambio quota. Sono due cose diverse:
+        #   - la zona di cambio quota cambia il giro ANCHE COL PEZZO APPESO --
+        #     presa e rilascio passano dal punto di cambio quota -- e vuole la
+        #     corsa della stazione a zero;
+        #   - l'ostacolo riguarda solo il GANCIO SCARICO: il telaio si prende e
+        #     si posa al centro come sempre, ma per andarsene (o per arrivare)
+        #     il gancio vuoto deve salire e scendere sullo svincolo, non dov'e'.
+        # Il secondo e' un impianto vero -- sopra lo scarico c'e' qualcosa che
+        # impedisce di tirare su il gancio in quel punto -- e rifiutarlo
+        # obbligava a descrivere con una zona di cambio quota un giro che il
+        # pezzo non fa. `serve_alto` e `svincolo_verso` lo gestiscono gia' come
+        # per qualunque altra vasca; lo svincolo resta obbligatorio, e lo
+        # controlla la regola qui sotto.
         # Gli svincoli si dichiarano per tutta la linea o per niente: qualunque
         # vasca puo' essere il capo di un rientro che deve passare alto, e
         # quella senza svincoli non saprebbe dove salire.
