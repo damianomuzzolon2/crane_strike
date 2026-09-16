@@ -1,4 +1,4 @@
-# Architettura del codice
+# Architettura del codice di CraneStrike
 
 Documento per chi deve **mettere le mani nel codice**. Il `README.md` spiega
 cosa fa il programma e come si usa; questo spiega com'e' fatto dentro, quali
@@ -6,7 +6,7 @@ invarianti regge, e dove sono le trappole — comprese quelle in cui siamo gia'
 caduti, che sono la parte piu' utile.
 
 Stato al momento della scrittura: 16 file Python, 15.223 righe, cinque suite di
-test per **498 asserzioni** complessive.
+test per **500 asserzioni** complessive.
 
 ---
 
@@ -14,9 +14,20 @@ test per **498 asserzioni** complessive.
 
 ### Dove stanno i file
 
-In radice ci sono **solo i nove moduli** del programma, i due documenti, il
-`.bat` e `requirements.txt`. Il resto sta in `test/`, `strumenti/`, `doc/`,
-`dati/`.
+In radice ci sono **solo i nove moduli** del programma, i due documenti,
+`CraneStrike.bat` e `requirements.txt`. Il resto sta in `test/`, `strumenti/`,
+`doc/`, `dati/` e `risorse/`.
+
+`risorse/` contiene l'icona in due formati, **ricavati** da `doc/icon.png` con
+`python strumenti/genera_icona.py` (che rende trasparente il bianco esterno):
+`icona.png` per Tk, `icona.ico` con le misure piccole per Windows e per il file
+`.exe`. `interfaccia._applica_icona` la cerca accanto al modulo o, impacchettata,
+in `sys._MEIPASS`; per questo il `.spec` la dichiara in `datas`. Sulla finestra
+se ne imposta **uno solo dei due** (l'ICO su Windows): impostarli entrambi,
+misurato, toglie a Windows l'icona piccola e nel titolo compare quella
+generica, senza nessun errore. Se si cambia
+l'immagine si rilancia lo script: il programma non usa Pillow e non la rigenera
+da solo.
 
 I moduli non sono in un package di proposito: si importano per nome
 (`from model import solve`) e i programmi si avviano direttamente
@@ -762,7 +773,7 @@ lascia il pulsante vuoto.
 
 ---
 
-## 11. I test — 498 asserzioni, cinque suite
+## 11. I test — 500 asserzioni, cinque suite
 
 Nessun pytest: ogni file si lancia da solo, stampa cosa ha provato e restituisce
 un codice d'uscita.
@@ -773,7 +784,7 @@ un codice d'uscita.
 | `test/test_excel_io.py` | 97 | — | un file compilato male viene respinto con un messaggio utile? |
 | `test/test_simulazione.py` | 78 | — | la simulazione mostra il ciclogramma che c'e'? |
 | `test/test_model.py` | 78 | OR-Tools | il modello produce soluzioni fisicamente valide? |
-| `test/test_interfaccia.py` | 126 | OR-Tools + grafica | l'interfaccia si comporta come deve? |
+| `test/test_interfaccia.py` | 128 | OR-Tools + grafica | l'interfaccia si comporta come deve? |
 
 > `test_model.py` risolve davvero, con limiti di tempo dell'ordine del minuto.
 > Su una macchina occupata un caso puo' scadere e restituire `UNKNOWN`: e'

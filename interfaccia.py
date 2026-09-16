@@ -57,7 +57,7 @@ from plotting import (
 from simulazione import FinestraSimulazione
 from verify import verify_solution
 
-TITOLO = "Ciclogrammi carroponti"
+TITOLO = "CraneStrike"
 
 # colori delle righe del report, per gravita'
 _COLORI_GRAVITA = {
@@ -144,6 +144,10 @@ class Applicazione(tk.Tk):
     def __init__(self, file_iniziale: str | None = None):
         super().__init__()
         self.title(TITOLO)
+        # Tenuta in un attributo: fuori da Windows e' un'immagine di Tk, che
+        # senza riferimenti viene raccolta dal garbage collector -- e la
+        # finestra torna all'icona predefinita.
+        self.icona = _applica_icona(self)
         self.geometry("1280x800")
         self.minsize(1000, 640)
 
@@ -2290,7 +2294,66 @@ class Applicazione(tk.Tk):
             self.barra_grafico = None
             barra.destroy()
             gc.collect()
+        # Per la stessa ragione l'icona della finestra: si lascia andare ora,
+        # finche' c'e' ancora un Tk a cui chiedere di cancellarla.
+        self.icona = None
         super().destroy()
+
+
+def _applica_icona(finestra) -> "tk.PhotoImage | str | None":
+    """Mette l'icona di CraneStrike sulla finestra, e su tutte quelle che si
+    apriranno dopo -- la simulazione compresa. Restituisce quello che ha
+    applicato, o None, e va tenuto in un attributo.
+
+    I file stanno in `risorse/`, accanto a questo modulo; nell'eseguibile
+    impacchettato stanno nella cartella che PyInstaller indica con
+    `sys._MEIPASS`.
+
+    UNO SOLO DEI DUE FILE, MAI TUTTI E DUE. Su Windows l'ICO, che contiene le
+    misure piccole gia' pronte: nel titolo l'icona e' di 16 pixel, e il PNG
+    rimpicciolito da Tk viene seghettato. Altrove il PNG. Impostarli entrambi
+    sembra la scelta prudente ed e' la sbagliata: misurato su Tk 8.6.15 e
+    Windows 11, `iconphoto` seguito da `iconbitmap` toglie alla finestra
+    l'icona PICCOLA, e nel titolo compare l'icona generica di Windows.
+
+    Un'icona che manca non e' un motivo per non partire: se il file non c'e',
+    o Tk non lo legge, la finestra resta con quella predefinita."""
+    cartella = os.path.join(
+        getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__))),
+        "risorse",
+    )
+    try:
+        if sys.platform == "win32":
+            percorso = os.path.join(cartella, "icona.ico")
+            finestra.iconbitmap(default=percorso)
+            return percorso
+        immagine = tk.PhotoImage(
+            master=finestra, file=os.path.join(cartella, "icona.png")
+        )
+        finestra.iconphoto(True, immagine)
+        return immagine
+    except Exception:
+        return None
+
+
+def _identita_windows():
+    """Dice a Windows che questo processo e' CraneStrike, non Python.
+
+    Lanciato da `CraneStrike.bat` o da `python interfaccia.py`, il processo e'
+    pythonw.exe, e Windows raggruppa la finestra sotto l'icona di Python sulla
+    barra delle applicazioni, qualunque icona abbia la finestra. Un
+    identificativo proprio la separa. Nell'eseguibile non servirebbe, e non fa
+    danni. Deve precedere la creazione della finestra."""
+    if sys.platform != "win32":
+        return
+    try:
+        import ctypes
+
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(
+            "IMEL.CraneStrike"
+        )
+    except Exception:
+        pass
 
 
 def autotest(cartella: str | None = None) -> int:
@@ -2302,13 +2365,13 @@ def autotest(cartella: str | None = None) -> int:
     non essere finite dentro, e ce ne si accorgerebbe solo al primo calcolo,
     in stabilimento. Da lanciare cosi':
 
-        Ciclogrammi.exe --autotest
+        CraneStrike.exe --autotest
 
     Scrive un resoconto accanto ai file prodotti e restituisce 0 se tutto
     funziona."""
     import tempfile
 
-    destinazione = cartella or tempfile.mkdtemp(prefix="ciclogrammi_prova_")
+    destinazione = cartella or tempfile.mkdtemp(prefix="cranestrike_prova_")
     os.makedirs(destinazione, exist_ok=True)
     resoconto = os.path.join(destinazione, "autotest.txt")
     righe = []
@@ -2416,6 +2479,7 @@ def main(argv=None):
     if argv and argv[0] == "--autotest":
         return autotest(argv[1] if len(argv) > 1 else None)
     file_iniziale = argv[0] if argv else None
+    _identita_windows()
     try:
         app = Applicazione(file_iniziale)
         app.mainloop()

@@ -106,6 +106,27 @@ def test_apertura_e_proposta(percorso_linea):
     try:
         app.update()
         check(
+            app.title() == "CraneStrike" and app.icona is not None,
+            f"la finestra si chiama CraneStrike e ha la sua icona "
+            f"(\"{app.title()}\", icona {'caricata' if app.icona else 'mancante'})",
+        )
+        if sys.platform == "win32":
+            # "Caricata" non basta: impostando PNG e ICO insieme Tk non dava
+            # nessun errore, e intanto Windows perdeva l'icona PICCOLA -- quella
+            # del titolo -- e mostrava l'icona generica. Lo si chiede a Windows.
+            import ctypes
+
+            u32 = ctypes.windll.user32
+            u32.GetAncestor.restype = ctypes.c_void_p
+            u32.GetAncestor.argtypes = [ctypes.c_void_p, ctypes.c_uint]
+            u32.GetClassLongPtrW.restype = ctypes.c_void_p
+            u32.GetClassLongPtrW.argtypes = [ctypes.c_void_p, ctypes.c_int]
+            radice = u32.GetAncestor(app.winfo_id(), 2)  # GA_ROOT
+            check(
+                bool(u32.GetClassLongPtrW(radice, -34)),  # GCLP_HICONSM
+                "e Windows ha l'icona piccola, quella che si vede nel titolo",
+            )
+        check(
             str(app.btn_auto["state"]) == "disabled",
             "senza linea caricata il calcolo e' disabilitato",
         )

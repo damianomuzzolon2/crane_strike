@@ -33,6 +33,13 @@ for pacchetto in ("ortools", "matplotlib", "openpyxl"):
     binari += b
     nascosti += n
 
+# L'icona: la cartella `risorse/` finisce dentro il pacchetto con lo stesso
+# nome, e interfaccia.py la cerca accanto a se' (sys._MEIPASS quando e'
+# impacchettato). Senza, l'eseguibile parte lo stesso, ma con la piuma di Tk
+# nel titolo della finestra.
+dati += [(os.path.join(RADICE, "risorse"), "risorse")]
+ICONA = os.path.join(RADICE, "risorse", "icona.ico")
+
 nascosti += collect_submodules("ortools.sat")
 nascosti += [
     "matplotlib.backends.backend_tkagg",
@@ -86,7 +93,10 @@ exe = EXE(
     analisi.scripts,
     [],
     exclude_binaries=True,
-    name="Ciclogrammi",
+    name="CraneStrike",
+    # l'icona del FILE .exe, quella di Esplora risorse e del collegamento;
+    # quella della finestra aperta la mette interfaccia.py da risorse/
+    icon=ICONA,
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -106,5 +116,5 @@ COLLECT(
     strip=False,
     upx=False,
     upx_exclude=[],
-    name="Ciclogrammi",
+    name="CraneStrike",
 )

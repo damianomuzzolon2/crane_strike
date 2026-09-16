@@ -5,8 +5,8 @@ Produce l'eseguibile autonomo, da usare su PC dove Python non c'e'.
 
     python strumenti/costruisci_exe.py
 
-Al termine si trova tutto in `dist/Ciclogrammi/`: la cartella va copiata
-intera sul PC di destinazione, e si lancia `Ciclogrammi.exe`.
+Al termine si trova tutto in `dist/CraneStrike/`: la cartella va copiata
+intera sul PC di destinazione, e si lancia `CraneStrike.exe`.
 
 Con `--con-test` esegue prima l'intera suite di test. Non e' obbligatorio, ma
 e' l'unico modo per non scoprire un problema in stabilimento.
@@ -22,7 +22,7 @@ from pathlib import Path
 # Questo file sta in `strumenti/`: la radice del progetto e' la cartella sopra.
 ATTREZZI = Path(__file__).resolve().parent
 RADICE = ATTREZZI.parent
-USCITA = RADICE / "dist" / "Ciclogrammi"
+USCITA = RADICE / "dist" / "CraneStrike"
 
 TEST = [
     "kinematics.py",  # l'autoverifica della cinematica sta nel modulo stesso
@@ -93,7 +93,7 @@ def main() -> int:
             "PyInstaller",
             "--noconfirm",
             "--clean",
-            str(ATTREZZI / "ciclogrammi.spec"),
+            str(ATTREZZI / "cranestrike.spec"),
         ],
         cwd=RADICE,
     )
@@ -101,7 +101,7 @@ def main() -> int:
         print("\nImpacchettamento fallito.")
         return esito.returncode
 
-    eseguibile = USCITA / "Ciclogrammi.exe"
+    eseguibile = USCITA / "CraneStrike.exe"
     if not eseguibile.exists():
         print(f"\nAtteso {eseguibile}, ma non c'e'.")
         return 1
@@ -112,8 +112,8 @@ def main() -> int:
     print(f"Fatto: {eseguibile}")
     print(f"Dimensione della cartella: {peso / 1e6:.0f} MB")
     print()
-    print("Copia l'intera cartella dist/Ciclogrammi sul PC di destinazione")
-    print("e lancia Ciclogrammi.exe. Non serve installare Python.")
+    print("Copia l'intera cartella dist/CraneStrike sul PC di destinazione")
+    print("e lancia CraneStrike.exe. Non serve installare Python.")
     print("=" * 68)
     return 0
 

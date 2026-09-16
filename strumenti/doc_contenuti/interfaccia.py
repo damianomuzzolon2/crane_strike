@@ -160,6 +160,11 @@ FINESTRA = [
 
     # ==================================================================
     ("h2", "4. L'autotest e l'avvio"),
+    ("p",
+     "In fondo si lascia andare anche self.icona, per la stessa ragione delle "
+     "icone della barra del grafico: un'immagine di Tk che sopravvive alla "
+     "finestra viene cancellata dal garbage collector su un interprete che "
+     "non c'e' piu', e stampa un traceback innocuo che sembra un guasto."),
     ("c", "interfaccia.autotest"),
     ("p",
      "Prova l'installazione da cima a fondo senza intervento umano: crea un "
@@ -174,6 +179,43 @@ FINESTRA = [
      "backend di matplotlib non parte, o che un pulsante resta disabilitato -- "
      "cose che su un PC di stabilimento capitano, e che una prova del solo "
      "motore non vedrebbe."),
+    ("h3", "Il nome e l'icona"),
+    ("c", "interfaccia._applica_icona"),
+    ("p",
+     "Mette l'icona di CraneStrike sulla finestra principale e, con il primo "
+     "argomento di iconphoto a True, su tutte quelle che si apriranno dopo: "
+     "la simulazione la eredita senza doverlo ripetere."),
+    ("p",
+     "I file sono due, e se ne usa UNO SOLO. Su Windows l'ICO, che contiene "
+     "le misure piccole gia' pronte: nel titolo l'icona e' di 16 pixel, e il "
+     "PNG rimpicciolito da Tk viene seghettato. Sugli altri sistemi il PNG, "
+     "che Tk legge ovunque."),
+    ("q",
+     "MAI TUTTI E DUE. La prima versione impostava il PNG con iconphoto e poi "
+     "l'ICO con iconbitmap, per prudenza. Nessun errore, il test diceva "
+     "'icona caricata', e nel titolo compariva l'icona generica di Windows. "
+     "Chiedendolo a Windows (GetClassLongPtr, GCLP_HICONSM) si e' visto "
+     "perche': la seconda chiamata toglie alla finestra l'icona PICCOLA, che "
+     "e' proprio quella del titolo. Con uno solo dei due file l'icona c'e'. "
+     "Il test dell'interfaccia ora controlla quel dato, non il caricamento."),
+    ("p",
+     "La cartella si cerca in sys._MEIPASS quando il programma e' "
+     "impacchettato -- e' li' che PyInstaller mette i file dichiarati in "
+     "`datas` -- e accanto al modulo altrimenti. Tutto sta in un try: "
+     "un'icona che manca non e' un motivo per non aprire il programma."),
+    ("p",
+     "Quello che restituisce va TENUTO: __init__ lo mette in self.icona. Su "
+     "Windows e' solo il percorso dell'ICO, ma altrove e' una PhotoImage, e "
+     "Tk non conserva un riferimento alle immagini: raccolta dal garbage "
+     "collector, la finestra tornerebbe all'icona predefinita."),
+    ("c", "interfaccia._identita_windows"),
+    ("p",
+     "Il problema che risolve si vede solo lanciando da CraneStrike.bat o da "
+     "python: il processo e' pythonw.exe, e Windows raggruppa la finestra "
+     "sotto l'icona di Python sulla barra delle applicazioni, qualunque icona "
+     "abbia la finestra. Un AppUserModelID proprio la separa. Va chiamata "
+     "prima di creare la finestra, e per questo la chiama main e non "
+     "__init__."),
     ("c", "interfaccia.main"),
     ("p",
      "`multiprocessing.freeze_support()` e' la prima riga, e serve solo "

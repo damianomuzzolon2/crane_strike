@@ -1,6 +1,8 @@
-# Ciclogrammi carroponti (Cyclic Hoist Scheduling) con OR-Tools CP-SAT
+# CraneStrike — ciclogrammi carroponti (Cyclic Hoist Scheduling) con OR-Tools CP-SAT
 
-Strumento per calcolare il ciclogramma periodico di uno o piu' carroponti
+![icona di CraneStrike](risorse/icona.png)
+
+**CraneStrike** e' uno strumento per calcolare il ciclogramma periodico di uno o piu' carroponti
 che spostano pezzi attraverso una sequenza di vasche, rispettando:
 
 - tempi di permanenza min/max per vasca (tolleranza di processo),
@@ -33,11 +35,12 @@ create_cyclograms/
   interfaccia.py  simulazione.py  ciclogramma.py       <- i moduli: nessuna
   model.py  verify.py  excel_io.py                        sottocartella, cosi'
   kinematics.py  plotting.py  manuale.py                  si importano per nome
-  Ciclogrammi.bat  README.md  ARCHITETTURA.md
+  CraneStrike.bat  README.md  ARCHITETTURA.md
   requirements.txt
 
   test/        i test e l'esempio d'uso in codice
-  strumenti/   costruisci_exe.py e la ricetta PyInstaller
+  strumenti/   costruisci_exe.py, la ricetta PyInstaller e genera_icona.py
+  risorse/     icona.ico e icona.png, ricavate da doc/icon.png
   doc/         immagini del manuale, SOLVE_riga_per_riga.docx
   dati/        file Excel di esempio e di prova
 ```
@@ -93,9 +96,10 @@ OR-Tools installato.
 | `ciclogramma.py` | 191 | Lo stesso lavoro da **riga di comando**, per chi preferisce il terminale o vuole automatizzare. |
 | `test/esempio.py` | 198 | La linea di esempio definita **in codice** invece che in Excel, per chi vuole integrare il solutore in qualcos'altro. |
 | `strumenti/costruisci_exe.py` | 119 | Costruisce l'**eseguibile autonomo** con PyInstaller. Vedi sotto. |
-| `strumenti/ciclogrammi.spec` | — | La ricetta per PyInstaller: cosa includere, cosa escludere, come impacchettare. Non si lancia a mano, la usa `costruisci_exe.py`. |
+| `strumenti/cranestrike.spec` | — | La ricetta per PyInstaller: cosa includere, cosa escludere, come impacchettare. Non si lancia a mano, la usa `costruisci_exe.py`. |
+| `strumenti/genera_icona.py` | 61 | Ricava `risorse/icona.ico` e `risorse/icona.png` da `doc/icon.png`, rendendo trasparente il bianco fuori dal quadrato arrotondato. Si rilancia solo se l'immagine cambia; richiede Pillow, il programma no. |
 | `strumenti/genera_doc.py` | 470 | Produce i documenti Word in `doc/`: la spiegazione riga per riga di ogni modulo e l'albero delle chiamate. Il codice citato **non e' ricopiato**, viene estratto dal sorgente per nome a ogni generazione. Vedi *La documentazione in `doc/`*. |
-| `Ciclogrammi.bat` | — | Avvia l'interfaccia con un doppio clic, senza aprire il terminale. |
+| `CraneStrike.bat` | — | Avvia l'interfaccia con un doppio clic, senza aprire il terminale. |
 
 ### Test
 
@@ -127,8 +131,8 @@ Excel). `pyinstaller` serve solo a chi deve costruire l'eseguibile.
 
 ## Come si usa l'interfaccia
 
-Doppio clic su **`Ciclogrammi.bat`** (oppure `python interfaccia.py`, oppure
-`Ciclogrammi.exe` se si usa la versione impacchettata).
+Doppio clic su **`CraneStrike.bat`** (oppure `python interfaccia.py`, oppure
+`CraneStrike.exe` se si usa la versione impacchettata).
 
 ![interfaccia](doc/interfaccia.png)
 
@@ -946,8 +950,8 @@ python strumenti/costruisci_exe.py
 ```
 
 Ci vogliono un paio di minuti. Al termine si trova tutto in
-`dist/Ciclogrammi/`, circa 390 MB: si copia **la cartella intera** sul PC di
-destinazione e si lancia `Ciclogrammi.exe`. Non serve installare ne' Python
+`dist/CraneStrike/`, circa 390 MB: si copia **la cartella intera** sul PC di
+destinazione e si lancia `CraneStrike.exe`. Non serve installare ne' Python
 ne' altro.
 
 Con `--con-test` il comando esegue prima l'intera suite di test, e non
@@ -959,7 +963,7 @@ non scoprire un problema in stabilimento.
 Sul PC di destinazione, una volta sola:
 
 ```bash
-Ciclogrammi.exe --autotest
+CraneStrike.exe --autotest
 ```
 
 Crea un file di esempio, lo rilegge, calcola il ciclogramma, lo verifica, salva
@@ -980,7 +984,12 @@ attesa tutte le volte. La cartella si copia tale e quale e parte subito.
 
 ### Se serve rimettere le mani nello spec
 
-`ciclogrammi.spec` e' la ricetta per PyInstaller. Due punti delicati:
+`cranestrike.spec` e' la ricetta per PyInstaller. Tre punti delicati:
+
+- **`datas` e `icon`**: la cartella `risorse/` va copiata dentro il pacchetto,
+  altrimenti l'eseguibile parte senza icona nella finestra; `icon=` invece
+  mette l'icona sul file `.exe` stesso, quella che si vede in Esplora risorse.
+  Sono due cose diverse, e servono tutte e due.
 
 - **`excludes`**: qui si tolgono i pacchetti inutili per alleggerire. Attenzione
   a `pandas`: il progetto non lo usa, ma OR-Tools si', quindi non va escluso.
@@ -1690,7 +1699,7 @@ python test/esempio.py           # risoluzione reale + verifica + grafico
 ```
 
 Ognuno stampa cosa ha provato e finisce con `RISULTATO: n ok, m falliti`.
-Nessuna dipendenza da pytest. Stato attuale: **119, 97, 78, 78 e 126
+Nessuna dipendenza da pytest. Stato attuale: **119, 97, 78, 78 e 128
 asserzioni, zero fallimenti**.
 
 **La risoluzione CP-SAT e' eseguita e verificata end-to-end.** Sull'esempio
