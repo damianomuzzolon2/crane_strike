@@ -21,7 +21,10 @@ In radice ci sono **solo i nove moduli** del programma, i due documenti,
 `risorse/` contiene l'icona in due formati, **ricavati** da `doc/icon.png` con
 `python strumenti/genera_icona.py` (che rende trasparente il bianco esterno):
 `icona.png` per Tk, `icona.ico` con le misure piccole per Windows e per il file
-`.exe`. `interfaccia._applica_icona` la cerca accanto al modulo o, impacchettata,
+`.exe`. Le misure fino a 48 px nel `.ico` non sono rimpicciolite ma
+**ridisegnate** con i bordi sui pixel: ridotti, i tratti rossi da mezzo pixel
+diventavano una macchia e l'icona nel titolo sembrava sfocata. Le quote del
+disegno sono scritte nel generatore, e vanno rimisurate se `doc/icon.png` cambia. `interfaccia._applica_icona` la cerca accanto al modulo o, impacchettata,
 in `sys._MEIPASS`; per questo il `.spec` la dichiara in `datas`. Sulla finestra
 se ne imposta **uno solo dei due** (l'ICO su Windows): impostarli entrambi,
 misurato, toglie a Windows l'icona piccola e nel titolo compare quella

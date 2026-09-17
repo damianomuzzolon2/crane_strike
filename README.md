@@ -97,7 +97,7 @@ OR-Tools installato.
 | `test/esempio.py` | 198 | La linea di esempio definita **in codice** invece che in Excel, per chi vuole integrare il solutore in qualcos'altro. |
 | `strumenti/costruisci_exe.py` | 119 | Costruisce l'**eseguibile autonomo** con PyInstaller. Vedi sotto. |
 | `strumenti/cranestrike.spec` | — | La ricetta per PyInstaller: cosa includere, cosa escludere, come impacchettare. Non si lancia a mano, la usa `costruisci_exe.py`. |
-| `strumenti/genera_icona.py` | 61 | Ricava `risorse/icona.ico` e `risorse/icona.png` da `doc/icon.png`, rendendo trasparente il bianco fuori dal quadrato arrotondato. Si rilancia solo se l'immagine cambia; richiede Pillow, il programma no. |
+| `strumenti/genera_icona.py` | 164 | Ricava `risorse/icona.ico` e `risorse/icona.png` da `doc/icon.png`, rendendo trasparente il bianco fuori dal quadrato arrotondato. Le misure piccole (16–48 px) le ridisegna invece di rimpicciolirle, perché restino nitide. Si rilancia solo se l'immagine cambia; richiede Pillow, il programma no. |
 | `strumenti/genera_doc.py` | 470 | Produce i documenti Word in `doc/`: la spiegazione riga per riga di ogni modulo e l'albero delle chiamate. Il codice citato **non e' ricopiato**, viene estratto dal sorgente per nome a ogni generazione. Vedi *La documentazione in `doc/`*. |
 | `CraneStrike.bat` | — | Avvia l'interfaccia con un doppio clic, senza aprire il terminale. |
 
