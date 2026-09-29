@@ -517,9 +517,17 @@ def _leggi_vasche(ws, errori: _Errori) -> dict[str, Tank]:
     return tanks
 
 
+def _percorso_vecchio_formato(ws) -> bool:
+    """I file compilati prima del passaggio al tempo teorico hanno in C e D
+    la permanenza minima e massima. Si riconoscono dall'intestazione, e vanno
+    letti lo stesso: chi ha una linea gia' descritta non deve ricompilarla."""
+    return "min" in _testo(ws.cell(1, 3).value).lower()
+
+
 def _leggi_percorso(ws, tanks: dict[str, Tank], errori: _Errori) -> list[StationSpec]:
     route: list[StationSpec] = []
     atteso = 1
+    vecchio_formato = _percorso_vecchio_formato(ws)
     for riga in range(2, ws.max_row + 1):
         n_cella = ws.cell(riga, 1).value
         tid = _testo(ws.cell(riga, 2).value)
@@ -545,30 +553,86 @@ def _leggi_percorso(ws, tanks: dict[str, Tank], errori: _Errori) -> list[Station
                 f"la vasca '{tid}' non e' definita nel foglio {FOGLIO_VASCHE}",
             )
             continue
-        dmin = _numero(
+        if vecchio_formato:
+            dmin = _numero(
+                ws.cell(riga, 3).value,
+                FOGLIO_PERCORSO,
+                f"C{riga}",
+                "permanenza minima",
+                errori,
+            )
+            dmax = _numero(
+                ws.cell(riga, 4).value,
+                FOGLIO_PERCORSO,
+                f"D{riga}",
+                "permanenza massima",
+                errori,
+            )
+            if dmin is None or dmax is None:
+                continue
+            if dmin > dmax:
+                errori.aggiungi(
+                    FOGLIO_PERCORSO,
+                    f"C{riga}",
+                    f"permanenza minima ({dmin}) maggiore della massima ({dmax})",
+                )
+                continue
+            route.append(StationSpec(tank_id=tid, dwell_min=dmin, dwell_max=dmax))
+            continue
+        teorico = _numero(
             ws.cell(riga, 3).value,
             FOGLIO_PERCORSO,
             f"C{riga}",
-            "permanenza minima",
+            "permanenza teorica",
             errori,
         )
-        dmax = _numero(
+        dneg = _numero(
             ws.cell(riga, 4).value,
             FOGLIO_PERCORSO,
             f"D{riga}",
-            "permanenza massima",
+            "delta negativo",
             errori,
         )
-        if dmin is None or dmax is None:
+        dpos = _numero(
+            ws.cell(riga, 5).value,
+            FOGLIO_PERCORSO,
+            f"E{riga}",
+            "delta positivo",
+            errori,
+        )
+        if teorico is None or dneg is None or dpos is None:
             continue
-        if dmin > dmax:
+        # I due delta sono AMPIEZZE, non estremi: si scrivono positivi tutti e
+        # due, e il software li sottrae e li somma. Un delta negativo scritto
+        # con il segno meno darebbe una finestra rovesciata senza dirlo.
+        fuori = [
+            (nome, valore, cella)
+            for nome, valore, cella in (
+                ("permanenza teorica", teorico, f"C{riga}"),
+                ("delta negativo", dneg, f"D{riga}"),
+                ("delta positivo", dpos, f"E{riga}"),
+            )
+            if valore < 0
+        ]
+        if fuori:
+            for nome, valore, cella in fuori:
+                errori.aggiungi(
+                    FOGLIO_PERCORSO,
+                    cella,
+                    f"{nome} ({valore}) negativa: i due delta sono ampiezze, "
+                    f"si scrivono positivi ed e' il software a sottrarre e "
+                    f"sommare",
+                )
+            continue
+        if dneg > teorico:
             errori.aggiungi(
                 FOGLIO_PERCORSO,
-                f"C{riga}",
-                f"permanenza minima ({dmin}) maggiore della massima ({dmax})",
+                f"D{riga}",
+                f"delta negativo ({dneg}) maggiore della permanenza teorica "
+                f"({teorico}): la soglia minima verrebbe negativa",
             )
             continue
-        route.append(StationSpec(tank_id=tid, dwell_min=dmin, dwell_max=dmax))
+        route.append(StationSpec.da_teorico(tid, teorico, dneg, dpos))
     if len(route) < 2:
         errori.aggiungi(
             FOGLIO_PERCORSO,
@@ -873,14 +937,16 @@ def _righe_esempio():
         ("PASSIVAZIONE", 16500, 1, 800, 3, None, None, None, 1800, 1200),
         ("SCARICO", 20000, 1, 0, 0, None, None, None, None, None),
     ]
+    # vasca, tempo teorico, delta negativo, delta positivo: le soglie sono
+    # teorico-delta_negativo e teorico+delta_positivo
     percorso = [
-        ("CARICO", 0, 0),
-        ("SGRASSO", 60, 90),
-        ("RISCIACQUO_1", 20, 40),
-        ("ZINCATURA", 180, 220),
-        ("RISCIACQUO_2", 20, 40),
-        ("PASSIVAZIONE", 30, 45),
-        ("SCARICO", 0, 0),
+        ("CARICO", 0, 0, 0),
+        ("SGRASSO", 75, 15, 15),
+        ("RISCIACQUO_1", 30, 10, 10),
+        ("ZINCATURA", 200, 20, 20),
+        ("RISCIACQUO_2", 30, 10, 10),
+        ("PASSIVAZIONE", 37, 7, 8),
+        ("SCARICO", 0, 0, 0),
     ]
     parametri = {
         "takt_min_s": 110,
@@ -935,7 +1001,7 @@ def _righe_da_configurazione(cfg: Configurazione):
         )
         for t in d.tanks.values()
     ]
-    percorso = [(s.tank_id, s.dwell_min, s.dwell_max) for s in d.route]
+    percorso = [(s.tank_id, s.nominale, s.delta_neg, s.delta_pos) for s in d.route]
     parametri = {
         "takt_min_s": d.takt_min,
         "takt_max_s": d.takt_max,
@@ -1160,6 +1226,21 @@ def _aggiungi_fogli_linea(
             None,
         ),
         (
+            "                Si dichiara come tempo TEORICO piu' due tolleranze: "
+            "il software lavora fra",
+            None,
+        ),
+        (
+            "                teorico - delta_negativo e teorico + delta_positivo. "
+            "I due delta sono ampiezze,",
+            None,
+        ),
+        (
+            "                si scrivono POSITIVI tutti e due; delta a zero "
+            "significa permanenza rigida.",
+            None,
+        ),
+        (
             "                Comprende le corse a vuoto del gancio: dopo lo sgancio "
             "il gancio risale e il pezzo",
             None,
@@ -1344,11 +1425,17 @@ def _aggiungi_fogli_linea(
     ws = wb.create_sheet(FOGLIO_PERCORSO)
     prepara(
         ws,
-        ["n", "vasca", "permanenza_min_s", "permanenza_max_s"],
-        [6, 22, 20, 20],
+        [
+            "n",
+            "vasca",
+            "permanenza_teorica_s",
+            "delta_negativo_s",
+            "delta_positivo_s",
+        ],
+        [6, 22, 22, 20, 20],
     )
-    for n, (tid, dmin, dmax) in enumerate(percorso, start=1):
-        ws.append([n, tid, dmin, dmax])
+    for n, (tid, teorico, dneg, dpos) in enumerate(percorso, start=1):
+        ws.append([n, tid, teorico, dneg, dpos])
 
     # -- Parametri -------------------------------------------------------
     ws = wb.create_sheet(FOGLIO_PARAMETRI)
@@ -2003,8 +2090,9 @@ def scrivi_risultati(
                 round(arrivo, 2),
                 round(partenza, 2),
                 round(permanenza, 2),
-                spec.dwell_min,
-                spec.dwell_max,
+                round(spec.nominale, 2),
+                round(spec.dwell_min, 2),
+                round(spec.dwell_max, 2),
                 round(permanenza - spec.dwell_min, 2) if 0 < s < data.n_moves else "",
                 round(spec.dwell_max - permanenza, 2) if 0 < s < data.n_moves else "",
                 report.tank_occupancy.get(spec.tank_id, 1),
@@ -2024,6 +2112,7 @@ def scrivi_risultati(
             "ingresso [s]",
             "uscita [s]",
             "permanenza [s]",
+            "teorico [s]",
             "min [s]",
             "max [s]",
             "margine sul min [s]",
@@ -2035,16 +2124,17 @@ def scrivi_risultati(
             "presa [s]",
             "rilascio [s]",
         ],
-        [5, 20, 14, 13, 12, 15, 10, 10, 19, 19, 12, 17, 19, 19, 11, 13],
+        [5, 20, 14, 13, 12, 15, 12, 10, 10, 19, 19, 12, 17, 19, 19, 11, 13],
         righe,
         formati={
             4: "0.00",
             5: "0.00",
             6: "0.00",
-            13: "0.000",
-            14: "0.00",
+            7: "0.00",
+            14: "0.000",
             15: "0.00",
             16: "0.00",
+            17: "0.00",
         },
     )
     ws.append([])

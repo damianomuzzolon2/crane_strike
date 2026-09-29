@@ -27,11 +27,15 @@ RIPETIZIONI_PREDEFINITE = 10
 
 
 def permanenze_iniziali(data: ProblemData) -> dict[int, float]:
-    """Tempo in vasca da cui partire: il minimo di processo per ogni vasca.
+    """Tempo in vasca da cui partire: il tempo TEORICO di processo di ogni
+    vasca, quello scritto sulla ricetta.
 
-    E' il pettine piu' "stretto" possibile, cioe' la linea piu' veloce che il
-    processo consenta. Da li' l'utente allarga dove serve."""
-    return {k: float(data.route[k].dwell_min) for k in range(1, data.n_moves)}
+    E' il pettine che la ricetta descrive davvero, e le tolleranze sono
+    quello che sono: margine da spendere se il ciclogramma lo chiede, in un
+    verso o nell'altro. Partire dal minimo dava una linea piu' veloce ma che
+    nessuno aveva scelto -- ogni vasca gia' al limite basso, e ogni ritocco
+    successivo che si poteva fare solo in una direzione."""
+    return {k: float(data.route[k].nominale) for k in range(1, data.n_moves)}
 
 
 def catena_pezzo(
@@ -43,7 +47,7 @@ def catena_pezzo(
     tempi = [0.0]
     for k in range(1, data.n_moves):
         arrivo = tempi[k - 1] + data.loaded_leg_seconds(k - 1)
-        tempi.append(arrivo + float(permanenze.get(k, data.route[k].dwell_min)))
+        tempi.append(arrivo + float(permanenze.get(k, data.route[k].nominale)))
     return tempi
 
 

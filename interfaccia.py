@@ -453,13 +453,14 @@ class Applicazione(tk.Tk):
         cornice_perm.pack(fill=tk.BOTH, expand=True)
         self.tabella_permanenze = ttk.Treeview(
             cornice_perm,
-            columns=("vasca", "tempo", "min", "max"),
+            columns=("vasca", "tempo", "teorico", "min", "max"),
             show="headings",
             height=7,
         )
         for chiave, titolo, larghezza in [
             ("vasca", "vasca", 130),
             ("tempo", "tempo [s]", 80),
+            ("teorico", "teorico", 65),
             ("min", "min", 55),
             ("max", "max", 55),
         ]:
@@ -472,7 +473,8 @@ class Applicazione(tk.Tk):
         ttk.Label(
             cornice,
             text="Doppio clic sul tempo per cambiarlo. Il minimo e il massimo\n"
-            "sono di processo: si possono sforare, la verifica lo dira'.",
+            "vengono dal teorico piu' o meno i delta: si possono sforare,\n"
+            "la verifica lo dira'.",
             foreground="#777777",
         ).pack(anchor=tk.W, pady=(2, 0))
 
@@ -627,7 +629,7 @@ class Applicazione(tk.Tk):
         self.T_corrente = c["T"]
         self.n_carroponti = max(1, min(c["n_carroponti"], d.n_moves))
         self.permanenze = {
-            k: c["permanenze"].get(k, float(d.route[k].dwell_min))
+            k: c["permanenze"].get(k, float(d.route[k].nominale))
             for k in range(1, d.n_moves)
         }
         self.assegnazione = dict(c["assegnazione"])
@@ -1244,7 +1246,7 @@ class Applicazione(tk.Tk):
         self._stato("Modifica chiusa: si guarda il ciclogramma")
 
     def _componi_da_zero(self):
-        """Butta via tutto e riparte dai tempi minimi di processo."""
+        """Butta via tutto e riparte dai tempi teorici di processo."""
         if not self._pronto_per_calcolare():
             return
         d = self.config_linea.data
@@ -1767,6 +1769,7 @@ class Applicazione(tk.Tk):
                 values=(
                     spec.tank_id,
                     f"{self.permanenze.get(k, 0.0):.1f}",
+                    f"{spec.nominale:.0f}",
                     f"{spec.dwell_min:.0f}",
                     f"{spec.dwell_max:.0f}",
                 ),

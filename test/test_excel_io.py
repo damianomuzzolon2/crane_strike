@@ -217,7 +217,9 @@ def test_valori_mancanti_e_sbagliati():
         (FOGLIO_VASCHE, "B3", None, "Vasche!B3", "posizione mancante"),
         (FOGLIO_VASCHE, "B3", "due metri", "Vasche!B3", "posizione non numerica"),
         (FOGLIO_VASCHE, "C3", 2.5, "Vasche!C3", "posti non intero"),
-        (FOGLIO_PERCORSO, "C3", None, "Percorso!C3", "permanenza minima mancante"),
+        (FOGLIO_PERCORSO, "C3", None, "Percorso!C3", "permanenza teorica mancante"),
+        (FOGLIO_PERCORSO, "D3", None, "Percorso!D3", "delta negativo mancante"),
+        (FOGLIO_PERCORSO, "E3", None, "Percorso!E3", "delta positivo mancante"),
         (FOGLIO_PARAMETRI, "B2", "abc", "Parametri!B2", "parametro non numerico"),
     ]
     for foglio, cella, valore, atteso, descrizione in casi:

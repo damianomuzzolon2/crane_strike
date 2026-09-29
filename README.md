@@ -159,7 +159,7 @@ programma.
 | `Nuovo modello Excel...` | Crea il file da compilare, gia' pieno con una linea di zincatura d'esempio, e chiede se aprirlo subito. E' il modo consigliato di cominciare: si parte da qualcosa che funziona e lo si modifica. |
 | `Calcola auto` | Cerca il numero minimo di carroponti, la suddivisione migliore della linea e il takt time piu' basso. Puo' durare da qualche secondo a qualche minuto: i pulsanti si spengono e la scheda *Ciclogramma* si chiude finche' non ha finito, ma la finestra **non si blocca**. In basso a destra la barra dice a che punto e': `2 carroponti: tentativo 3 di 5 - ancora circa 3 s` (vedi *Quanto durera' il calcolo*). |
 | `Ferma` | Interrompe `Calcola auto` (e `Ottimizza con questi carroponti`). E' acceso solo mentre il calcolo gira, e il calcolo si ferma entro mezzo secondo. Se fino a quel momento era gia' stata trovata una soluzione valida la mostra e la verifica, dicendo nel Riepilogo che **non e' dimostrata ottima**: e' la migliore fra le suddivisioni provate, e le altre non lo sono state. Se non era stato trovato niente, il ciclogramma che avevi a schermo **resta com'era**, e la barra in basso scrive `Calcolo interrotto`. Uno stop non e' mai un «nessuna soluzione»: la linea non e' stata dimostrata impossibile. |
-| `Calcola man` | Butta via il ciclogramma corrente e riparte dai tempi minimi di processo, con **nessun trasporto assegnato**, per comporlo a mano (vedi sotto). |
+| `Calcola man` | Butta via il ciclogramma corrente e riparte dai tempi teorici di processo, con **nessun trasporto assegnato**, per comporlo a mano (vedi sotto). |
 | `Modifica` / `Fine modifica` | Apre alla modifica il ciclogramma che c'e', portando sul **pettine** — che e' il foglio su cui si assegna. Non cambia niente, ma e' il passaggio obbligato: senza, la scheda *Ciclogramma* resta chiusa. Premuto di nuovo chiude la modifica e riporta a guardare il ciclogramma. |
 | `Simulazione` | Apre una finestra a parte in cui la linea si vede **di fronte e in movimento**: i carroponti che scorrono, calano il gancio, tirano su il telaio, lo portano e lo immergono. Si accende solo quando un ciclogramma c'e' — calcolato o composto a mano, e' lo stesso oggetto. Vedi sotto. |
 | `Salva risultati...` | Scrive l'Excel dei risultati e, accanto, l'immagine del ciclogramma. **Lo stesso Excel si riapre con `Apri linea...`** per riprendere il lavoro: contiene anche la linea e il ciclogramma. Si abilita solo quando c'e' qualcosa da salvare. |
@@ -733,8 +733,10 @@ prendersi quella mossa.
 ### Comporre da zero
 
 `Calcola man` butta via tutto, passa alla vista **pettine** e riparte dai
-**tempi minimi di processo**, col takt time piu' basso ammesso e — soprattutto
-— **nessun trasporto assegnato a nessuno**.
+**tempi teorici di processo** — quelli scritti sulla ricetta, `permanenza_teorica_s` —
+col takt time piu' basso ammesso e — soprattutto — **nessun trasporto
+assegnato a nessuno**. Le tolleranze restano tutte da spendere, in un verso o
+nell'altro, dove il ciclogramma lo chiede.
 
 ![composizione a mano](doc/disegno-manuale.png)
 
@@ -1037,8 +1039,11 @@ attesa tutte le volte. La cartella si copia tale e quale e parte subito.
    sgocciolamento (`drain_time`). Le ultime due sono **obbligatorie e proprie
    di ogni vasca**: dove non c'e' movimentazione verticale si scrive 0.
 2. **Percorso** (`route`, lista di `StationSpec`): sequenza di vasche che il
-   pezzo attraversa, con tempo di permanenza `[min,max]` in secondi. La stessa
-   vasca puo' comparire piu' volte.
+   pezzo attraversa, con il tempo di permanenza dichiarato come **tempo
+   teorico piu' due tolleranze** (`permanenza_teorica_s`, `delta_negativo_s`,
+   `delta_positivo_s`, in secondi). Le soglie su cui lavora il modello —
+   `dwell_min` e `dwell_max` — sono `teorico - delta_negativo` e
+   `teorico + delta_positivo`. La stessa vasca puo' comparire piu' volte.
    Assunzione v1: **un solo percorso condiviso da tutti i pezzi**.
 3. **Cinematica**: `Kinematics(v_max, a_max)` separata per carroponte vuoto
    e carico.
@@ -1232,9 +1237,18 @@ successiva — contarlo di nuovo sarebbe doppio conteggio.
 
 ### Cosa comprende la permanenza in vasca
 
-I tempi di permanenza (`permanenza_min_s` / `permanenza_max_s`) sono il tempo
-**effettivo in bagno**: da quando il telaio e' immerso a quando ricomincia a
-salire. Non vanno gonfiati a mano — ma bisogna sapere cosa ci sta dentro.
+I tempi di permanenza (`permanenza_teorica_s` con i suoi `delta_negativo_s` e
+`delta_positivo_s`) sono il tempo **effettivo in bagno**: da quando il telaio
+e' immerso a quando ricomincia a salire. Non vanno gonfiati a mano — ma
+bisogna sapere cosa ci sta dentro.
+
+Si scrive il tempo teorico di processo, quello della ricetta, e quanto lo si
+puo' accorciare o allungare. I due delta sono **ampiezze**: si scrivono
+positivi tutti e due, ed e' il software a fare `teorico - delta_negativo` e
+`teorico + delta_positivo` per ricavarsi le soglie. Due delta a zero valgono
+una permanenza rigida. I file compilati nel vecchio formato a due colonne
+(`permanenza_min_s` / `permanenza_max_s`) continuano a leggersi: il foglio si
+riconosce dall'intestazione.
 
 Ci stanno dentro i tempi morti di sgancio e aggancio — il telaio e' gia' (o
 ancora) in fondo alla vasca mentre si fanno — e, sugli impianti che le
@@ -1403,7 +1417,7 @@ Corretto, il conto va nelle due direzioni:
   con circa un 16% di produttivita' in piu' a parita' di impianto.
 
 Se la finestra di processo e' piu' stretta del bagno inevitabile — cioe' se
-`permanenza_max_s` e' minore delle sole corse a vuoto piu' i tempi morti — la
+`teorico + delta_positivo` e' minore delle sole corse a vuoto piu' i tempi morti — la
 linea non e' realizzabile e il programma **lo dice subito**, con il numero:
 meglio di un `INFEASIBLE` muto che manda a cercare la causa dove non c'e'.
 

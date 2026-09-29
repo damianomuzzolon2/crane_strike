@@ -68,16 +68,19 @@ RIGA_PER_RIGA = [
     ("h3", "permanenze_iniziali -- da dove si parte"),
     ("c", "manuale.permanenze_iniziali"),
     ("p",
-     "Il punto di partenza e' il pettine piu' STRETTO possibile: ogni pezzo "
-     "sta in ogni vasca il minimo che il processo consente. E' la linea piu' "
-     "veloce immaginabile, quasi certamente irrealizzabile perche' i "
-     "carroponti non ce la faranno, e va benissimo cosi': da li' l'utente "
-     "allarga dove serve, e ogni allargamento e' una decisione consapevole."),
+     "Il punto di partenza e' il pettine che la RICETTA descrive: ogni pezzo "
+     "sta in ogni vasca il suo tempo teorico. E' quasi certamente "
+     "irrealizzabile cosi' com'e', perche' i carroponti non ce la faranno, e "
+     "va benissimo: da li' l'utente sposta dove serve, e ogni spostamento e' "
+     "una decisione consapevole."),
     ("p",
-     "Partire dal minimo invece che dal massimo non e' indifferente. Dal "
-     "minimo si aggiunge tempo dove il ciclogramma lo chiede e si vede subito "
-     "quale vasca costringe; dal massimo si toglierebbe tempo un po' "
-     "dappertutto senza sapere quando fermarsi."),
+     "Partire dal teorico invece che dal minimo non e' indifferente. Il "
+     "teorico e' l'unico valore che qualcuno ha scelto davvero; il minimo e' "
+     "un estremo di tolleranza, e partire di li' voleva dire cominciare con "
+     "ogni vasca gia' appiccicata al limite basso -- tutto il margine da una "
+     "parte sola, e ogni ritocco possibile in una direzione soltanto. Dal "
+     "teorico il margine c'e' in tutti e due i versi, e si spende dove il "
+     "ciclogramma lo chiede."),
     ("p",
      "Si noti che l'intervallo parte da 1, non da 0: la stazione 0 e' il "
      "carico, dove il pezzo non 'sta' -- ci viene messo. Le permanenze sono "

@@ -150,7 +150,11 @@ Due dettagli che il resto del progetto sfrutta:
 ```text
 Tank            id, position, capacity, lift_height, drain_time,
                 svincolo_pos, svincolo_neg, gancio_basso
-StationSpec     tank_id, dwell_min, dwell_max       (una tappa del percorso)
+StationSpec     tank_id, dwell_min, dwell_max, dwell_nominal
+                                                    (una tappa del percorso;
+                                                    si dichiara come teorico
+                                                    +/- due delta, vedi
+                                                    StationSpec.da_teorico)
 HoistZone       lo, hi                               (intervallo di MOSSE)
 ZonaCambioQuota position, intermediate1, intermediate2, corsa_totale
 LiftPhase       name, duration, z_start, z_end, kin, loaded,

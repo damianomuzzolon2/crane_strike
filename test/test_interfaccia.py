@@ -706,10 +706,10 @@ def test_composizione_da_zero(percorso_linea):
         check(
             len(app.permanenze) == d.n_moves - 1
             and all(
-                app.permanenze[k] == d.route[k].dwell_min
+                app.permanenze[k] == d.route[k].nominale
                 for k in range(1, d.n_moves)
             ),
-            "si parte dai tempi in vasca minimi di processo",
+            "si parte dai tempi in vasca teorici di processo",
         )
         check(
             app.report is None and not app.verifica_viva,

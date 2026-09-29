@@ -301,10 +301,10 @@ STRUTTURE = [
     ("p",
      "Il primo: il pezzo resta in bagno almeno per le due corse a vuoto del "
      "gancio piu' i tempi morti, anche prelevandolo appena possibile. Se la "
-     "permanenza massima dichiarata e' inferiore a quel minimo, la linea e' "
-     "irrealizzabile -- e il messaggio elenca le tre leve vere: alzare la "
-     "permanenza massima, velocizzare il sollevamento a vuoto, ridurre la "
-     "corsa."),
+     "permanenza massima ammessa -- il tempo teorico piu' il delta positivo "
+     "-- e' inferiore a quel minimo, la linea e' irrealizzabile, e il "
+     "messaggio elenca le tre leve vere: alzare il teorico o il delta "
+     "positivo, velocizzare il sollevamento a vuoto, ridurre la corsa."),
     ("p",
      "Il secondo: un pezzo occupa un posto per un certo tempo, e ogni T ne "
      "entra uno nuovo; se l'occupazione minima supera capacity * takt_max, non "

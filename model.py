@@ -179,6 +179,45 @@ class StationSpec:
     dwell_min: float  # [s] tempo minimo di permanenza (tolleranza -)
     dwell_max: float  # [s] tempo massimo di permanenza (tolleranza +)
 
+    # Il tempo TEORICO di processo, quello che il tecnico scrive davvero sulla
+    # ricetta. Le due soglie qui sopra non sono un dato indipendente: sono
+    # `teorico - delta_negativo` e `teorico + delta_positivo`. Il modello
+    # continua a ragionare sulle soglie -- sono quelle il vincolo -- ma il
+    # valore nominale va conservato, perche' da min e max soli non ci si
+    # risale, e il file va poi riscritto com'era stato compilato.
+    dwell_nominal: Optional[float] = field(default=None, kw_only=True)
+
+    @classmethod
+    def da_teorico(
+        cls, tank_id: str, teorico: float, delta_neg: float, delta_pos: float
+    ) -> "StationSpec":
+        """La tappa come la si dichiara: tempo teorico e le due tolleranze."""
+        return cls(
+            tank_id=tank_id,
+            dwell_min=teorico - delta_neg,
+            dwell_max=teorico + delta_pos,
+            dwell_nominal=teorico,
+        )
+
+    @property
+    def nominale(self) -> float:
+        """Il tempo teorico. Se la tappa e' stata costruita dalle sole soglie
+        -- succede nei test e in chi costruisce a mano -- il centro della
+        finestra e' l'unica risposta onesta."""
+        if self.dwell_nominal is not None:
+            return self.dwell_nominal
+        return (self.dwell_min + self.dwell_max) / 2
+
+    @property
+    def delta_neg(self) -> float:
+        """Quanto si puo' stare SOTTO il teorico."""
+        return self.nominale - self.dwell_min
+
+    @property
+    def delta_pos(self) -> float:
+        """Quanto si puo' stare SOPRA il teorico."""
+        return self.dwell_max - self.nominale
+
 
 @dataclass(frozen=True)
 class HoistZone:
@@ -376,6 +415,11 @@ class ProblemData:
                 raise ValueError(f"vasca '{s.tank_id}' non definita in tanks")
             if s.dwell_min > s.dwell_max:
                 raise ValueError(f"dwell_min > dwell_max per vasca '{s.tank_id}'")
+            if s.dwell_min < 0:
+                raise ValueError(
+                    f"dwell_min negativo per vasca '{s.tank_id}': il delta "
+                    f"negativo non puo' superare il tempo teorico"
+                )
         if self.takt_min > self.takt_max:
             raise ValueError("takt_min > takt_max")
         if self.engage_time < 0 or self.disengage_time < 0:
@@ -609,9 +653,11 @@ class ProblemData:
                     f"in bagno almeno {minimo_fisico:.1f}s -- il gancio deve "
                     f"risalire dopo averlo deposto e ricalare per riprenderlo, "
                     f"e il pezzo e' immerso tutto il tempo -- ma la permanenza "
-                    f"massima dichiarata e' {spec.dwell_max:.1f}s. Alza la "
-                    f"permanenza massima, oppure velocizza il sollevamento a "
-                    f"vuoto o riduci la corsa verticale della vasca."
+                    f"massima ammessa e' {spec.dwell_max:.1f}s (teorico "
+                    f"{spec.nominale:.1f}s + delta positivo "
+                    f"{spec.delta_pos:.1f}s). Alza il tempo teorico o il delta "
+                    f"positivo, oppure velocizza il sollevamento a vuoto o "
+                    f"riduci la corsa verticale della vasca."
                 )
             occ_min = self.slot_occupancy_seconds(
                 s_idx, max(spec.dwell_min, minimo_fisico)
@@ -622,7 +668,9 @@ class ProblemData:
                     f"un posto per almeno {occ_min:.1f}s, ma con capacity="
                     f"{cap} e takt_max={self.takt_max:.1f}s il limite "
                     f"e' {cap * self.takt_max:.1f}s. Aumenta la capacity della "
-                    f"vasca (multi-posto), riduci dwell_min, o alza takt_max."
+                    f"vasca (multi-posto), abbassa la permanenza minima "
+                    f"({spec.dwell_min:.1f}s = teorico {spec.nominale:.1f}s - "
+                    f"delta negativo {spec.delta_neg:.1f}s), o alza takt_max."
                 )
 
     # -- comodita' --------------------------------------------------------
@@ -3319,7 +3367,8 @@ def _vasche_che_bloccano(
         fuori.append(
             f"  - basta la vasca '{spec.tank_id}' (stazione {i}): portando il "
             f"suo tempo massimo da {spec.dwell_max:.0f} a circa {alto:.0f} s "
-            f"(+{alto - spec.dwell_max:.0f}) la linea si risolve."
+            f"-- cioe' alzando il delta positivo da {spec.delta_pos:.0f} a "
+            f"circa {alto - spec.nominale:.0f} s -- la linea si risolve."
         )
     if not fuori:
         fuori.append(
