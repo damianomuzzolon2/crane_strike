@@ -25,6 +25,7 @@ import sys
 import threading
 import time
 import traceback
+from typing import Optional
 
 import matplotlib
 import numpy as np
@@ -677,13 +678,20 @@ class Applicazione(tk.Tk):
             lambda interruzione: self._risolvi(cfg, interruzione),
         )
 
-    def _segnala_tentativo(self, n_hoists: int, indice: int, totale: int):
+    def _segnala_tentativo(
+        self,
+        n_hoists: int,
+        indice: int,
+        totale: int,
+        n_valide: int,
+        best_T: Optional[float],
+    ):
         """Chiamata dal solutore PRIMA di ogni tentativo, dal thread di lavoro.
 
         Non tocca widget: mette il messaggio nella coda, che e' l'unico modo
         sicuro di parlare con la finestra da un altro thread. Chi lo legge e'
         _controlla_coda."""
-        self._coda.put(("progresso", (n_hoists, indice, totale)))
+        self._coda.put(("progresso", (n_hoists, indice, totale, n_valide, best_T)))
 
     def _risolvi(self, cfg, interruzione: Interruzione):
         """Gira nel thread di lavoro: niente widget qui dentro."""
@@ -934,8 +942,15 @@ class Applicazione(tk.Tk):
         self._aggiorna_stato_pulsanti()
         self._stato("Interruzione in corso...")
 
-    def _mostra_avanzamento(self, n_hoists: int, indice: int, totale: int):
-        """A che punto e' la ricerca, e quanto manca.
+    def _mostra_avanzamento(
+        self,
+        n_hoists: int,
+        indice: int,
+        totale: int,
+        n_valide: int,
+        best_T: Optional[float],
+    ):
+        """A che punto e' la ricerca, quanto manca, e cosa c'e' gia' in mano.
 
         I TENTATIVI RIMASTI si sanno esattamente: sono combinatoria piu' due
         prefiltri deterministici, e il solutore li ha gia' contati. Quello che
@@ -960,7 +975,21 @@ class Applicazione(tk.Tk):
         calcolabile a priori sarebbe il limite superiore (tutti i tentativi
         possibili al limite di tempo), e sull'esempio darebbe sei minuti e
         mezzo contro sei secondi e mezzo reali. Un numero sessanta volte
-        sbagliato non informa, spaventa."""
+        sbagliato non informa, spaventa.
+
+        LE SOLUZIONI GIA' TROVATE sono l'altra meta' della risposta. Il tempo
+        che manca dice quanto costa aspettare; non dice cosa si perde a non
+        aspettare. Con "Ferma" si tiene la migliore soluzione trovata fino a
+        quel punto, ma finche' non se ne e' trovata nessuna fermarsi vuol dire
+        restare a mani vuote -- ed e' una differenza che l'utente non aveva
+        modo di conoscere se non fermandosi e scoprendolo. Percio' il
+        conteggio si dice sempre, anche e soprattutto quando e' zero.
+
+        Col conteggio va il TAKT TIME della migliore, che e' poi il numero per
+        cui si sta facendo tutto questo. Sapere che ci sono tre soluzioni dice
+        che fermarsi e' sicuro; sapere che la migliore sta a 118 s dice se vale
+        la pena aspettarne una quarta. Chi ha in mente il valore che gli serve
+        riconosce da solo quando puo' smettere."""
         if self.avanzamento.cget("mode") != "determinate":
             self.avanzamento.stop()
             self.avanzamento.configure(mode="determinate", maximum=totale)
@@ -979,6 +1008,23 @@ class Applicazione(tk.Tk):
             media = (time.monotonic() - self._inizio_lavoro) / conclusi
             manca = media * (totale - indice + 1)
             testo += f" - ancora circa {_durata_leggibile(manca)}"
+        if n_valide == 0:
+            testo += " - nessuna soluzione ancora: fermando ora non resta niente"
+        else:
+            quante = (
+                "1 soluzione trovata, T"
+                if n_valide == 1
+                else f"{n_valide} soluzioni trovate, migliore T"
+            )
+            # best_T non puo' essere None qui -- si conta valida solo una
+            # soluzione che ha un takt time -- ma il formato lo direbbe con un
+            # errore in mezzo a un calcolo lungo, e non vale il rischio.
+            if best_T is None:
+                testo += f" - {n_valide} gia' trovate: fermando ora resta la migliore"
+            else:
+                testo += (
+                    f" - {quante} = {best_T:.2f} s: fermando ora resta quella"
+                )
         self._stato(testo)
 
     def _resoconto_fallimento(self, sol, durata: float) -> str:

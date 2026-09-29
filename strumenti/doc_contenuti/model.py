@@ -1859,9 +1859,25 @@ AUTOMATICA = [
      "impraticabile non impedisce di provare gli altri."),
     ("p",
      "`su_tentativo` viene chiamata prima di ogni risoluzione, con l'indice e "
-     "il totale gia' al netto dei prefiltri. Gira nel thread del chiamante, "
-     "quindi -- come avverte il docstring -- non deve toccare widget: chi la "
-     "usa dall'interfaccia grafica ci mette dentro solo un accodamento."),
+     "il totale gia' al netto dei prefiltri, piu' quante suddivisioni "
+     "fattibili si sono trovate finora e il takt time della migliore. Gira "
+     "nel thread del chiamante, quindi "
+     "-- come avverte il docstring -- non deve toccare widget: chi la usa "
+     "dall'interfaccia grafica ci mette dentro solo un accodamento."),
+    ("p",
+     "Gli ultimi due argomenti sono i soli che non descrivono l'avanzamento "
+     "ma il RISULTATO PARZIALE, e sono li' per una domanda precisa di chi "
+     "guarda: fermando adesso, mi resta qualcosa? La ricerca si puo' "
+     "interrompere, e interrotta restituisce la migliore fra le suddivisioni "
+     "gia' provate -- ma solo se ce n'e' almeno una. Senza il conteggio la "
+     "differenza fra 'fermati pure' e 'fermarti ti lascia a mani vuote' si "
+     "scopriva fermandosi."),
+    ("p",
+     "Il takt time della migliore risponde al seguito della stessa domanda: "
+     "non se fermarsi e' sicuro, ma se conviene. Puo' solo scendere mentre la "
+     "ricerca va avanti -- si tiene la piu' veloce fra quelle provate -- "
+     "quindi chi ha in mente il valore che gli serve vede da se' quando e' "
+     "arrivato, invece di aspettare la fine per scoprire che ci era gia'."),
     ("p",
      "`log_progress` stampa una riga per candidata, ed e' il modo per capire "
      "da terminale perche' una ricerca non trova niente."),

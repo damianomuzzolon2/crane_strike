@@ -2930,10 +2930,14 @@ def solve_auto_zones(
     tentativo). Restituisce (Solution, zones) -- se nessuna suddivisione e'
     fattibile, Solution.status sara' "INFEASIBLE" e zones sara' None.
 
-    `su_tentativo(n_hoists, indice, totale)` viene chiamata PRIMA di ogni
-    risoluzione, con l'indice contato da 1 e il totale gia' al netto dei
-    prefiltri. Serve a chi mostra un avanzamento; gira nel thread del
-    chiamante, quindi non deve toccare widget.
+    `su_tentativo(n_hoists, indice, totale, n_valide, best_T)` viene chiamata
+    PRIMA di ogni risoluzione, con l'indice contato da 1 e il totale gia' al
+    netto dei prefiltri. `n_valide` e' quante suddivisioni fattibili si sono
+    trovate fino a quel momento e `best_T` il takt time della migliore (None
+    se non se n'e' trovata ancora nessuna): insieme dicono cosa si avrebbe in
+    mano fermando adesso, quante soluzioni e quanto buona la migliore. Serve a
+    chi mostra un avanzamento; gira nel thread del chiamante, quindi non deve
+    toccare widget.
 
     `interruzione`: vedi `Interruzione`. Se viene fermata non si provano
     altre suddivisioni, e si restituisce la migliore trovata fino a li' --
@@ -3013,12 +3017,25 @@ def solve_auto_zones(
     # Sono due azioni opposte, e senza questo conteggio l'utente non ha modo
     # di sapere quale delle due gli tocca.
     per_stato: dict[str, int] = {}
+    # Quante suddivisioni fattibili si sono gia' trovate. Non e' un doppione
+    # di per_stato: quello conta gli esiti del solutore, questo conta le
+    # soluzioni che si potrebbero davvero TENERE -- status buono E takt time
+    # presente, gli stessi due requisiti con cui piu' sotto si sceglie la
+    # migliore. Chi guarda l'avanzamento se ne serve per sapere se fermarsi
+    # adesso gli lascia qualcosa in mano o niente.
+    n_valide = 0
 
     for indice, zones in enumerate(da_provare, start=1):
         if interruzione is not None and interruzione.richiesta:
             break
         if su_tentativo is not None:
-            su_tentativo(n_hoists, indice, len(da_provare))
+            su_tentativo(
+                n_hoists,
+                indice,
+                len(da_provare),
+                n_valide,
+                None if best_solution is None else best_solution.T,
+            )
         candidate_data = dataclasses.replace(data, zones=zones)
         n_tried += 1
         sol = solve(
@@ -3032,12 +3049,14 @@ def solve_auto_zones(
             info = f"T={sol.T:.2f}s" if sol.T is not None else sol.status
             print(f"  zone {zone_str}: {info}")
         if sol.status in ("OPTIMAL", "FEASIBLE") and sol.T is not None:
+            n_valide += 1
             if best_solution is None or sol.T < best_solution.T:
                 best_solution = sol
                 best_zones = zones
 
     conti = {
         "n_tried": n_tried,
+        "n_valide": n_valide,
         "n_skipped": n_skipped,
         "n_skipped_layout": n_skipped_layout,
         "layout_example": esempio_layout,
@@ -3411,9 +3430,15 @@ def solve_auto_hoists(
     "INFEASIBLE" e zones/n_hoists saranno None -- in tal caso prova ad
     aumentare max_hoists o la tolleranza sul takt time.
 
-    `su_tentativo(n_hoists, indice, totale)` viene passata a solve_auto_zones:
-    vedi li'. Il totale riguarda il numero di carroponti in corso, non l'intera
-    ricerca -- quanti carroponti serviranno non si sa finche' non si trova.
+    `su_tentativo(n_hoists, indice, totale, n_valide, best_T)` viene passata a
+    solve_auto_zones: vedi li'. Il totale, il conteggio delle soluzioni e il
+    miglior takt time riguardano il numero di carroponti in corso, non
+    l'intera ricerca --
+    quanti carroponti serviranno non si sa finche' non si trova. Non si perde
+    niente per strada: la ricerca si ferma al PRIMO numero di carroponti che
+    funziona, quindi se si sta provando n_hoists+1 vuol dire che con
+    n_hoists non si era trovato nulla, e il conteggio in corso e' davvero
+    tutto quello che c'e'.
 
     `interruzione`: vedi `Interruzione` e `solve_auto_zones`. Fermata, la
     ricerca non passa al numero di carroponti successivo: restituisce quello

@@ -549,15 +549,15 @@ def test_tentativi_previsti():
     from model import tentativi_previsti
 
     data = linea(6, 1200, None, takt_min=10.0, takt_max=60.0)
-    visti: list[tuple[int, int, int]] = []
+    visti: list[tuple[int, int, int, int, object]] = []
     solve_auto_hoists(
         data,
         max_hoists=3,
         time_limit_per_candidate=15.0,
-        su_tentativo=lambda h, i, t: visti.append((h, i, t)),
+        su_tentativo=lambda h, i, t, v, bt: visti.append((h, i, t, v, bt)),
     )
     fatti: dict[int, int] = {}
-    for h, _i, _t in visti:
+    for h, _i, _t, _v, _bt in visti:
         fatti[h] = fatti.get(h, 0) + 1
     check(
         bool(visti), f"il solutore ha segnalato {len(visti)} tentativi"
@@ -571,11 +571,32 @@ def test_tentativi_previsti():
     # il totale annunciato deve essere lo stesso a ogni segnalazione dello
     # stesso numero di carroponti, e gli indici devono salire da 1 senza salti
     for h, quanti in sorted(fatti.items()):
-        indici = [i for hh, i, _t in visti if hh == h]
-        totali = {t for hh, _i, t in visti if hh == h}
+        indici = [i for hh, i, _t, _v, _bt in visti if hh == h]
+        totali = {t for hh, _i, t, _v, _bt in visti if hh == h}
         check(
             indici == list(range(1, quanti + 1)) and totali == {quanti},
             f"{h} carroponti: indici {indici} su totale {totali}",
+        )
+        # Il conteggio delle soluzioni gia' trovate e' quello che dice
+        # all'utente se fermarsi ora gli lascia qualcosa: parte da zero e non
+        # puo' che salire, di uno alla volta e mai piu' dei tentativi fatti.
+        valide = [v for hh, _i, _t, v, _bt in visti if hh == h]
+        check(
+            valide[0] == 0
+            and all(0 <= b - a <= 1 for a, b in zip(valide, valide[1:]))
+            and valide[-1] < quanti + 1,
+            f"{h} carroponti: soluzioni trovate lungo la ricerca {valide}",
+        )
+        # Il takt time della migliore accompagna il conteggio: manca finche'
+        # non c'e' niente, c'e' appena il conteggio sale, e non puo' che
+        # MIGLIORARE -- si tiene la piu' veloce fra quelle provate.
+        coppie = [(v, bt) for hh, _i, _t, v, bt in visti if hh == h]
+        migliori = [bt for v, bt in coppie if v > 0]
+        check(
+            all((bt is None) == (v == 0) for v, bt in coppie)
+            and all(b <= a + 1e-9 for a, b in zip(migliori, migliori[1:])),
+            f"{h} carroponti: miglior takt lungo la ricerca "
+            f"{[None if bt is None else round(bt, 2) for _v, bt in coppie]}",
         )
 
 
@@ -1206,7 +1227,7 @@ def test_ferma_il_calcolo():
     piccola = linea(4, 2500, None, takt_max=120.0)
     fermata = Interruzione()
 
-    def al_secondo(n_h, indice, totale):
+    def al_secondo(n_h, indice, totale, n_valide, best_T):
         tentativi_zone.append(indice)
         if indice == 2:
             fermata.ferma()

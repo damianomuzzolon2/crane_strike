@@ -158,7 +158,7 @@ programma.
 | --- | --- |
 | `Apri linea...` | Carica un file Excel con la definizione della linea. Se il file e' compilato male non succede nulla di brutto: compare una finestra con **tutti** gli errori trovati, con foglio e cella. |
 | `Nuovo modello Excel...` | Crea il file da compilare, gia' pieno con una linea di zincatura d'esempio, e chiede se aprirlo subito. E' il modo consigliato di cominciare: si parte da qualcosa che funziona e lo si modifica. |
-| `Calcola auto` | Cerca il numero minimo di carroponti, la suddivisione migliore della linea e il takt time piu' basso. Puo' durare da qualche secondo a qualche minuto: i pulsanti si spengono e la scheda *Ciclogramma* si chiude finche' non ha finito, ma la finestra **non si blocca**. In basso a destra la barra dice a che punto e': `2 carroponti: tentativo 3 di 5 - ancora circa 3 s` (vedi *Quanto durera' il calcolo*). |
+| `Calcola auto` | Cerca il numero minimo di carroponti, la suddivisione migliore della linea e il takt time piu' basso. Puo' durare da qualche secondo a qualche minuto: i pulsanti si spengono e la scheda *Ciclogramma* si chiude finche' non ha finito, ma la finestra **non si blocca**. In basso a destra la barra dice a che punto e' e cosa ha gia' in mano: `2 carroponti: tentativo 3 di 5 - ancora circa 3 s - 2 soluzioni trovate, migliore T = 122.14 s: fermando ora resta quella` (vedi *Quanto durera' il calcolo*). |
 | `Ferma` | Interrompe `Calcola auto` (e `Ottimizza con questi carroponti`). E' acceso solo mentre il calcolo gira, e il calcolo si ferma entro mezzo secondo. Se fino a quel momento era gia' stata trovata una soluzione valida la mostra e la verifica, dicendo nel Riepilogo che **non e' dimostrata ottima**: e' la migliore fra le suddivisioni provate, e le altre non lo sono state. Se non era stato trovato niente, il ciclogramma che avevi a schermo **resta com'era**, e la barra in basso scrive `Calcolo interrotto`. Uno stop non e' mai un «nessuna soluzione»: la linea non e' stata dimostrata impossibile. |
 | `Calcola man` | Butta via il ciclogramma corrente e riparte dai tempi teorici di processo, con **nessun trasporto assegnato**, per comporlo a mano (vedi sotto). |
 | `Modifica` / `Fine modifica` | Apre alla modifica il ciclogramma che c'e', portando sul **pettine** — che e' il foglio su cui si assegna. Non cambia niente, ma e' il passaggio obbligato: senza, la scheda *Ciclogramma* resta chiusa. Premuto di nuovo chiude la modifica e riporta a guardare il ciclogramma. |
@@ -177,7 +177,7 @@ Durante `Calcola auto` la barra in basso a destra si riempie e accanto si
 legge, per esempio:
 
 ```text
-2 carroponti: tentativo 3 di 5 - ancora circa 3,1 s
+2 carroponti: tentativo 3 di 5 - ancora circa 3,1 s - 2 soluzioni trovate, migliore T = 122.14 s: fermando ora resta quella
 ```
 
 Il numero di **tentativi** e' esatto: il programma prova una suddivisione della
@@ -199,6 +199,24 @@ Due cose che vale la pena sapere:
 - **prima** di cominciare non viene detto niente, ed e' voluto: l'unico numero
   onesto sarebbe il caso peggiore, e sulla linea d'esempio sarebbe sei minuti e
   mezzo contro sei secondi e mezzo reali.
+
+Le **soluzioni gia' trovate** rispondono all'altra domanda, quella che il tempo
+residuo non tocca: *se premo `Ferma` adesso, cosa mi resta?* Con `Ferma` si
+tiene la migliore soluzione trovata fino a quel punto — valida, ma scelta fra
+quelle provate, quindi non dimostrata ottima. Finche' il conteggio e' a zero,
+pero', fermarsi vuol dire restare a mani vuote, e conviene aspettare almeno la
+prima. Per questo il numero si legge sempre, anche quando e' zero.
+
+Accanto c'e' il **takt time della migliore**, che e' poi il numero per cui si
+sta facendo tutto questo, e puo' solo migliorare mentre la ricerca va avanti:
+sulla linea d'esempio scende 139,29 → 122,14 → 110,00 s. Il conteggio dice se
+fermarsi e' sicuro, il takt time se conviene. Chi ha in mente il valore che gli
+serve riconosce da solo quando puo' smettere.
+
+Il conteggio riguarda il numero di carroponti in corso, come la stima del
+tempo, e non si perde niente per strada: la ricerca si ferma al primo numero di
+carroponti che funziona, quindi se sta provando con tre vuol dire che con due
+non aveva trovato nulla.
 
 Se hai dichiarato tu le zone nel foglio *Zone*, non c'e' niente da provare: il
 calcolo e' uno solo e la barra si limita a oscillare.
