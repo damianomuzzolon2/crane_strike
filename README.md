@@ -7,7 +7,8 @@ che spostano pezzi attraverso una sequenza di vasche, rispettando:
 
 - tempi di permanenza min/max per vasca (tolleranza di processo),
 - un takt time target con tolleranza,
-- velocita'/accelerazione massime diverse per carroponte vuoto e carico,
+- velocita', accelerazione e decelerazione massime diverse per carroponte
+  vuoto e carico,
 - vincoli di non collisione fra carroponti sulla stessa rotaia.
 
 Si usa da **interfaccia grafica**, da riga di comando o come libreria Python.
@@ -75,7 +76,7 @@ OR-Tools installato.
 
 | file | righe | contenuto |
 | --- | ---: | --- |
-| `kinematics.py` | 130 | La fisica del movimento, in millimetri e secondi. `travel_time()` da' il tempo per percorrere una distanza con profilo trapezoidale o triangolare; `position_profile()` la posizione istante per istante; `profile_breakpoints()` gli spigoli della curva, che servono al verificatore per limitare in modo rigoroso l'errore di campionamento. Non sa nulla del resto del progetto. |
+| `kinematics.py` | 187 | La fisica del movimento, in millimetri e secondi. Accelerazione e decelerazione sono due numeri distinti. `travel_time()` da' il tempo per percorrere una distanza con profilo trapezoidale o triangolare; `position_profile()` la posizione istante per istante; `profile_breakpoints()` gli spigoli della curva, che servono al verificatore per limitare in modo rigoroso l'errore di campionamento. Non sa nulla del resto del progetto. |
 | `model.py` | 2052 | Il cuore. Contiene le **strutture dati** (`Tank`, `StationSpec`, `HoistZone`, `ProblemData`, `Segment`, `Solution`), la costruzione e risoluzione del **modello CP-SAT** (`solve`), la scelta automatica di zone e numero di carroponti (`solve_auto_zones`, `solve_auto_hoists`), e la costruzione di un ciclogramma **senza risolvere** a partire dai suoi gradi di liberta' (`build_solution`, `estrai_gradi_di_liberta`) — quest'ultima e' cio' che rende possibile l'editor. |
 | `verify.py` | 1043 | Il **verificatore indipendente**: `verify_solution()` ricontrolla una soluzione in Python puro, senza CP-SAT, campionando le posizioni reali dei carroponti. Restituisce un `VerificationReport` con l'elenco delle `Violation` divise per gravita'. E' la rete di sicurezza contro gli errori nella formulazione del modello. |
 | `manuale.py` | 260 | Il ciclogramma nei termini in cui si modifica: il "pettine" dei pezzi (`pettine`, `catena_pezzo`), la composizione libera del ciclogramma (`componi`) e il controllo che i carroponti non si scavalchino sulla rotaia (`perche_non_va`). |
@@ -1045,8 +1046,10 @@ attesa tutte le volte. La cartella si copia tale e quale e parte subito.
    `dwell_min` e `dwell_max` — sono `teorico - delta_negativo` e
    `teorico + delta_positivo`. La stessa vasca puo' comparire piu' volte.
    Assunzione v1: **un solo percorso condiviso da tutti i pezzi**.
-3. **Cinematica**: `Kinematics(v_max, a_max)` separata per carroponte vuoto
-   e carico.
+3. **Cinematica**: `Kinematics(v_max, a_max, d_max)` separata per carroponte
+   vuoto e carico. `d_max` e' la decelerazione ed e' **facoltativa**: lasciata
+   vuota si frena con `a_max`, che e' come si comportava il programma prima
+   che il parametro esistesse.
 4. **Takt time**: `takt_min`, `takt_max` (puoi calcolarli da
    `nominale ± tolleranza`).
 5. **Carroponti e zone** (`HoistZone`): ogni carroponte serve una **zona
@@ -1155,8 +1158,8 @@ orizzontale.
 
 Del **carroponte** (uguali su tutta la linea, in `ProblemData`):
 
-- `kin_lift_empty`, `kin_lift_loaded` — velocita' e accelerazione massime di
-  sollevamento, a gancio scarico e col telaio;
+- `kin_lift_empty`, `kin_lift_loaded` — velocita', accelerazione e
+  decelerazione massime di sollevamento, a gancio scarico e col telaio;
 - `engage_time` — aggancio del telaio, prima del sollevamento (tempo morto);
 - `disengage_time` — sgancio, dopo l'immersione (tempo morto).
 
@@ -1234,6 +1237,29 @@ Ogni mossa dura quindi `presa + traslazione + rilascio`. Lo spostamento **a
 vuoto non paga alcun tempo verticale**: dopo lo sgancio il gancio e' gia' in
 alto (ce lo ha portato il rilascio) e ridiscendera' dentro la presa della mossa
 successiva — contarlo di nuovo sarebbe doppio conteggio.
+
+### Accelerazione e decelerazione
+
+Un carroponte non parte alla sua velocita' massima: accelera, eventualmente
+viaggia un tratto a velocita' costante, poi frena. **Accelerazione e frenata
+sono due numeri distinti**, uno per ciascuna delle quattro cinematiche:
+
+| accelerazione | decelerazione | dove |
+|---|---|---|
+| `a_max_vuoto_mm_s2` | `d_max_vuoto_mm_s2` | traslazione a vuoto |
+| `a_max_carico_mm_s2` | `d_max_carico_mm_s2` | traslazione col pezzo |
+| `a_max_sollevamento_vuoto_mm_s2` | `d_max_sollevamento_vuoto_mm_s2` | sollevamento a gancio scarico |
+| `a_max_sollevamento_carico_mm_s2` | `d_max_sollevamento_carico_mm_s2` | sollevamento col telaio |
+
+Le quattro decelerazioni sono **facoltative**: lasciate in bianco si frena con
+l'accelerazione, che e' come il programma si comportava prima che esistessero.
+Un file gia' compilato da' percio' esattamente gli stessi tempi di prima.
+
+Vale la pena compilarle quando si conoscono, perche' non sono un dettaglio.
+Sul carroponte vuoto dell'esempio — 1600 mm/s con 900 mm/s^2 — la soglia fra
+profilo triangolare e trapezoidale sta a 2844 mm; dichiarando una frenata a
+1200 mm/s^2 scende a 2489 mm. Un salto di 2500 mm cambia cosi' di **profilo**,
+non solo di durata: da triangolare a 3,33 s a trapezoidale a 3,12 s.
 
 ### Cosa comprende la permanenza in vasca
 

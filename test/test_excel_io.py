@@ -1164,6 +1164,84 @@ def test_misure_di_disegno():
         os.unlink(p)
 
 
+def test_decelerazione_separata():
+    """La frenata ha i suoi numeri, e si vedono nei tempi."""
+    print("\n[28] decelerazione distinta dall'accelerazione")
+    from openpyxl import load_workbook
+
+    def scrivi_parametri(percorso, valori: dict):
+        wb = load_workbook(percorso)
+        ws = wb[FOGLIO_PARAMETRI]
+        for riga in range(2, ws.max_row + 1):
+            nome = ws.cell(riga, 1).value
+            if nome in valori:
+                ws.cell(riga, 2).value = valori[nome]
+        wb.save(percorso)
+
+    p = modello_temporaneo()
+    try:
+        cfg = leggi_problema(p)
+        check(
+            cfg.data.kin_empty.d_max == 1200 and cfg.data.kin_loaded.d_max == 500,
+            f"le quattro decelerazioni si leggono "
+            f"(vuoto {cfg.data.kin_empty.d_max}, carico {cfg.data.kin_loaded.d_max})",
+        )
+        check(
+            cfg.data.kin_lift_empty.d_max == 800
+            and cfg.data.kin_lift_loaded.d_max == 500,
+            "anche quelle del sollevamento",
+        )
+        # la leva vera: a parita' di tutto il resto, frenare piu' forte
+        # accorcia il trasporto. Se il codice usasse ancora l'accelerazione
+        # in frenata, questi due numeri sarebbero identici.
+        t_base = cfg.data.loaded_leg_seconds(0)
+        scrivi_parametri(p, {"d_max_carico_mm_s2": 2000})
+        t_frena = leggi_problema(p).data.loaded_leg_seconds(0)
+        check(
+            t_frena < t_base - 1e-6,
+            f"frenando piu' forte il trasporto si accorcia "
+            f"({t_base:.3f} s -> {t_frena:.3f} s)",
+        )
+    finally:
+        os.unlink(p)
+
+    # cella vuota: si frena come si accelera, cioe' come prima che il
+    # parametro esistesse. E' quello che rende leggibili i file gia' compilati.
+    p = modello_temporaneo()
+    try:
+        scrivi_parametri(
+            p,
+            {
+                "d_max_vuoto_mm_s2": None,
+                "d_max_carico_mm_s2": None,
+                "d_max_sollevamento_vuoto_mm_s2": None,
+                "d_max_sollevamento_carico_mm_s2": None,
+            },
+        )
+        cfg = leggi_problema(p)
+        check(
+            cfg.data.kin_empty.d_max is None
+            and cfg.data.kin_empty.decel == cfg.data.kin_empty.a_max,
+            f"lasciata vuota, si frena con l'accelerazione "
+            f"({cfg.data.kin_empty.decel} mm/s^2)",
+        )
+        check(
+            cfg.data.kin_lift_empty is not None,
+            "e il sollevamento resta attivo: manca la frenata, non la cinematica",
+        )
+    finally:
+        os.unlink(p)
+
+    # una decelerazione a zero non e' un valore mancante: e' un assurdo
+    p = modello_temporaneo()
+    try:
+        scrivi_parametri(p, {"d_max_carico_mm_s2": 0})
+        msg = errore_leggendo(p)
+        check("d_max" in msg, f"una frenata a zero viene respinta: \"{msg[:70]}\"")
+    finally:
+        os.unlink(p)
+
+
 def main():
     print("=" * 72)
     print("TEST DI LETTURA E SCRITTURA EXCEL (richiede openpyxl, non OR-Tools)")
@@ -1195,6 +1273,7 @@ def main():
     test_cambio_quota()
     test_ordine_svincoli()
     test_misure_di_disegno()
+    test_decelerazione_separata()
     print("\n" + "=" * 72)
     print(f"RISULTATO: {_n_pass} ok, {_n_fail} falliti")
     print("=" * 72)

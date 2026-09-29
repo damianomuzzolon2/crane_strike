@@ -228,9 +228,19 @@ class _Trajectory:
 
     def max_accel(self) -> float:
         """Accelerazione massima presente nella traiettoria, per il calcolo
-        rigoroso dell'errore di campionamento."""
+        rigoroso dell'errore di campionamento.
+
+        Conta anche la DECELERAZIONE: il limite sull'errore vuole la curvatura
+        massima del profilo, e su un carroponte che frena piu' forte di quanto
+        accelera quella sta nella rampa di frenata. Guardare la sola a_max
+        darebbe un limite piu' piccolo del vero, cioe' non un limite."""
         return max(
-            (s.kin.a_max for s in self.segs if s.kin is not None),
+            (
+                valore
+                for s in self.segs
+                if s.kin is not None
+                for valore in (s.kin.a_max, s.kin.decel)
+            ),
             default=0.0,
         )
 

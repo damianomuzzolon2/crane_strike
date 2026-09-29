@@ -119,15 +119,33 @@ niente si scrive `0`, che e' una dichiarazione; una cella vuota no.
 
 ---
 
-## 3. `kinematics.py` — la fisica, 130 righe
+## 3. `kinematics.py` — la fisica, 187 righe
 
-Tre funzioni pure, nessuno stato:
+Tre funzioni pure, nessuno stato, piu' due private che tengono in un posto
+solo i due conti che tutte e tre rifanno:
 
 | funzione | cosa da |
 | --- | --- |
 | `travel_time(distance, kin)` | tempo minimo con profilo trapezoidale o triangolare |
 | `position_profile(t, distance, kin)` | spazio percorso a `t`, **senza segno**, con `t` clampato in `[0, t_total]` |
 | `profile_breakpoints(distance, kin)` | gli spigoli della curva |
+| `_distanza_rampe(kin)` | la soglia fra trapezio e triangolo, `v²/(2a) + v²/(2d)` |
+| `_picco_triangolare(d, kin)` | la velocita' di picco quando la crociera non c'e' |
+
+`Kinematics` porta `v_max`, `a_max` e `d_max`. **La decelerazione e' un numero
+a se'**, facoltativo: `None` significa "frena come accelera", e la proprieta'
+`decel` e' l'unico punto in cui quel `None` diventa un valore. Tutto il resto
+del modulo legge `decel`, mai `a_max`, per la frenata — cosi' il caso
+simmetrico non e' un ramo di codice parallelo che prima o poi diverge.
+
+Con rampe diverse cadono due semplificazioni che il modulo faceva:
+
+- le due rampe hanno durate diverse, quindi non se ne conta una e la si
+  raddoppia;
+- il vertice del profilo triangolare **non sta piu' a meta' durata**, ma dove
+  finisce l'accelerazione. `profile_breakpoints` lo restituisce li': prenderlo
+  a `t_total/2` lascerebbe il vero spigolo fra due campioni e farebbe decadere
+  in silenzio la garanzia sull'errore descritta sotto.
 
 Due dettagli che il resto del progetto sfrutta:
 
@@ -139,7 +157,10 @@ Due dettagli che il resto del progetto sfrutta:
   posizione e' un polinomio di grado ≤ 2, quindi anche la **differenza** fra due
   traiettorie lo e'. Campionando tutti gli spigoli piu' una griglia di passo
   `dt`, l'errore sul minimo cercato e' limitato da `(a_i + a_j)/2 · (dt/2)²`.
-  E' cosi' che `verify.py` da' un limite **rigoroso** e non una speranza.
+  E' cosi' che `verify.py` da' un limite **rigoroso** e non una speranza. Gli
+  `a_i` sono il massimo fra accelerazione e decelerazione (`Trajectory.
+  max_accel`): serve la curvatura massima del profilo, e su un carroponte che
+  frena piu' forte di quanto accelera quella sta nella rampa di frenata.
 
 ---
 

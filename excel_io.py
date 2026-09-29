@@ -49,8 +49,20 @@ _PARAMETRI = {
     "takt_max_s": ("s", True, None, "takt time massimo accettabile"),
     "v_max_vuoto_mm_s": ("mm/s", True, None, "velocita' max del carroponte scarico"),
     "a_max_vuoto_mm_s2": ("mm/s^2", True, None, "accelerazione max del carroponte scarico"),
+    "d_max_vuoto_mm_s2": (
+        "mm/s^2",
+        False,
+        None,
+        "decelerazione max del carroponte scarico; vuoto = come l'accelerazione",
+    ),
     "v_max_carico_mm_s": ("mm/s", True, None, "velocita' max del carroponte col pezzo"),
     "a_max_carico_mm_s2": ("mm/s^2", True, None, "accelerazione max col pezzo"),
+    "d_max_carico_mm_s2": (
+        "mm/s^2",
+        False,
+        None,
+        "decelerazione max col pezzo; vuoto = come l'accelerazione",
+    ),
     "ingombro_lato_positivo_mm": (
         "mm",
         True,
@@ -81,6 +93,13 @@ _PARAMETRI = {
         None,
         "accelerazione max di sollevamento a gancio scarico",
     ),
+    "d_max_sollevamento_vuoto_mm_s2": (
+        "mm/s^2",
+        False,
+        None,
+        "decelerazione max di sollevamento a gancio scarico; vuoto = come "
+        "l'accelerazione",
+    ),
     "v_max_sollevamento_carico_mm_s": (
         "mm/s",
         False,
@@ -92,6 +111,13 @@ _PARAMETRI = {
         False,
         None,
         "accelerazione max di sollevamento col telaio",
+    ),
+    "d_max_sollevamento_carico_mm_s2": (
+        "mm/s^2",
+        False,
+        None,
+        "decelerazione max di sollevamento col telaio; vuoto = come "
+        "l'accelerazione",
     ),
     "tempo_aggancio_s": (
         "s",
@@ -329,7 +355,11 @@ def leggi_problema(percorso_file: str) -> Configurazione:
         a = par.get(f"a_max_sollevamento_{prefisso}_mm_s2")
         if v is None or a is None:
             return None
-        return Kinematics(v_max=v, a_max=a)
+        # la decelerazione resta facoltativa anche dove il sollevamento c'e':
+        # None vuol dire "frena come accelera", non "niente sollevamento"
+        return Kinematics(
+            v_max=v, a_max=a, d_max=par.get(f"d_max_sollevamento_{prefisso}_mm_s2")
+        )
 
     try:
         data = ProblemData(
@@ -338,10 +368,14 @@ def leggi_problema(percorso_file: str) -> Configurazione:
             takt_min=par["takt_min_s"],
             takt_max=par["takt_max_s"],
             kin_empty=Kinematics(
-                v_max=par["v_max_vuoto_mm_s"], a_max=par["a_max_vuoto_mm_s2"]
+                v_max=par["v_max_vuoto_mm_s"],
+                a_max=par["a_max_vuoto_mm_s2"],
+                d_max=par["d_max_vuoto_mm_s2"],
             ),
             kin_loaded=Kinematics(
-                v_max=par["v_max_carico_mm_s"], a_max=par["a_max_carico_mm_s2"]
+                v_max=par["v_max_carico_mm_s"],
+                a_max=par["a_max_carico_mm_s2"],
+                d_max=par["d_max_carico_mm_s2"],
             ),
             hoist_extent_pos=par["ingombro_lato_positivo_mm"],
             hoist_extent_neg=par["ingombro_lato_negativo_mm"],
@@ -953,15 +987,19 @@ def _righe_esempio():
         "takt_max_s": 150,
         "v_max_vuoto_mm_s": 1600,
         "a_max_vuoto_mm_s2": 900,
+        "d_max_vuoto_mm_s2": 1200,
         "v_max_carico_mm_s": 1000,
         "a_max_carico_mm_s2": 400,
+        "d_max_carico_mm_s2": 500,
         "ingombro_lato_positivo_mm": 500,
         "ingombro_lato_negativo_mm": 700,
         "distanza_sicurezza_mm": 600,
         "v_max_sollevamento_vuoto_mm_s": 500,
         "a_max_sollevamento_vuoto_mm_s2": 800,
+        "d_max_sollevamento_vuoto_mm_s2": 800,
         "v_max_sollevamento_carico_mm_s": 300,
         "a_max_sollevamento_carico_mm_s2": 500,
+        "d_max_sollevamento_carico_mm_s2": 500,
         "tempo_aggancio_s": 2,
         "tempo_sgancio_s": 1,
         "risoluzione_tick_per_s": 100,
@@ -1007,15 +1045,19 @@ def _righe_da_configurazione(cfg: Configurazione):
         "takt_max_s": d.takt_max,
         "v_max_vuoto_mm_s": d.kin_empty.v_max,
         "a_max_vuoto_mm_s2": d.kin_empty.a_max,
+        "d_max_vuoto_mm_s2": d.kin_empty.d_max,
         "v_max_carico_mm_s": d.kin_loaded.v_max,
         "a_max_carico_mm_s2": d.kin_loaded.a_max,
+        "d_max_carico_mm_s2": d.kin_loaded.d_max,
         "ingombro_lato_positivo_mm": d.hoist_extent_pos,
         "ingombro_lato_negativo_mm": d.hoist_extent_neg,
         "distanza_sicurezza_mm": d.safety_distance,
         "v_max_sollevamento_vuoto_mm_s": cinematica(d.kin_lift_empty, "v_max"),
         "a_max_sollevamento_vuoto_mm_s2": cinematica(d.kin_lift_empty, "a_max"),
+        "d_max_sollevamento_vuoto_mm_s2": cinematica(d.kin_lift_empty, "d_max"),
         "v_max_sollevamento_carico_mm_s": cinematica(d.kin_lift_loaded, "v_max"),
         "a_max_sollevamento_carico_mm_s2": cinematica(d.kin_lift_loaded, "a_max"),
+        "d_max_sollevamento_carico_mm_s2": cinematica(d.kin_lift_loaded, "d_max"),
         "tempo_aggancio_s": d.engage_time,
         "tempo_sgancio_s": d.disengage_time,
         "risoluzione_tick_per_s": d.time_scale,
@@ -1264,6 +1306,16 @@ def _aggiungi_fogli_linea(
             None,
         ),
         ("si possono lasciare vuoti o cancellare del tutto.", None),
+        (
+            "  d_max_...       la DECELERAZIONE, in frenata. E' facoltativa: "
+            "lasciata vuota si frena",
+            None,
+        ),
+        (
+            "                  con l'accelerazione, com'era prima che questo "
+            "parametro esistesse.",
+            None,
+        ),
         ("", None),
         (f"Foglio {FOGLIO_ZONE}", titolo_par),
         (
