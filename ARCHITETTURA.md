@@ -348,6 +348,16 @@ dwell_min = max(0, T_(spec.dwell_min) - extra)
 dwell_max = T_(spec.dwell_max) - extra
 ```
 
+> **`bath_extra` sono SOLO i due tempi morti.** Le corse a vuoto del gancio —
+> quello che risale dopo lo sgancio e quello che ricala prima dell'aggancio —
+> avvengono davvero col pezzo giù, ma cadono **dentro** l'intervallo fra i due
+> istanti, quindi sono già contate lì. Il primo capoverso del docstring di
+> `bath_extra_seconds` le descrive prima di arrivare a questa conclusione, ed
+> e' riuscito a trarre in inganno: il foglio `FlussoPezzo` le ha sommate una
+> seconda volta per un po', gonfiando ogni permanenza riportata di una decina
+> di secondi. Chiunque scriva un secondo posto che calcola il bagno deve
+> passare da `bath_extra_seconds`, non riderivarlo.
+
 ### 4.4 Movimentazione verticale, e le posizioni di svincolo
 
 Presa e rilascio **non contengono mai** corse a vuoto del gancio: quelle

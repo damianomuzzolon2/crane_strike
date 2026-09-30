@@ -1364,9 +1364,12 @@ una permanenza rigida. I file compilati nel vecchio formato a due colonne
 (`permanenza_min_s` / `permanenza_max_s`) continuano a leggersi: il foglio si
 riconosce dall'intestazione.
 
-Ci stanno dentro i tempi morti di sgancio e aggancio — il telaio e' gia' (o
-ancora) in fondo alla vasca mentre si fanno — e, sugli impianti che le
-richiedono, **le due corse a vuoto del gancio**.
+Ci stanno dentro i tempi morti di **sgancio e aggancio**: il telaio e' gia' (o
+ancora) in fondo alla vasca mentre si fanno, e sono i due soli tempi che
+allargano il bagno oltre l'intervallo fra i due movimenti del gancio. Tutto il
+resto di quello che il gancio fa nel frattempo — risalire, traslare, ricalare
+— sta gia' **dentro** quell'intervallo, ed e' quindi gia' compreso: non va
+sommato una seconda volta.
 
 `traslazione_con_gancio_basso` e' una colonna del foglio **Vasche**, una per
 vasca, e vale `1` (o vuoto) sulle vasche che il gancio calato puo' scavalcare —
@@ -1377,8 +1380,11 @@ gia' in fondo.
 Mettendo `0` si dichiara che quella vasca e' un **ostacolo**: sopra di lei il
 gancio calato non passa e non cambia quota. Chi deve scavalcarla sale su uno
 svincolo, viaggia alto e riscende su un altro. Quelle due corse **non entrano
-ne' nella presa ne' nel rilascio ne' nel bagno**: avvengono *fra* due mosse, e
-le paga lo **spostamento a vuoto**, che e' quando avvengono davvero.
+ne' nella presa ne' nel rilascio**: avvengono *fra* due mosse, e le paga lo
+**spostamento a vuoto**, che e' quando avvengono davvero. Nel bagno ci
+ricadono, perche' il pezzo in quei secondi e' giù — ma senza allungarlo di un
+solo secondo in piu', visto che l'intervallo fra i due movimenti del gancio le
+contiene gia'.
 
 > **E' per vasca, non per linea.** Un rientro che non scavalca nessun ostacolo
 > resta basso e non paga niente: pagano solo quelli che passano davvero da una

@@ -780,6 +780,59 @@ def test_risultati_flusso_pezzo():
     finally:
         os.unlink(percorso)
 
+    # La permanenza scritta deve essere ESATTAMENTE il bagno del modello, e
+    # per accorgersene serve una linea con le corse verticali vere: il caso di
+    # riferimento le ha a zero, e con quelle a zero ogni definizione sbagliata
+    # da' comunque il numero giusto.
+    import shutil
+
+    from excel_io import scrivi_modello, scrivi_risultati
+    from model import proposta_semplice
+    from verify import verify_solution
+
+    from openpyxl import load_workbook
+
+    cartella = tempfile.mkdtemp()
+    try:
+        linea = os.path.join(cartella, "linea.xlsx")
+        scrivi_modello(linea)
+        cfg = leggi_problema(linea)
+        solution, data = proposta_semplice(cfg.data)
+        risultati = os.path.join(cartella, "risultati.xlsx")
+        scrivi_risultati(risultati, data, solution, verify_solution(data, solution))
+        ws = load_workbook(risultati)["FlussoPezzo"]
+        righe = [
+            [ws.cell(r, c).value for c in range(1, 7)]
+            for r in range(2, ws.max_row + 1)
+            if isinstance(ws.cell(r, 1).value, int)
+        ]
+        at = solution.actual_time
+        scarti = []
+        for s_idx, vasca, _, ingresso, uscita, permanenza in righe[1:-1]:
+            atteso = (
+                at[s_idx]
+                - (at[s_idx - 1] + data.loaded_leg_seconds(s_idx - 1))
+                + data.bath_extra_seconds(s_idx)
+            )
+            if abs(permanenza - atteso) > 0.01:
+                scarti.append((vasca, permanenza, round(atteso, 2)))
+        check(
+            not scarti,
+            f"la permanenza scritta e' il bagno del modello, corse verticali "
+            f"comprese ({scarti if scarti else 'tutte e ' + str(len(righe) - 2)})",
+        )
+        # Il controllo di sopra passerebbe anche sommando zero due volte: qui
+        # si accerta che le corse a vuoto ci siano davvero, cioe' che
+        # sommarle una seconda volta -- com'era -- si vedrebbe.
+        a_vuoto = data.empty_lift_seconds(1, scendendo=False)
+        check(
+            a_vuoto > 1.0,
+            f"e su questa linea una corsa a vuoto dura {a_vuoto:.2f} s: "
+            f"contarla due volte non passerebbe inosservato",
+        )
+    finally:
+        shutil.rmtree(cartella, ignore_errors=True)
+
 
 def test_risultati_verifica():
     print("\n[16] foglio Verifica: elenca i rilievi del verificatore")

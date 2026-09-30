@@ -2354,23 +2354,31 @@ def scrivi_risultati(
             arrivo, partenza, permanenza = 0.0, at[0] if at else 0.0, 0.0
         elif s < data.n_moves:
             # `arrivo` e `partenza` sono gli istanti in cui il PEZZO entra e
-            # esce dal bagno, non quelli in cui il gancio smette e riprende a
-            # muoversi: il telaio e' gia' immerso mentre il gancio che lo ha
-            # deposto risale, e ancora immerso mentre quello che verra' a
-            # riprenderlo ricala. La permanenza e' la differenza fra i due, ed
-            # e' su quella che valgono i limiti di processo.
-            # due corse diverse, non due volte la stessa: dopo lo sgancio il
-            # gancio SALE, prima dell'aggancio SCENDE, e con una zona di
-            # avvicinamento i due versi non durano uguale
-            risalita = data.empty_lift_seconds(s, scendendo=False)
-            discesa = data.empty_lift_seconds(s, scendendo=True)
-            arrivo = (
-                at[s - 1]
-                + data.loaded_leg_seconds(s - 1)
-                - data.disengage_time
-                - risalita
-            )
-            partenza = at[s] + discesa + data.engage_time
+            # esce dal bagno, non quelli in cui il gancio finisce e ricomincia
+            # a muoversi: il telaio e' immerso da quando tocca il fondo -- e
+            # il gancio deve ancora sganciare -- a quando ricomincia a salire,
+            # cioe' dopo che quello nuovo ha agganciato. I limiti di processo
+            # valgono su questa permanenza.
+            #
+            # E' ESATTAMENTE il bagno del modello: l'intervallo fra la fine
+            # del rilascio e l'inizio della presa, allargato dei due soli
+            # tempi morti che il telaio passa in fondo alla vasca. Vedi
+            # `ProblemData.bath_extra_seconds`, che vale `disengage + engage`
+            # e da' la stessa differenza che si ottiene qui.
+            #
+            # LE CORSE A VUOTO DEL GANCIO NON SI AGGIUNGONO. Il telaio e'
+            # davvero ancora giu' mentre il gancio che l'ha deposto risale e
+            # mentre quello che verra' a riprenderlo ricala -- ma quelle corse
+            # cadono DENTRO l'intervallo fra i due istanti, e sono gia'
+            # contate li'. Sommarle di nuovo gonfiava la permanenza di una
+            # decina di secondi: abbastanza da far leggere uno sforamento del
+            # massimo di processo su un ciclogramma che il verificatore
+            # dichiara valido, e da nascondere le vasche che il solutore ha
+            # portato esattamente sul minimo. Su una linea a gancio basso,
+            # dove quelle corse non le fa nessuno, era tempo inventato.
+            fine_rilascio = at[s - 1] + data.loaded_leg_seconds(s - 1)
+            arrivo = fine_rilascio - data.disengage_time
+            partenza = at[s] + data.engage_time
             permanenza = partenza - arrivo
         else:
             arrivo = at[s - 1] + data.loaded_leg_seconds(s - 1) if at else 0.0
@@ -2436,9 +2444,11 @@ def scrivi_risultati(
         [
             "Tempi assoluti di UN pezzo lungo tutta la linea: possono superare il "
             "takt time, perche' piu' pezzi sono in lavorazione insieme. Ingresso e "
-            "uscita sono quelli del PEZZO, non del gancio: il telaio e' gia' immerso "
-            "mentre il gancio che lo ha deposto risale, e ancora immerso mentre "
-            "quello che verra' a riprenderlo ricala. E' su questa permanenza che "
+            "uscita sono quelli del PEZZO, non del gancio: il telaio entra in bagno "
+            "quando tocca il fondo, e il gancio deve ancora sganciare; ne esce "
+            "quando ricomincia a salire, dopo che il gancio nuovo ha agganciato. "
+            "Tutto quello che il gancio fa nel frattempo -- risalire, traslare, "
+            "ricalare -- e' gia' dentro questa permanenza, ed e' su questa che "
             "valgono i limiti di processo."
         ]
     )
