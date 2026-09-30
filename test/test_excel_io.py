@@ -62,6 +62,14 @@ def modifica(percorso: str, foglio: str, cella: str, valore):
     wb.save(percorso)
 
 
+def valore(percorso: str, foglio: str, cella: str):
+    """Il contenuto grezzo di una cella, per controllare COME una cosa e'
+    scritta e non solo che si rilegga."""
+    from openpyxl import load_workbook
+
+    return load_workbook(percorso)[foglio][cella].value
+
+
 def _testo_cella(valore) -> str:
     return "" if valore is None else str(valore).strip()
 
@@ -132,6 +140,7 @@ def test_andata_e_ritorno():
 def test_foglio_ciclogramma():
     print("\n[1-bis] il ciclogramma va e torna dal foglio Ciclogramma")
     from excel_io import FOGLIO_CICLOGRAMMA, scrivi_linea
+    from model import SostaIntermedia
 
     p = modello_temporaneo()
     try:
@@ -151,6 +160,10 @@ def test_foglio_ciclogramma():
             # cioe' "decidi tu": e' come si comportano i file scritti prima
             # che la colonna esistesse
             "attese": None,
+            # le soste in una vasca in mezzo invece sono l'eccezione: vuoto
+            # vuol dire "nessuna", non "decidi tu", perche' nessuna regola le
+            # inventa
+            "soste": {},
         }
         fd, con_ciclo = tempfile.mkstemp(suffix=".xlsx")
         os.close(fd)
@@ -192,6 +205,48 @@ def test_foglio_ciclogramma():
             check(
                 f"{FOGLIO_CICLOGRAMMA}!F5" in msg and "negativa" in msg,
                 f"una sosta negativa viene respinta: \"{msg.splitlines()[-1][:60]}\"",
+            )
+            scrivi_linea(con_ciclo, cfg, ciclo)
+
+            # La SOSTA IN UNA VASCA IN MEZZO: cambia il percorso, non solo i
+            # tempi, e va e torna come gli altri gradi di liberta'. Si scrive
+            # col nome della vasca, perche' e' quello che si legge senza
+            # contare le righe del foglio Percorso.
+            in_mezzo = dict(
+                ciclo,
+                attese={0: 0.0, 1: 5.0},
+                soste={1: SostaIntermedia(stazione=2, secondi=8.25)},
+            )
+            scrivi_linea(con_ciclo, cfg, in_mezzo)
+            riletto = leggi_problema(con_ciclo).ciclogramma
+            check(
+                riletto == in_mezzo,
+                "la sosta in una vasca in mezzo va e torna identica "
+                f"({riletto['soste']})",
+            )
+            vasca = cfg.data.route[2].tank_id
+            check(
+                valore(con_ciclo, FOGLIO_CICLOGRAMMA, "G6") == vasca,
+                f"e sul foglio si legge il NOME della vasca ('{vasca}'), "
+                f"non il numero della tappa",
+            )
+            # Mezza sosta non e' una sosta: dire dove senza dire per quanto (o
+            # viceversa) e' un dato incompleto, e passarlo in silenzio vorrebbe
+            # dire disegnare un rientro che nessuno ha chiesto.
+            modifica(con_ciclo, FOGLIO_CICLOGRAMMA, "H6", None)
+            msg = errore_leggendo(con_ciclo)
+            check(
+                f"{FOGLIO_CICLOGRAMMA}!G6" in msg and "entrambe" in msg,
+                f"una sosta a meta' viene respinta: \"{msg.splitlines()[-1][:60]}\"",
+            )
+            scrivi_linea(con_ciclo, cfg, in_mezzo)
+            # Una vasca fuori dal percorso non e' un posto dove sostare.
+            modifica(con_ciclo, FOGLIO_CICLOGRAMMA, "G6", "NON_ESISTE")
+            msg = errore_leggendo(con_ciclo)
+            check(
+                f"{FOGLIO_CICLOGRAMMA}!G6" in msg and "percorso" in msg,
+                f"una vasca inesistente viene respinta: "
+                f"\"{msg.splitlines()[-1][:60]}\"",
             )
             scrivi_linea(con_ciclo, cfg, ciclo)
 

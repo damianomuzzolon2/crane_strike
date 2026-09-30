@@ -808,8 +808,9 @@ scheda resta chiusa come sempre, e si preme `Modifica` per intervenire.
 
 Nel foglio ci sono i **gradi di liberta'** e nient'altro: takt time, tempo in
 vasca di ogni tappa, quale carroponte fa ogni trasporto (piu' quanti carroponti
-hai a disposizione), e **quanto ogni carroponte resta fermo dove ha consegnato**
-prima di ripartire a vuoto. Le traiettorie e gli istanti di prelievo non ci
+hai a disposizione), **quanto ogni carroponte resta fermo dove ha consegnato**
+prima di ripartire a vuoto, e se in quel viaggio a vuoto **si ferma in una vasca
+in mezzo** (`sosta_in_vasca` e `sosta_s`). Le traiettorie e gli istanti di prelievo non ci
 sono, perche' sono conseguenze: riscriverli vorrebbe dire poterli rileggere in
 contrasto con i valori da cui derivano. Si ricostruiscono, e tornano identici.
 
@@ -825,6 +826,17 @@ dopo la riapertura, una con i due carri sovrapposti. La colonna e' facoltativa:
 se manca (file vecchi, ciclogrammi composti a mano) decide la regola
 predefinita, che e' aspettare dove si e' consegnato tranne che sulle vasche di
 confine.
+
+Le due colonne `sosta_in_vasca` / `sosta_s` dicono la stessa cosa per un posto
+in piu': non uno dei due estremi del viaggio a vuoto, ma una **vasca in mezzo**.
+Valgono insieme — o entrambe o nessuna — e vuote significano rientro diritto,
+che e' il caso normale. La vasca si scrive col suo nome, perche' e' quello che si
+legge senza contare le righe del foglio `Percorso`; se la stessa vasca compare
+piu' volte nella ricetta il nome non dice quale tappa sia, e non serve che lo
+dica: le due tappe stanno nello stesso punto della rotaia, e per starci fermi
+sono la stessa cosa. Qui salvare non e' solo questione di tempi — cambia il
+**percorso**: senza quelle due colonne il rientro si ricostruirebbe diritto,
+piu' corto di quanto e', e non tornerebbe nemmeno la traiettoria.
 
 Il file di partenza **non viene toccato**: quello descrive l'impianto, e a
 riscriverlo si rischierebbe di perdere quello che openpyxl non sa riprodurre —
@@ -1715,6 +1727,109 @@ banda molto larga (`takt_max` molte volte `takt_min`) fa crescere parecchio il
 modello. Se la risoluzione diventa lenta, stringere la tolleranza sul takt time
 e' la prima cosa da provare.
 
+### Dove il carroponte passa il tempo morto (`max_soste_intermedie`)
+
+Fra una consegna e il prelievo successivo al carroponte avanza del tempo, e
+**dove lo passa e' una scelta**, non una conseguenza: sono traiettorie diverse,
+con collisioni diverse. Il solutore ne ha tre:
+
+1. resta fermo **dove ha consegnato** e parte all'ultimo momento utile;
+2. parte subito e aspetta **dove deve andare**;
+3. si ferma in una **vasca in mezzo** fra le due.
+
+Le prime due sono la stessa liberta' vista dai due lati (l'istante di partenza,
+salvato nella colonna `attesa_dopo_consegna_s`) e ci sono da sempre. La terza
+serve quando **nessuno dei due estremi e' un buon posto dove stare fermi**,
+perche' tutti e due sono abbastanza vicini a un confine di zona da finire sotto
+il naso del vicino.
+
+Due situazioni tipiche:
+
+- il carroponte di mezzo di tre, che consegna sul confine di sinistra e va a
+  prelevare su quello di destra;
+- **due mosse consecutive che condividono la vasca**: si consegna in FO1 e dalla
+  stessa FO1 si riprende. Li' il carroponte non si sposta affatto, e se quella
+  vasca e' dentro la fascia del vicino ci resta fermo per minuti. Non c'e'
+  nessun "in mezzo" fra partenza e arrivo: l'unica via d'uscita e' **andarsene e
+  tornare**, e la vasca dove andare e' una qualunque della propria zona.
+
+Fermarsi costa il tempo di frenare e ripartire — due traslate invece di una (o
+invece di nessuna), calcolate con la cinematica vera — quindi il solutore lo
+sceglie solo quando gli serve.
+
+`max_soste_intermedie` (foglio `Parametri`, default **1**) dice quante vasche
+puo' valutare per ogni viaggio a vuoto. **A zero** il calcolo torna a essere
+quello di prima. Ogni candidato in piu' e' un ramo in piu' per il solutore e,
+attorno ai confini, un fascio di intervalli in piu' nel vincolo di non
+collisione — che si combinano **a coppie**, quindi crescono col quadrato.
+
+**Quanto rende.** Su una linea a tre carroponti con vasche a 1500 mm e fascia di
+esclusione che copre la vasca accanto al confine (e' il caso di
+`test_dove_va_ad_aspettare_il_carro`):
+
+| `max_soste_intermedie` | takt ottimo | vincoli di separazione | tempo per arrivarci |
+| --- | --- | --- | --- |
+| 0 | 41,23 s | 5.456 | ~6 s |
+| 2 | **40,00 s** | 8.052 | ~16 s |
+
+Un secondo e due decimi di takt time in meno, e il ciclo ci arriva fermandosi
+**0,2 s** in un'altra vasca: quello che conta non e' la pausa, e' che il
+carroponte possa lasciare il confine subito *e* arrivare all'altro piu' tardi —
+cosa che con una traslata unica a velocita' piena non si puo' fare.
+
+**Quanto costa.** Misurato su una linea vera da 14 mosse e 4 carroponti, con le
+vasche a 2035 mm e `D` = 2600 mm (quindi quasi ogni vasca e' dentro la fascia di
+un vicino):
+
+| `max_soste_intermedie` | alternative in piu' | vincoli di separazione |
+| --- | ---: | ---: |
+| 0 | 0 | 43.264 |
+| 1 | 11 | 60.684 (+40%) |
+| 2 | 22 | 120.120 (x2,8) |
+| 3 | 33 | 190.684 (x4,4) |
+
+Il salto fra il primo e il secondo candidato non e' casuale: il primo e' quasi
+sempre una vasca **al riparo da tutti e due i confini**, e una sosta fuori dalle
+fasce non genera nessuna finestra nel vincolo di non collisione — costa quasi
+nulla. Dal secondo in poi si comincia a prendere vasche ancora esposte, e li'
+la sosta e' una finestra lunga che si accoppia con tutte quelle del vicino.
+
+Per questo il default e' **1**: il posto piu' al riparo, quasi gratis. Alzalo a
+2-3 quando vuoi che il solutore consideri anche i posti imperfetti — per
+esempio una vasca esposta al vicino di sinistra per scappare da quello di
+destra — e mettilo a 0 se il calcolo deve restare veloce. Si incrocia con
+`tempo_limite_per_tentativo_s` (default 15 s): un modello piu' grande ha bisogno
+di piu' tempo, e con un limite stretto puo' restituire un takt PEGGIORE di
+quello che si otterrebbe senza le soste. Se succede, alza il limite invece di
+abbassare le soste — o abbassale, se il calcolo deve restare veloce.
+
+**I candidati sono pochi per costruzione**, e non per prudenza: una sosta puo'
+servire solo se **entrambi** gli estremi del viaggio sono abbastanza vicini a un
+confine perche' il vicino possa arrivare a distanza minore di `D` (piu' la
+sporgenza degli svincoli, perche' il vicino, per scavalcare la vasca di confine
+col gancio scarico, si spinge fin la'). Se **uno dei due e' al riparo**, la
+mossa migliore e' gia' nel modello: partire subito e passare li' tutto il tempo
+morto. Cosi' si sta al confine il minimo indispensabile — il tempo di uscire
+dalla fascia, che nessuna sosta puo' accorciare — e per il resto si e' al
+sicuro; qualunque deviazione aggiunge tempo dentro le fasce invece di toglierlo.
+
+Fra i candidati che restano (tutte le vasche della propria zona, estremi
+esclusi) si tengono, nell'ordine: le **al riparo da tutti e due i confini**, e
+fra quelle la piu' **vicina** — uscito dalla fascia, farsi altri metri non compra
+niente e costa tempo; poi le altre, dalla **meno esposta** in giu'.
+
+Quel che NON si fa e' scartare una vasca perche' e' esposta quanto l'estremo da
+cui si parte. Sembrerebbe sensato, ma le due esposizioni possono guardare
+confini **diversi**: FO1 a 2080 mm dal vicino di destra e LA3 a 2035 mm da
+quello di sinistra sono ugualmente esposte, e spostarsi dall'una all'altra
+risolve eccome, se il vicino di sinistra in quel momento e' altrove. Chi dei due
+sia libero, e quando, e' una domanda di orario e non di geometria: la risposta
+la puo' dare solo il solutore.
+
+Tutto questo vale per il **calcolo automatico**. Nel disegno manuale non c'e'
+nessuna regola che inventi una sosta in mezzo: quelle che si vedono sono quelle
+che il solutore ha scelto, o quelle scritte nel foglio `Ciclogramma`.
+
 ### Cosa resta non rappresentabile
 
 Solo la geometria patologica: vasche non ordinate lungo la rotaia, con zone
@@ -1767,13 +1882,15 @@ fa scelte di modellazione precise, in particolare:
   con qualunque spaziatura fra le vasche, ma resta leggermente conservativo:
   puo' scartare soluzioni "al limite" che in pratica sarebbero fattibili.
   Quanto, lo regola `passo_controllo_distanza_mm` (vedi "Non collisione").
-- **Posizione di attesa non scelta dal solver**: per convenzione un carroponte
-  che ha consegnato riparte subito e attende alla stazione della mossa
-  successiva. Poterlo far attendere altrove gli darebbe piu' modo di
-  allontanarsi dal vicino. La composizione MANUALE invece lo fa aspettare dove
-  ha consegnato, quando quella stazione non e' un confine di zona: e' quindi
-  possibile disegnare a mano un ciclogramma valido che il calcolo automatico,
-  con la sua convenzione piu' rigida, non produrrebbe.
+- **Dove il carroponte aspetta lo sceglie il solver**, e non una convenzione:
+  l'istante di partenza e' una variabile del modello (aspettare dove si e'
+  consegnato, dove si deve andare, o un po' e un po'), e con
+  `max_soste_intermedie > 0` puo' anche fermarsi in una **vasca in mezzo** fra
+  le due. Resta una restrizione, e sta nei candidati: le soste in mezzo vengono
+  valutate solo sui viaggi a vuoto che hanno **entrambi** gli estremi vicini a
+  un confine di zona, che e' l'unico caso in cui possono servire (vedi "Dove il
+  carroponte passa il tempo morto"). La composizione MANUALE non ne inventa
+  nessuna: disegna quelle scelte dal solutore o scritte nel file.
 - **Capienza delle vasche**: vincolata tramite `Tank.capacity`, in modo esatto
   anche quando la stessa vasca compare piu' volte nella ricetta, ma solo per le
   stazioni intermedie (carico e scarico restano fuori).

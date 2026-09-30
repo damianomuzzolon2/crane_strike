@@ -29,7 +29,14 @@ from dataclasses import dataclass
 from typing import Optional
 
 from kinematics import Kinematics
-from model import HoistZone, ProblemData, StationSpec, Tank, ZonaCambioQuota
+from model import (
+    HoistZone,
+    ProblemData,
+    SostaIntermedia,
+    StationSpec,
+    Tank,
+    ZonaCambioQuota,
+)
 
 FOGLIO_ISTRUZIONI = "Istruzioni"
 FOGLIO_VASCHE = "Vasche"
@@ -165,6 +172,21 @@ _PARAMETRI = {
         "come larghezza_pezzo_mm: insieme all'altezza delle vasche dice "
         "quanto il pezzo le riempie",
     ),
+    "max_soste_intermedie": (
+        "-",
+        False,
+        1,
+        "quante vasche IN MEZZO il calcolo automatico puo' valutare come posto "
+        "dove far sostare un carroponte durante uno spostamento a vuoto, per "
+        "tenerlo lontano dal vicino. 0 = nessuna, il carro aspetta solo dove "
+        "ha consegnato o dove deve andare (come prima che questa colonna "
+        "esistesse). 1 (il default) da' al solutore il posto piu' al riparo, "
+        "ed e' quello che costa meno. Ogni candidato in piu' allarga il "
+        "modello parecchio -- su una linea da 14 mosse e 4 carroponti il "
+        "secondo candidato triplica i vincoli di non collisione: se il calcolo "
+        "diventa lento, o se il takt time PEGGIORA dopo averlo alzato, alza "
+        "tempo_limite_per_tentativo_s oppure riporta questo a 1 o a 0",
+    ),
     "max_carroponti": (
         "-",
         False,
@@ -179,7 +201,7 @@ _PARAMETRI = {
     ),
 }
 
-_INTERI = {"risoluzione_tick_per_s", "max_carroponti"}
+_INTERI = {"risoluzione_tick_per_s", "max_carroponti", "max_soste_intermedie"}
 
 # Come si chiamavano gli stessi parametri quando il progetto lavorava in metri.
 # Servono solo a riconoscere un file vecchio e dirlo chiaramente: leggerlo
@@ -344,7 +366,7 @@ def leggi_problema(percorso_file: str) -> Configurazione:
         else {v: None for v in _VERSI_CAMBIO_QUOTA}
     )
     ciclogramma = (
-        _leggi_ciclogramma(wb[FOGLIO_CICLOGRAMMA], len(route) - 1, errori)
+        _leggi_ciclogramma(wb[FOGLIO_CICLOGRAMMA], route, errori)
         if FOGLIO_CICLOGRAMMA in wb.sheetnames
         else None
     )
@@ -389,6 +411,7 @@ def leggi_problema(percorso_file: str) -> Configurazione:
             disengage_time=par["tempo_sgancio_s"],
 
             clearance_step_mm=par["passo_controllo_distanza_mm"],
+            max_soste_intermedie=par["max_soste_intermedie"],
             cambio_quota_carico=cambio_quota["carico"],
             cambio_quota_scarico=cambio_quota["scarico"],
             larghezza_pezzo=par["larghezza_pezzo_mm"],
@@ -676,7 +699,20 @@ def _leggi_percorso(ws, tanks: dict[str, Tank], errori: _Errori) -> list[Station
     return route
 
 
-def _leggi_ciclogramma(ws, n_moves: int, errori: _Errori) -> Optional[dict]:
+def _stazione_di(route, tank_id: str) -> Optional[int]:
+    """La prima tappa del percorso servita dalla vasca data, o None se quella
+    vasca non e' nel percorso.
+
+    La PRIMA e non "quella giusta": se la vasca compare piu' volte le sue tappe
+    stanno nello stesso punto della rotaia, e per dire dove un carroponte sosta
+    sono la stessa cosa."""
+    for i, spec in enumerate(route):
+        if spec.tank_id == tank_id:
+            return i
+    return None
+
+
+def _leggi_ciclogramma(ws, route, errori: _Errori) -> Optional[dict]:
     """Il ciclogramma salvato: takt time, tempi in vasca, assegnazione.
 
     Foglio facoltativo, e una linea senza ciclogramma e' normale: un foglio
@@ -710,6 +746,8 @@ def _leggi_ciclogramma(ws, n_moves: int, errori: _Errori) -> Optional[dict]:
     permanenze: dict[int, float] = {}
     assegnazione: dict[int, int] = {}
     attese: dict[int, float] = {}
+    soste: dict[int, SostaIntermedia] = {}
+    n_moves = len(route) - 1
     for riga in range(5, ws.max_row + 1):
         cella_k = ws.cell(riga, 1).value
         if cella_k is None or (isinstance(cella_k, str) and not cella_k.strip()):
@@ -768,6 +806,43 @@ def _leggi_ciclogramma(ws, n_moves: int, errori: _Errori) -> Optional[dict]:
                     )
                 else:
                     attese[k] = a
+        # Le due colonne della sosta per strada: la vasca dove il carroponte si
+        # ferma durante il rientro, e per quanto. Vanno insieme -- una da sola
+        # non dice niente -- e sono facoltative come l'attesa.
+        vasca_sosta = _testo(ws.cell(riga, 7).value)
+        secondi_sosta = ws.cell(riga, 8).value
+        vuota = secondi_sosta is None or (
+            isinstance(secondi_sosta, str) and not secondi_sosta.strip()
+        )
+        if vasca_sosta and not vuota:
+            s = _numero(secondi_sosta, FOGLIO_CICLOGRAMMA, f"H{riga}",
+                        "durata della sosta in mezzo", errori)
+            stazione = _stazione_di(route, vasca_sosta)
+            if stazione is None:
+                errori.aggiungi(
+                    FOGLIO_CICLOGRAMMA,
+                    f"G{riga}",
+                    f"la vasca '{vasca_sosta}' dove sostare non e' nel "
+                    f"percorso: il carroponte non ci passa",
+                )
+            elif s is None:
+                pass  # il numero era rotto: l'errore l'ha gia' registrato
+            elif s < 0:
+                errori.aggiungi(
+                    FOGLIO_CICLOGRAMMA,
+                    f"H{riga}",
+                    f"durata della sosta in mezzo negativa: {s}",
+                )
+            else:
+                soste[k] = SostaIntermedia(stazione=stazione, secondi=s)
+        elif vasca_sosta or not vuota:
+            errori.aggiungi(
+                FOGLIO_CICLOGRAMMA,
+                f"G{riga}",
+                "la sosta in una vasca in mezzo vuole entrambe le colonne: "
+                "in quale vasca (G) e per quanti secondi (H). Lasciale "
+                "entrambe vuote se il carroponte rientra diritto",
+            )
     if takt is None:
         return None
     if not n_carroponti or n_carroponti < 1:
@@ -782,6 +857,10 @@ def _leggi_ciclogramma(ws, n_moves: int, errori: _Errori) -> Optional[dict]:
         # direbbe "nessuno aspetta", che e' una scelta, mentre qui la scelta
         # non c'e' proprio e va lasciata fare alla regola predefinita.
         "attese": attese or None,
+        # Le soste per strada invece sono l'eccezione, non la regola: un
+        # dizionario vuoto e' la risposta giusta -- vuol dire che tutti i
+        # rientri sono diritti -- e non c'e' nessuna regola a cui delegare.
+        "soste": soste,
     }
 
 
@@ -1004,6 +1083,7 @@ def _righe_esempio():
         "tempo_sgancio_s": 1,
         "risoluzione_tick_per_s": 100,
         "passo_controllo_distanza_mm": 200,
+        "max_soste_intermedie": 1,
         "larghezza_pezzo_mm": 1400,
         "altezza_pezzo_mm": 900,
         "max_carroponti": 4,
@@ -1062,6 +1142,7 @@ def _righe_da_configurazione(cfg: Configurazione):
         "tempo_sgancio_s": d.disengage_time,
         "risoluzione_tick_per_s": d.time_scale,
         "passo_controllo_distanza_mm": d.clearance_step_mm,
+        "max_soste_intermedie": d.max_soste_intermedie,
         "larghezza_pezzo_mm": d.larghezza_pezzo,
         "altezza_pezzo_mm": d.altezza_pezzo,
         "max_carroponti": cfg.max_carroponti,
@@ -1434,6 +1515,40 @@ def _aggiungi_fogli_linea(
             None,
         ),
         (
+            "  attesa_dopo_consegna_s   quanto il carroponte resta fermo dove "
+            "ha appena consegnato,",
+            None,
+        ),
+        (
+            "                prima di ripartire a vuoto. Vuoto = decidilo tu, "
+            "e il programma sceglie",
+            None,
+        ),
+        (
+            "  sosta_in_vasca / sosta_s   se durante quel rientro a vuoto il "
+            "carroponte si ferma in una",
+            None,
+        ),
+        (
+            "                vasca IN MEZZO, quale e per quanti secondi. "
+            "Vanno insieme: o entrambe o",
+            None,
+        ),
+        (
+            "                nessuna. Vuote = rientro diritto, che e' il caso "
+            "normale; una sosta per",
+            None,
+        ),
+        (
+            "                strada serve a stare lontani dal carroponte "
+            "vicino, e costa il tempo di",
+            None,
+        ),
+        (
+            "                fermarsi e ripartire.",
+            None,
+        ),
+        (
             "Cancellalo se vuoi ripartire da zero: senza, la linea si apre e basta.",
             None,
         ),
@@ -1551,7 +1666,7 @@ def _scrivi_foglio_ciclogramma(wb, data, ciclogramma, intestazione, sfondo, nota
     conseguenze, e riscriverle vorrebbe dire poterle rileggere in contrasto
     con quello da cui derivano.
 
-    L'ultima colonna e' l'eccezione che conferma la regola. Quanto il
+    Le ultime tre colonne sono l'eccezione che conferma la regola. Quanto il
     carroponte resta fermo dove ha consegnato NON e' una conseguenza delle
     fasi: a parita' di takt time, permanenze e assegnazione il carro puo'
     ripartire subito e aspettare a destinazione, oppure restare fermo e
@@ -1559,7 +1674,12 @@ def _scrivi_foglio_ciclogramma(wb, data, ciclogramma, intestazione, sfondo, nota
     diverse. Finche' la scelta la faceva una convenzione scritta nel codice
     non c'era niente da salvare; da quando la fa il solutore, non salvarla
     significherebbe riaprire il file e trovarsi un ciclogramma diverso da
-    quello che era stato verificato."""
+    quello che era stato verificato.
+
+    Lo stesso vale, e ancora di piu', per la SOSTA in una vasca in mezzo: li'
+    non cambia solo quando il carroponte si muove, cambia dove passa. Senza
+    quelle due colonne il rientro si ricostruirebbe diritto -- piu' corto di
+    quanto e' -- e non tornerebbero nemmeno i tempi."""
     ws = wb.create_sheet(FOGLIO_CICLOGRAMMA)
     for riga, (nome, valore, spiega) in enumerate(
         (
@@ -1584,9 +1704,9 @@ def _scrivi_foglio_ciclogramma(wb, data, ciclogramma, intestazione, sfondo, nota
     # vasca. Un millesimo di troppo su una tappa al limite fa scattare un
     # periodo, e il ciclogramma riaperto non e' piu' quello salvato.
     titoli = ["mossa", "da vasca", "a vasca", "carroponte", "tempo_in_vasca_s",
-              "attesa_dopo_consegna_s"]
+              "attesa_dopo_consegna_s", "sosta_in_vasca", "sosta_s"]
     for col, (titolo, larghezza) in enumerate(
-        zip(titoli, [8, 22, 22, 12, 18, 24]), start=1
+        zip(titoli, [8, 22, 22, 12, 18, 24, 22, 12]), start=1
     ):
         cella = ws.cell(4, col)
         cella.value = titolo
@@ -1597,19 +1717,29 @@ def _scrivi_foglio_ciclogramma(wb, data, ciclogramma, intestazione, sfondo, nota
     permanenze = ciclogramma.get("permanenze") or {}
     assegnazione = ciclogramma.get("assegnazione") or {}
     attese = ciclogramma.get("attese") or {}
+    soste = ciclogramma.get("soste") or {}
     for k in range(data.n_moves):
         # append() parte dopo l'ultima riga scritta, cioe' dalla 5
         carro = assegnazione.get(k)
-        sosta = permanenze.get(k)
+        tempo_vasca = permanenze.get(k)
         attesa = attese.get(k)
+        # La sosta per strada si scrive con il NOME della vasca, non con
+        # l'indice di tappa: e' quello che si legge senza contare le righe del
+        # foglio Percorso. Se la stessa vasca compare due volte nella ricetta il
+        # nome non dice quale tappa sia, e non serve che lo dica: le due tappe
+        # stanno nello stesso punto della rotaia, quindi per una sosta -- che e'
+        # solo un posto dove stare fermi -- sono la stessa cosa.
+        sosta = soste.get(k)
         ws.append(
             [
                 k,
                 data.route[k].tank_id,
                 data.route[k + 1].tank_id,
                 None if carro is None else carro + 1,
-                None if sosta is None else round(float(sosta), 9),
+                None if tempo_vasca is None else round(float(tempo_vasca), 9),
                 None if attesa is None else round(float(attesa), 9),
+                None if sosta is None else data.route[sosta.stazione].tank_id,
+                None if sosta is None else round(float(sosta.secondi), 9),
             ]
         )
 
@@ -1666,6 +1796,15 @@ def _mosse_dei_segmenti(segs: list) -> list[int]:
     return out
 
 
+def _stazione_in_posizione(data: ProblemData, x: float, altrimenti: int) -> int:
+    """La tappa che sta in quel punto della rotaia, o `altrimenti` se li' non
+    c'e' nessuna tappa (e' il caso degli svincoli)."""
+    for i in range(data.n_stations):
+        if abs(data.approach_position(i) - x) < 1e-6:
+            return i
+    return altrimenti
+
+
 def _righe_movimenti(data: ProblemData, solution) -> list[list]:
     """Tabella degli spostamenti: una riga per tratto, per carroponte."""
     righe = []
@@ -1693,13 +1832,27 @@ def _righe_movimenti(data: ProblemData, solution) -> list[list]:
                     k if j_trasporto is not None and j < j_trasporto else k + 1
                 )
             elif seg.kind == "empty":
-                st_da, st_a = k + 1, ordine[(i + 1) % n]
+                # Di norma il tratto va dalla vasca di consegna a quella del
+                # prelievo dopo. Con una sosta per strada no: allora una delle
+                # due estremita' e' la vasca dove il carroponte si e' fermato, e
+                # la si riconosce dalla POSIZIONE. Gli svincoli, che non sono
+                # stazioni, non si riconoscono e restano attribuiti agli estremi
+                # dell'arco -- che e' quello che si vuole.
+                st_da = _stazione_in_posizione(data, seg.x_start, k + 1)
+                st_a = _stazione_in_posizione(
+                    data, seg.x_end, ordine[(i + 1) % n]
+                )
             else:  # attesa: fermo su una stazione, o prima o dopo il rientro
+                # Prima i due estremi del rientro, che sono il caso normale;
+                # poi TUTTE le stazioni, perche' il carroponte puo' essersi
+                # fermato in una vasca in mezzo. Senza il secondo giro quella
+                # sosta verrebbe attribuita alla vasca di consegna, cioe'
+                # scritta nel posto sbagliato.
                 candidate = (k + 1, ordine[(i + 1) % n])
                 st_da = st_a = next(
                     (
                         c
-                        for c in candidate
+                        for c in (*candidate, *range(data.n_stations))
                         if abs(data.station_position(c) - seg.x_start) < 1e-6
                     ),
                     candidate[0],
@@ -1972,6 +2125,36 @@ def scrivi_risultati(
             ]
         )
         ws.cell(ws.max_row, 6).number_format = "0.0%"
+
+    # Le soste in una vasca IN MEZZO. Si vedono nel foglio Movimenti come
+    # un'attesa sopra una vasca che non e' ne' la partenza ne' l'arrivo del
+    # rientro, ma li' bisogna saperle cercare: elencate qui dicono anche perche'
+    # ci sono.
+    soste = [
+        (h, k, s)
+        for h, plan in enumerate(solution.plans)
+        for k, s in sorted(plan.soste_intermedie.items())
+    ]
+    if soste:
+        sezione("Soste durante il rientro a vuoto")
+        ws.append(
+            ["carroponte", "dopo il trasporto", "in vasca", "durata [s]"]
+        )
+        for col in range(1, 5):
+            ws.cell(ws.max_row, col).font = grassetto
+        for h, k, sosta in soste:
+            ws.append(
+                [h + 1, k, data.route[sosta.stazione].tank_id,
+                 round(sosta.secondi, 2)]
+            )
+            ws.cell(ws.max_row, 4).number_format = "0.00"
+        ws.append([])
+        ws.append([
+            "Il carroponte si ferma in una vasca in mezzo invece che a un "
+            "estremo del viaggio: serve a stare lontano dal vicino quando "
+            "entrambi gli estremi sono vasche di confine."
+        ])
+        ws.cell(ws.max_row, 1).font = Font(italic=True, color="666666")
 
     # -- Movimenti -------------------------------------------------------
     ws = wb.create_sheet("Movimenti")

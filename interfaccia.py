@@ -582,6 +582,11 @@ class Applicazione(tk.Tk):
         # quando la scelta e' gia' stata fatta da qualcuno (il solutore, o il
         # file da cui si riapre). None = decide la regola predefinita.
         self.attese = None
+        # Le soste in una vasca IN MEZZO al rientro a vuoto, mossa per mossa
+        # (model.SostaIntermedia). Vuoto = tutti i rientri sono diritti, che e'
+        # il caso normale: qui non c'e' nessuna regola predefinita da invocare,
+        # una sosta per strada la sa proporre solo il solutore.
+        self.soste = {}
         self.incoerenze = []
         self.origine = ""
         self.durata_calcolo = None
@@ -635,6 +640,7 @@ class Applicazione(tk.Tk):
         }
         self.assegnazione = dict(c["assegnazione"])
         self.attese = dict(c["attese"]) if c.get("attese") else None
+        self.soste = dict(c.get("soste") or {})
         self.carroponte_attivo = 0
         self.origine = "riletto dal file, gia' composto"
         self.modificato = False
@@ -775,6 +781,7 @@ class Applicazione(tk.Tk):
                     "permanenze": self.permanenze,
                     "assegnazione": self.assegnazione,
                     "attese": self.attese,
+                    "soste": self.soste,
                 },
             )
             png = os.path.splitext(percorso)[0] + ".png"
@@ -1242,6 +1249,9 @@ class Applicazione(tk.Tk):
         # disegnerebbe una traiettoria DIVERSA da quella appena verificata --
         # con collisioni diverse.
         self.attese = {k: v for p in sol.plans for k, v in p.attese.items()}
+        self.soste = {
+            k: v for p in sol.plans for k, v in p.soste_intermedie.items()
+        }
         self.n_carroponti = len(d.zones)
         self.carroponte_attivo = 0
         self._annulla.clear()
@@ -1306,6 +1316,12 @@ class Applicazione(tk.Tk):
         # significava non avere mai niente "da assegnare" -- si restava a
         # correggere una proposta invece di comporre.
         self.assegnazione = {}
+        # Dove i carri sostavano era una scelta fatta per il ciclogramma di
+        # prima: qui non ce n'e' piu' nemmeno uno. Tenerla vorrebbe dire far
+        # aspettare un carro in un posto deciso per un giro che non esiste --
+        # e per la sosta in mezzo anche fargli fare una strada diversa.
+        self.attese = None
+        self.soste = {}
         self.carroponte_attivo = 0
         self.origine = "composto da zero"
         # non viene da un calcolo: il tempo di quello precedente non c'entra
@@ -1348,6 +1364,10 @@ class Applicazione(tk.Tk):
             # sensato (si aspetterebbe piu' a lungo del tempo disponibile).
             # Si torna alla regola predefinita, che si adatta da sola.
             self.attese = None
+            # E le soste per strada se ne vanno con loro: erano il posto giusto
+            # per il ciclogramma di prima. Senza attese non c'e' nemmeno da
+            # chiedersi quando ci si fermava.
+            self.soste = {}
         self.soluzione, self.dati, self.incoerenze = manuale.componi(
             self.config_linea.data,
             self.T_corrente,
@@ -1355,6 +1375,7 @@ class Applicazione(tk.Tk):
             self.assegnazione,
             self.n_carroponti,
             attese=self.attese,
+            soste=self.soste,
         )
         if self.verifica_viva:
             self.report = verify_solution(self.dati, self.soluzione)
@@ -1913,6 +1934,22 @@ class Applicazione(tk.Tk):
                 f"({self.dati.route[z.lo].tank_id} -> "
                 f"{self.dati.route[z.hi + 1].tank_id})"
             )
+        # Le soste in una vasca in mezzo si vedono sul grafico -- un tratto
+        # piatto sopra una vasca che non e' ne' la partenza ne' l'arrivo -- ma
+        # a chi guarda sembrano una stranezza finche' non gli si dice che sono
+        # una scelta, e quale.
+        if self.soste:
+            righe.append("")
+            righe.append(
+                f"Soste durante il rientro a vuoto: {len(self.soste)} "
+                f"(per stare lontani dal carroponte vicino)"
+            )
+            for k in sorted(self.soste):
+                s = self.soste[k]
+                righe.append(
+                    f"   dopo il trasporto {k}: "
+                    f"{s.secondi:.1f} s in {self.dati.route[s.stazione].tank_id}"
+                )
         scoperte = [k for k in range(self.dati.n_moves) if k not in self.assegnazione]
         if scoperte:
             righe.append("")

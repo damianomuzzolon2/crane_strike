@@ -48,6 +48,21 @@ APPROCCIO SCELTO E SUE ASSUNZIONI (importante leggere prima di usare il codice)
    Adesso quale arco richiuda il periodo lo sceglie il solutore
    (`inizio[k]`), e il modello e' completo rispetto a questa dimensione.
 
+3-ter. **Anche DOVE il carroponte passa il tempo morto lo sceglie il solutore.**
+   Fra una consegna e il prelievo successivo puo' restare fermo dove ha
+   consegnato, partire subito e aspettare dove deve andare, o qualunque via di
+   mezzo (l'istante di partenza e' una variabile), e con
+   `max_soste_intermedie > 0` puo' anche andare ad aspettare in UN'ALTRA VASCA
+   della propria zona, spezzando il rientro in due traslate. Serve quando
+   nessuno dei due estremi e' un buon posto dove stare fermi, perche' tutti e
+   due sono dentro la fascia di un vicino: il carroponte di mezzo che consegna
+   su un confine e preleva sull'altro, e -- caso ancora piu' frequente -- due
+   mosse consecutive che condividono la vasca, dove il carroponte non si
+   sposta affatto e non esiste nessun "in mezzo" in cui fermarsi: l'unica via
+   d'uscita e' andarsene e tornare. Costa il tempo di fermarsi e ripartire,
+   quindi il solutore lo sceglie solo se gli serve, e le vasche candidate sono
+   solo quelle in cui puo' servire (`soste_candidate`).
+
 4. Non collisione: attorno a ogni stazione di confine fra due zone adiacenti
    il modello impone che i due carroponti restino sempre ad almeno
    hoist_length + safety_distance l'uno dall'altro, tenendo conto della
@@ -396,6 +411,24 @@ class ProblemData:
     # romperebbe le costruzioni posizionali gia' scritte.
     cambio_quota_carico: Optional[ZonaCambioQuota] = None
     cambio_quota_scarico: Optional[ZonaCambioQuota] = None
+    # Quante ALTRE vasche il solutore puo' valutare come posto dove sostare
+    # durante uno spostamento a vuoto (vedi `soste_candidate`). Zero = come
+    # prima, il carroponte passa il tempo morto solo dove ha consegnato o dove
+    # deve andare -- anche quando sono la stessa vasca e la' c'e' il vicino.
+    #
+    # E' un limite e non un interruttore perche' ogni candidato in piu' e' un
+    # ramo in piu' per ogni arco del giro, e attorno ai confini di zona anche
+    # intervalli in piu' nel vincolo di non collisione -- che si combinano a
+    # coppie, quindi crescono col quadrato. Due candidati per arco coprono il
+    # caso che serve (allontanarsi dal vicino) senza rendere il modello un
+    # altro problema. Il default e' UNO, misurato sulla linea piu' grossa che
+    # il progetto abbia visto (14 mosse, 4 carroponti, vasche piu' vicine della
+    # distanza di sicurezza): un candidato per arco fa crescere i vincoli di
+    # separazione del 40%, due li triplicano. Il primo candidato e' anche il
+    # piu' utile -- `soste_candidate` mette per primo un posto AL RIPARO da
+    # tutti e due i confini, e quello nel vincolo di non collisione non costa
+    # quasi niente, perche' una sosta fuori dalle fasce non genera finestre.
+    max_soste_intermedie: int = 1
 
     def __post_init__(self):
         n_moves = len(self.route) - 1
@@ -619,6 +652,12 @@ class ProblemData:
                 "clearance_step_mm deve essere > 0: e' ogni quanti millimetri "
                 "viene verificata la distanza fra i carroponti, e a zero "
                 "servirebbero infinite verifiche"
+            )
+        if self.max_soste_intermedie < 0:
+            raise ValueError(
+                "max_soste_intermedie deve essere >= 0: e' quante vasche in "
+                "mezzo il solutore puo' valutare come posto dove sostare, e "
+                "zero vuol dire nessuna"
             )
         if self.hoist_extent_pos < 0 or self.hoist_extent_neg < 0:
             raise ValueError(
@@ -1232,6 +1271,235 @@ def tratte_rientro(
     ]
 
 
+def confini_condivisi(data: "ProblemData", zone: "HoistZone") -> list[float]:
+    """Le posizioni [mm] che il carroponte di questa zona CONDIVIDE con un
+    vicino: la stazione di confine a sinistra, quella a destra, o nessuna.
+
+    Non sono i due estremi della zona: l'estremo che sta al capo della linea
+    non e' condiviso con nessuno -- di la' non c'e' nessun carroponte -- e
+    trattarlo come un confine farebbe scartare come "esposto" il posto piu'
+    sicuro che ci sia. Con un carroponte solo la lista e' vuota."""
+    confini = []
+    if zone.lo > 0:
+        confini.append(data.approach_position(zone.lo))
+    if zone.hi < data.n_moves - 1:
+        confini.append(data.approach_position(zone.hi + 1))
+    return confini
+
+
+def soste_candidate(
+    data: "ProblemData",
+    zone: "HoistZone",
+    stazione_a: int,
+    stazione_b: int,
+    quante: Optional[int] = None,
+) -> list[int]:
+    """Le vasche in cui il carroponte potrebbe sostare mentre va a vuoto dalla
+    stazione `a` alla `b`, in ordine di preferenza. Lista vuota = quel rientro
+    si fa diritto, e il modello resta quello di prima.
+
+    Sono tappe della PROPRIA zona, diverse dai due estremi: fermarsi la' spezza
+    il rientro in due traslate, e fra le due il carroponte aspetta dove non e'
+    in mezzo a nessuno. Fuori dalla zona non si guarda -- quel pezzo di rotaia
+    e' del vicino -- e i due estremi nemmeno: sostare li' e' quello che il
+    modello sa fare da sempre, con `attese`.
+
+    NON si pretende che stiano FRA le due: il caso che conta di piu' e' proprio
+    quello in cui non c'e' nessun "fra". Quando due mosse consecutive
+    condividono la vasca -- si consegna in FO1 e dalla stessa FO1 si riprende --
+    il carroponte non si sposta affatto, e se quella vasca e' sotto il naso del
+    vicino ci resta fermo per minuti. L'unica via d'uscita e' ANDARSENE E
+    TORNARE, che costa due traslate e nessun "in mezzo" saprebbe proporre.
+
+    LA CONDIZIONE VERA E' CHE SERVANO, e non e' un risparmio opportunista: ogni
+    candidato e' un ramo in piu' per il solutore e, attorno ai confini, un
+    fascio di intervalli in piu' nel vincolo di non collisione -- che si
+    combinano a coppie. Su una linea con gli svincoli questo e' bastato a far
+    scadere il tempo su un modello che prima si risolveva.
+
+    Una sosta puo' servire solo se ENTRAMBI gli estremi del rientro sono
+    ESPOSTI, cioe' abbastanza vicini a un confine perche' il vicino possa
+    arrivare a distanza minore di quella di sicurezza. Se uno dei due e' al
+    riparo, la mossa migliore e' gia' nel modello: partire subito e passare li'
+    tutto il tempo morto. Cosi' si sta al confine il minimo indispensabile --
+    il tempo di uscire dalla fascia, che nessuna sosta puo' accorciare -- e per
+    il resto si e' al sicuro. Qualunque deviazione aggiunge tempo dentro le
+    fasce, non lo toglie.
+
+    "Abbastanza vicino" e' la distanza di sicurezza piu' la SPORGENZA massima
+    degli svincoli: il vicino, per scavalcare la vasca di confine col gancio
+    scarico, si spinge fino allo svincolo, che sta oltre la vasca -- dentro il
+    nostro pezzo di rotaia. Dimenticarselo vorrebbe dire credere al riparo un
+    punto che il vicino puo' raggiungere.
+
+    L'ORDINE E' UNA PREFERENZA, e serve quando i candidati si tagliano a
+    `quante` (vedi `max_soste_intermedie`). Prima le vasche AL RIPARO da tutti
+    e due i confini, e fra quelle la piu' VICINA: uscita dalla fascia, farsi
+    altri metri non compra niente e costa tempo. Poi le altre, dalla meno
+    esposta in giu'.
+
+    Quel che NON si fa e' scartare una vasca solo perche' e' esposta quanto un
+    estremo. Sembrerebbe sensato -- se non sei piu' al riparo di dove sei gia',
+    a che serve muoversi? -- ma le due esposizioni possono guardare confini
+    DIVERSI: FO1 e' a 2080 mm dal vicino di destra, LA3 a 2035 mm da quello di
+    sinistra, e spostarsi dall'una all'altra risolve eccome, se il vicino di
+    sinistra in quel momento e' altrove. Chi dei due sia libero e QUANDO e' una
+    domanda di orario, non di geometria: qui si puo' solo mettere in fila i
+    candidati, non decidere al posto del solutore.
+
+    Due tappe sulla stessa posizione -- la stessa vasca che ricompare nella
+    ricetta -- contano per una: il posto dove il carroponte si ferma e' lo
+    stesso, e tenerle entrambe raddoppierebbe i rami del solutore senza
+    aggiungere una scelta.
+    """
+    if quante is None:
+        quante = data.max_soste_intermedie
+    if quante <= 0:
+        return []
+    confini = confini_condivisi(data, zone)
+    if not confini:
+        return []  # nessun vicino: non c'e' niente da cui allontanarsi
+
+    def esposizione(x: float) -> float:
+        """Quanto dista dal confine piu' vicino: piu' e' grande, piu' e' al
+        riparo."""
+        return min(abs(x - c) for c in confini)
+
+    # Fin dove il vicino puo' arrivare oltre la propria vasca di confine: lo
+    # svincolo su cui il gancio scarico sale sta oltre la vasca, e chi ci va e'
+    # dentro il nostro pezzo di rotaia.
+    sporgenza = max(
+        [0.0]
+        + [
+            abs(sv - t.position)
+            for t in data.tanks.values()
+            for sv in (t.svincolo_pos, t.svincolo_neg)
+            if sv is not None
+        ]
+    )
+    al_riparo = data.hoist_length + data.safety_distance + sporgenza
+
+    pos_a = data.approach_position(stazione_a)
+    pos_b = data.approach_position(stazione_b)
+    if esposizione(pos_a) >= al_riparo or esposizione(pos_b) >= al_riparo:
+        return []
+
+    candidati: list[tuple] = []
+    viste: list[float] = []
+    for s in range(zone.lo, zone.hi + 2):
+        x = data.approach_position(s)
+        # Gli estremi no: sostare li' e' l'attesa che il modello ha gia'. Si
+        # guarda la POSIZIONE e non l'indice, perche' due tappe sulla stessa
+        # vasca sono lo stesso posto dove stare fermi.
+        if abs(x - pos_a) < 1e-9 or abs(x - pos_b) < 1e-9:
+            continue
+        if any(abs(x - v) < 1e-9 for v in viste):
+            continue
+        viste.append(x)
+        esp = esposizione(x)
+        costo = data.empty_leg_seconds(stazione_a, s) + data.empty_leg_seconds(
+            s, stazione_b
+        )
+        # Al riparo: la piu' vicina, perche' altri metri non comprano niente.
+        # Ancora esposta: la meno esposta, che e' quanto si puo' guadagnare.
+        chiave = (0, costo, s) if esp >= al_riparo else (1, -esp, s)
+        candidati.append((chiave, s))
+    # A pari merito si tiene l'indice minore, cosi' il risultato non dipende
+    # dall'ordine in cui il dizionario delle vasche e' stato letto.
+    candidati.sort(key=lambda v: v[0])
+    return [s for _, s in candidati[:quante]]
+
+
+def _perche_la_sosta_non_va(
+    data: "ProblemData",
+    zone: "HoistZone",
+    k: int,
+    nxt_k: int,
+    sosta: "SostaIntermedia",
+) -> Optional[str]:
+    """Perche' quella sosta non si puo' disegnare, in italiano, oppure None se
+    va bene.
+
+    Serve a due posti (`_assembla` per non passarla avanti, e
+    `_build_zone_trajectory` come ultima rete) e per questo sta qui: la stessa
+    domanda fatta due volte in due modi diversi darebbe due risposte diverse
+    sullo stesso file.
+
+    Le soste del solutore sono sane per costruzione. Queste arrivano dal FILE,
+    dove le puo' aver scritte una persona."""
+    if not 0 <= sosta.stazione < data.n_stations:
+        return (
+            f"la sosta della mossa {k} e' indicata nella stazione "
+            f"{sosta.stazione}, che non esiste: il percorso ne ha "
+            f"{data.n_stations} (da 0 a {data.n_stations - 1})"
+        )
+    if not zone.lo <= sosta.stazione <= zone.hi + 1:
+        # una sosta fuori dalla zona non e' una sosta piu' lunga o piu' corta:
+        # e' un carroponte che entra nel territorio del vicino.
+        return (
+            f"la sosta della mossa {k} e' indicata nella stazione "
+            f"{sosta.stazione}, fuori dalla zona del carroponte "
+            f"({zone.lo}..{zone.hi + 1}): non ci puo' arrivare"
+        )
+    x = data.approach_position(sosta.stazione)
+    if (
+        abs(x - data.approach_position(k + 1)) < 1e-9
+        or abs(x - data.approach_position(nxt_k)) < 1e-9
+    ):
+        # Una sosta su un estremo del viaggio non e' una sosta IN MEZZO: e'
+        # l'attesa che c'e' gia', e disegnarla come una sosta vorrebbe dire
+        # emettere una traslazione di lunghezza zero -- un movimento che non
+        # c'e', che si ordina male fra i vicini e spezza la traiettoria.
+        return (
+            f"la sosta della mossa {k} e' indicata in "
+            f"{data.route[sosta.stazione].tank_id}, che e' un estremo del "
+            f"viaggio a vuoto: li' il carroponte aspetta gia', e quanto lo dice "
+            f"l'attesa dopo la consegna"
+        )
+    return None
+
+
+def _durata_rientro(
+    data: "ProblemData",
+    stazione_a: int,
+    stazione_b: int,
+    sosta: Optional["SostaIntermedia"] = None,
+) -> float:
+    """Quanto passa [s] fra la partenza dalla stazione `a` e l'arrivo pronto
+    sulla `b`, andando a vuoto: la sola traslata, oppure -- con una sosta in
+    mezzo -- le due traslate piu' il tempo fermi la'.
+
+    E' la grandezza con cui si decide QUANDO partire, e per questo la sosta ci
+    entra dentro: chi si ferma per strada deve muoversi prima."""
+    if sosta is None:
+        return data.empty_leg_seconds(stazione_a, stazione_b)
+    return (
+        data.empty_leg_seconds(stazione_a, sosta.stazione)
+        + max(0.0, sosta.secondi)
+        + data.empty_leg_seconds(sosta.stazione, stazione_b)
+    )
+
+
+@dataclass(frozen=True)
+class SostaIntermedia:
+    """Una fermata del carroponte in un'altra vasca della propria zona, fra la
+    consegna di una mossa e il prelievo della successiva.
+
+    Non e' detto che stia FRA le due: quando le due mosse condividono la vasca
+    -- si consegna e si riprende nello stesso posto -- non c'e' nessun "fra", e
+    la sosta e' una andata e ritorno. E' proprio il caso che serve di piu'.
+
+    E' il QUINTO grado di liberta' del ciclogramma, e come gli altri quattro
+    non discende da niente: va portata dietro e salvata, altrimenti il
+    ciclogramma riaperto non e' quello che era stato verificato.
+
+    `stazione` e' l'indice di TAPPA del percorso (non della vasca): e' con
+    quello che si chiedono le posizioni e i tempi di percorrenza."""
+
+    stazione: int
+    secondi: float
+
+
 @dataclass
 class Segment:
     """Un tratto della traiettoria di un carroponte entro un ciclo."""
@@ -1283,6 +1551,11 @@ class HoistPlan:
     # QUARTO grado di liberta' del ciclogramma: non discende dalle fasi, e
     # se non lo si porta dietro la traiettoria non si ricostruisce uguale.
     attese: dict[int, float] = field(default_factory=dict)
+    # La sosta in una vasca IN MEZZO, per le mosse dopo le quali il carroponte
+    # ne fa una: chiave = mossa consegnata, valore = dove si ferma e per
+    # quanto. Assente = rientro diretto, che e' il caso normale. Quinto grado
+    # di liberta': vedi SostaIntermedia.
+    soste_intermedie: dict[int, "SostaIntermedia"] = field(default_factory=dict)
 
 
 @dataclass
@@ -1600,6 +1873,9 @@ def solve(
     # -- 2) Per ciascun carroponte: circuito ciclico sulle mosse della
     #    propria zona, con ordine di visita libero. ------------------------
     zone_data = []
+    # I selettori delle soste in una vasca in mezzo, di tutti i carroponti:
+    # servono all'obiettivo, che a parita' di takt time ne preferisce meno.
+    sel_soste = []
     for h, z in enumerate(data.zones):
         # La costruzione del modello e' Python, e su una linea lunga dura
         # parecchi secondi: si guarda se qualcuno ha chiesto di fermare a ogni
@@ -1630,6 +1906,85 @@ def solve(
             for k in moves
         }
 
+        def rientro(k1: int, k2: int, lit, dep, arr, candidati=None) -> dict:
+            """Lo spostamento a vuoto dell'arco k1 -> k2: le sue alternative e i
+            vincoli che le legano. `dep` e' l'istante in cui il carroponte
+            lascia la vasca dove ha consegnato, `arr` quello in cui e' pronto su
+            quella dove prelevera'; quando l'arco e' scelto, il tempo fra i due
+            deve bastare al percorso -- e al percorso SCELTO, non a quello piu'
+            corto.
+
+            Le alternative sono il rientro diretto e, una per vasca candidata
+            (`soste_candidate`), il rientro con una SOSTA in mezzo: si trasla
+            fino a quella vasca, si resta fermi quanto si vuole, si riparte. Ne
+            viene scelta esattamente una quando l'arco e' scelto, nessuna
+            altrimenti, e il literal di ciascuna e' il selettore con cui il
+            vincolo di non collisione la guarda.
+
+            Ogni alternativa si racconta come una lista di TAPPE
+            `(stazione_da, stazione_a, partenza, arrivo)` in fila: da queste --
+            e non da una stima -- discendono sia il disegno sia gli intervalli
+            del vincolo di non collisione. Il tempo fermi in mezzo e' il buco
+            fra l'arrivo di una tappa e la partenza della successiva.
+
+            Restituisce anche `t_min`, il piu' breve dei percorsi possibili:
+            serve ai vincoli di sola necessita' (cut), che devono valere
+            qualunque alternativa venga poi scelta."""
+            u, v = k1 + 1, k2
+            t_dir = travel_empty_ticks(u, v)
+            if candidati is None:
+                candidati = soste_candidate(data, z, u, v)
+            if not candidati:
+                # nessuna scelta da fare: l'arco e' il rientro diretto, e il
+                # modello resta identico a quello di prima
+                vincolo = model.Add(arr == dep + t_dir)
+                if lit is not None:
+                    vincolo.OnlyEnforceIf(lit)
+                return dict(
+                    t_min=t_dir,
+                    opzioni=[
+                        dict(sel=lit, sosta=None, tappe=[(u, v, dep, arr)])
+                    ],
+                )
+            opzioni, sels, tempi = [], [], [t_dir]
+            for i, m in enumerate([None] + candidati):
+                sel = model.NewBoolVar(f"sosta_{h}_{k1}_{k2}_{i}")
+                sels.append(sel)
+                if m is None:
+                    model.Add(arr == dep + t_dir).OnlyEnforceIf(sel)
+                    opzioni.append(
+                        dict(sel=sel, sosta=None, tappe=[(u, v, dep, arr)])
+                    )
+                    continue
+                t1 = travel_empty_ticks(u, m)
+                t2 = travel_empty_ticks(m, v)
+                tempi.append(t1 + t2)
+                # `arr_m` e' un'espressione (l'arrivo sulla vasca in mezzo e'
+                # incollato alla partenza), `dep_m` una variabile: quanto il
+                # carroponte ci resta fermo e' proprio la scelta in piu'.
+                arr_m = dep + t1
+                dep_m = model.NewIntVar(0, DEP_MAX, f"ripart_{h}_{k1}_{k2}_{i}")
+                model.Add(dep_m >= arr_m).OnlyEnforceIf(sel)
+                model.Add(arr == dep_m + t2).OnlyEnforceIf(sel)
+                # Se l'alternativa non e' scelta, `dep_m` non vuol dire niente:
+                # inchiodarlo evita di lasciare al solutore una variabile
+                # intera libera per ogni alternativa scartata.
+                model.Add(dep_m == 0).OnlyEnforceIf(sel.Not())
+                sel_soste.append(sel)
+                opzioni.append(
+                    dict(
+                        sel=sel,
+                        sosta=m,
+                        tappe=[(u, m, dep, arr_m), (m, v, dep_m, arr)],
+                    )
+                )
+            # esattamente una alternativa se l'arco e' scelto, nessuna se no:
+            # senza la seconda meta' il solutore pagherebbe una sosta su archi
+            # che non percorre, e i suoi intervalli entrerebbero nel vincolo di
+            # non collisione come se il carroponte fosse in due giri insieme
+            model.Add(sum(sels) == (1 if lit is None else lit))
+            return dict(t_min=min(tempi), opzioni=opzioni)
+
         if n_h == 1:
             # Caso degenere: una sola mossa nella zona. Il "circuito" e'
             # semplicemente andata (mossa) + ritorno a vuoto, come in v1.
@@ -1637,8 +1992,9 @@ def solve(
             dep_hi = model.NewIntVar(0, DEP_MAX, f"dep_hi_{h}")
             model.Add(dep_hi >= finish[k0])
             arr_lo = model.NewIntVar(0, DEP_MAX, f"arr_lo_{h}")
-            t_ret = travel_empty_ticks(hi_h + 1, lo_h)
-            model.Add(arr_lo == dep_hi + t_ret)
+            # il rientro lega arr_lo a dep_hi: diretto, o con una sosta in una
+            # vasca in mezzo se il solutore la sceglie
+            rit = rientro(k0, k0, None, dep_hi, arr_lo)
             model.Add(arr_lo <= local_pick[lo_h] + Tv)
             zone_data.append(
                 dict(
@@ -1653,21 +2009,21 @@ def solve(
                     # con una sola mossa il giro si richiude per forza su di
                     # lei: non c'e' niente da scegliere
                     inizio=None,
-                    # l'unico rientro parte dal confine alto, e li' la
-                    # partenza libera e' gia' dep_hi
-                    partenze={},
-                    # unico "arco": andata (gia' nella mossa) + rientro a vuoto
-                    arcs=[
-                        dict(
+                    # unico "arco": andata (gia' nella mossa) + rientro a vuoto.
+                    # La partenza libera e' dep_hi, e le alternative del rientro
+                    # sono quelle che `rientro` ha messo in piedi.
+                    archi={
+                        (k0, k0): dict(
                             k1=k0,
                             k2=k0,
                             lit=None,
+                            dep=dep_hi,
+                            arr=arr_lo,
                             span_start=finish[k0],
-                            depart=dep_hi,
-                            arrive=arr_lo,
                             span_end=local_pick[k0] + Tv,
+                            opzioni=rit["opzioni"],
                         )
-                    ],
+                    },
                 )
             )
             continue
@@ -1724,86 +2080,108 @@ def solve(
             model.Add(b == local_pick[k]).OnlyEnforceIf(inizio[k].Not())
             bersaglio[k] = b
 
-        # vincolo di tempo per ciascun arco possibile: se selezionato,
-        # bisogna riuscire ad arrivare in tempo alla mossa successiva
-        for (k1, k2), lit in arc_lits.items():
-            t_emp = travel_empty_ticks(k1 + 1, k2)
-            model.Add(finish[k1] + t_emp <= bersaglio[k2]).OnlyEnforceIf(lit)
-
         # -- variabili libere di confine (per traiettoria e non-collisione) --
         dep_hi = model.NewIntVar(0, DEP_MAX, f"dep_hi_{h}")
         model.Add(dep_hi >= finish[hi_h])
-        for k2 in moves:
-            if k2 == hi_h:
-                continue
-            t_emp = travel_empty_ticks(hi_h + 1, k2)
-            model.Add(dep_hi + t_emp <= bersaglio[k2]).OnlyEnforceIf(
-                arc_lits[(hi_h, k2)]
-            )
-
         arr_lo = model.NewIntVar(0, DEP_MAX, f"arr_lo_{h}")
-        for k1 in moves:
-            if k1 == lo_h:
-                continue
-            t_emp = travel_empty_ticks(k1 + 1, lo_h)
-            model.Add(arr_lo >= finish[k1] + t_emp).OnlyEnforceIf(arc_lits[(k1, lo_h)])
         # arr_lo e' l'arrivo al confine BASSO, e il prelievo di lo_h appartiene
         # al ciclo dopo solo se e' li' che il periodo si richiude: e' proprio
         # quello che `bersaglio` dice.
         model.Add(arr_lo <= bersaglio[lo_h])
 
-        # se l'arco hi_h -> lo_h e' selezionato (rientro diretto, senza
-        # visitare altre mosse nel mezzo), dep_hi e arr_lo descrivono lo
-        # STESSO spostamento a vuoto: vanno legati fra loro esattamente.
-        if (hi_h, lo_h) in arc_lits:
-            t_emp_direct = travel_empty_ticks(hi_h + 1, lo_h)
-            model.Add(arr_lo == dep_hi + t_emp_direct).OnlyEnforceIf(
-                arc_lits[(hi_h, lo_h)]
-            )
-
         # Istanti di partenza/arrivo di ciascun trasferimento a vuoto, usati
         # dal vincolo di non collisione. Le convenzioni devono essere IDENTICHE
         # a quelle di _build_zone_trajectory, altrimenti il vincolo
         # proteggerebbe una traiettoria diversa da quella poi disegnata.
-        arcs = []
-        partenze = {}
+        #
+        # DOVE il carroponte passa il tempo che gli avanza lo sceglie il
+        # solutore, non una convenzione: `dep` e' libera fra la consegna e
+        # l'ultimo istante utile per arrivare in tempo. Partire subito significa
+        # aspettare a destinazione, partire tardi significa aspettare dove si e'
+        # consegnato, e ogni via di mezzo e' ammessa; `rientro` aggiunge la
+        # terza possibilita', fermarsi in una vasca IN MEZZO. Sui due archi di
+        # confine la stessa liberta' ce l'hanno gia' dep_hi e arr_lo, che sono
+        # la partenza e l'arrivo condivisi con il vicino.
+        #
+        # Nessuna di queste scelte discende dalle fasi: vanno salvate insieme al
+        # ciclogramma, altrimenti riaprendo il file si ricostruirebbe una
+        # traiettoria diversa da quella verificata.
+        archi = {}
         for (k1, k2), lit in arc_lits.items():
-            t_emp = travel_empty_ticks(k1 + 1, k2)
-            if k1 == hi_h:
-                depart = dep_hi
-            elif k2 == lo_h:
-                depart = arr_lo - t_emp
+            t_dir = travel_empty_ticks(k1 + 1, k2)
+            candidati = soste_candidate(data, z, k1 + 1, k2)
+            if not candidati:
+                # NESSUNA vasca dove valga la pena fermarsi: l'arco e' il
+                # rientro diritto, e si scrive con le sole espressioni che
+                # servono -- una variabile libera per arco e non tre. Non e' un
+                # risparmio di righe: e' il modello che questa linea aveva prima
+                # che le soste esistessero, identico, cosi' su una linea a cui
+                # la novita' non serve non cambia nemmeno il tempo di calcolo.
+                if k1 == hi_h:
+                    dep = dep_hi  # la partenza dal confine alto e' una sola
+                elif k2 == lo_h:
+                    dep = arr_lo - t_dir
+                else:
+                    dep = model.NewIntVar(0, DEP_MAX, f"part_{h}_{k1}_{k2}")
+                    model.Add(dep >= finish[k1]).OnlyEnforceIf(lit)
+                    # arrivare in tempo: senza, `dep` non avrebbe nessun limite
+                    # superiore e il carroponte potrebbe partire quando gli pare
+                    model.Add(dep + t_dir <= bersaglio[k2]).OnlyEnforceIf(lit)
+                arr = arr_lo if k2 == lo_h else dep + t_dir
+                if k1 == hi_h and k2 == lo_h:
+                    # i due istanti di confine descrivono lo STESSO viaggio:
+                    # vanno legati, altrimenti restano liberi l'uno dall'altro
+                    model.Add(arr_lo == dep_hi + t_dir).OnlyEnforceIf(lit)
+                rit = dict(
+                    t_min=t_dir,
+                    opzioni=[
+                        dict(
+                            sel=lit,
+                            sosta=None,
+                            tappe=[(k1 + 1, k2, dep, arr)],
+                        )
+                    ],
+                )
             else:
-                # DOVE il carroponte passa il tempo che gli avanza lo sceglie
-                # il solutore, non una convenzione: `depart` e' libera fra la
-                # consegna e l'ultimo istante utile per arrivare in tempo.
-                # Partire subito significa aspettare a destinazione, partire
-                # tardi significa aspettare dove si e' consegnato, e ogni via
-                # di mezzo e' ammessa. Sui due archi di confine la stessa
-                # liberta' ce l'hanno gia' dep_hi e arr_lo.
-                #
-                # Questa scelta NON discende dalle fasi: va salvata insieme
-                # al ciclogramma, altrimenti riaprendo il file si
-                # ricostruirebbe una traiettoria diversa da quella verificata.
-                depart = model.NewIntVar(0, DEP_MAX, f"part_{h}_{k1}_{k2}")
-                model.Add(depart >= finish[k1]).OnlyEnforceIf(lit)
-                model.Add(depart + t_emp <= bersaglio[k2]).OnlyEnforceIf(lit)
-                partenze[(k1, k2)] = depart
-            arrive = arr_lo if k2 == lo_h else depart + t_emp
+                if k1 == hi_h:
+                    dep = dep_hi
+                else:
+                    dep = model.NewIntVar(0, DEP_MAX, f"part_{h}_{k1}_{k2}")
+                    model.Add(dep >= finish[k1]).OnlyEnforceIf(lit)
+                if k2 == lo_h:
+                    arr = arr_lo
+                else:
+                    arr = model.NewIntVar(0, DEP_MAX, f"arriv_{h}_{k1}_{k2}")
+                    model.Add(arr <= bersaglio[k2]).OnlyEnforceIf(lit)
+                rit = rientro(k1, k2, lit, dep, arr, candidati)
             # L'attesa DOPO l'arrivo finisce al prelievo successivo, che sta
             # nel ciclo dopo solo se e' qui che il periodo si richiude: e'
             # esattamente quello che dice `bersaglio`.
-            arcs.append(
-                dict(
-                    k1=k1,
-                    k2=k2,
-                    lit=lit,
-                    span_start=finish[k1],
-                    depart=depart,
-                    arrive=arrive,
-                    span_end=bersaglio[k2],
-                )
+            archi[(k1, k2)] = dict(
+                k1=k1,
+                k2=k2,
+                lit=lit,
+                dep=dep,
+                arr=arr,
+                span_start=finish[k1],
+                span_end=bersaglio[k2],
+                opzioni=rit["opzioni"],
+                t_min=rit["t_min"],
             )
+
+        # Vincoli di sola NECESSITA' (cut): non aggiungono niente che i vincoli
+        # sopra non dicano gia', ma lo dicono in una forma che il solutore
+        # propaga subito, senza passare dalle variabili di partenza e arrivo.
+        # Usano il percorso piu' BREVE fra quelli possibili per l'arco: con una
+        # sosta in mezzo il rientro dura di piu', e un cut tarato sul percorso
+        # diretto taglierebbe soluzioni valide.
+        for (k1, k2), arco in archi.items():
+            lit, t_min = arco["lit"], arco["t_min"]
+            model.Add(finish[k1] + t_min <= bersaglio[k2]).OnlyEnforceIf(lit)
+            if k1 == hi_h:
+                model.Add(dep_hi + t_min <= bersaglio[k2]).OnlyEnforceIf(lit)
+            if k2 == lo_h:
+                model.Add(arr_lo >= finish[k1] + t_min).OnlyEnforceIf(lit)
 
         zone_data.append(
             dict(
@@ -1816,8 +2194,7 @@ def solve(
                 arr_lo=arr_lo,
                 arc_lits=arc_lits,
                 inizio=inizio,
-                arcs=arcs,
-                partenze=partenze,
+                archi=archi,
             )
         )
 
@@ -2014,28 +2391,58 @@ def solve(
                 None,
             )
 
-        for arc in zd["arcs"]:
-            u, v = arc["k1"] + 1, arc["k2"]
-            depart, lit = arc["depart"], arc["lit"]
-            tratte = tratte_rientro(data, u, v)
-            # l'attesa prima di partire, e quella dopo essere arrivato
-            fermo(arc["span_start"], depart, tratte[0][0], tratte[0][0], lit)
-            fermo(arc["arrive"], arc["span_end"], tratte[-1][1], tratte[-1][1], lit)
-            # Le tratte del rientro, una per una. I confini si convertono in
-            # tick sul tempo CUMULATO e non tratta per tratta: cosi' l'ultimo
-            # coincide con T_(empty_leg_seconds), che e' quello che il modello
-            # ha usato per legare `arrive` a `depart`, e fra le tratte non si
-            # aprono buchi da arrotondamento.
-            secondi, prec = 0.0, 0
-            for xa, xb, durata in tratte:
-                secondi += durata
-                adesso = T_(secondi)
-                if adesso > prec:
-                    if xa == xb:
-                        fermo(depart + prec, depart + adesso, xa, xa, lit)
-                    else:
-                        traslazione(depart + prec, depart + adesso, xa, xb, lit)
-                prec = adesso
+        for arco in zd["archi"].values():
+            # L'attesa PRIMA di partire e quella DOPO essere arrivato non
+            # dipendono da come si viaggia: partenza e arrivo sono gli stessi
+            # per tutte le alternative dell'arco, e le due finestre si scrivono
+            # una volta sola sotto il letterale dell'ARCO. Ripeterle per ogni
+            # alternativa darebbe intervalli identici con letterali diversi --
+            # e sono le finestre piu' LUNGHE, quindi quelle che generano piu'
+            # coppie nel vincolo di non collisione.
+            tappe0 = arco["opzioni"][0]["tappe"]
+            x_u = data.approach_position(tappe0[0][0])
+            x_v = data.approach_position(tappe0[-1][1])
+            fermo(arco["span_start"], arco["dep"], x_u, x_u, arco["lit"])
+            fermo(arco["arr"], arco["span_end"], x_v, x_v, arco["lit"])
+            # Il VIAGGIO invece cambia da un'alternativa all'altra (rientro
+            # diretto, oppure con una sosta in un'altra vasca): ciascuna porta i
+            # suoi intervalli, opzionali sul proprio selettore, e il solutore ne
+            # sceglie una. Con `max_soste_intermedie = 0` ce n'e' una sola e
+            # questo giro e' identico a quello di prima.
+            for opz in arco["opzioni"]:
+                lit = opz["sel"]
+                tappe = opz["tappe"]
+                for i, (a, b, partenza, arrivo) in enumerate(tappe):
+                    if i:
+                        # la SOSTA nella vasca in mezzo: fra l'arrivo della
+                        # tappa precedente e la partenza di questa il
+                        # carroponte e' fermo li', e puo' esserci un vicino
+                        x_sosta = data.approach_position(a)
+                        fermo(
+                            tappe[i - 1][3], partenza, x_sosta, x_sosta, lit
+                        )
+                    # Le tratte del rientro, una per una. I confini si
+                    # convertono in tick sul tempo CUMULATO e non tratta per
+                    # tratta: cosi' l'ultimo coincide con
+                    # T_(empty_leg_seconds), che e' quello che il modello ha
+                    # usato per legare l'arrivo alla partenza, e fra le tratte
+                    # non si aprono buchi da arrotondamento.
+                    secondi, prec = 0.0, 0
+                    for xa, xb, durata in tratte_rientro(data, a, b):
+                        secondi += durata
+                        adesso = T_(secondi)
+                        if adesso > prec:
+                            if xa == xb:
+                                fermo(
+                                    partenza + prec, partenza + adesso,
+                                    xa, xa, lit,
+                                )
+                            else:
+                                traslazione(
+                                    partenza + prec, partenza + adesso,
+                                    xa, xb, lit,
+                                )
+                        prec = adesso
         return out
 
     # Quante traslazioni di T servono perche' due blocchi possano incontrarsi.
@@ -2104,7 +2511,23 @@ def solve(
                     n_sep_constraints += 1
 
     # -- Obiettivo: minimizzare il takt time entro la tolleranza data -------
-    model.Minimize(Tv)
+    #
+    # A parita' di takt time si preferisce il giro con MENO soste per strada.
+    # Non e' un gusto: fermarsi in una vasca in mezzo e' una traiettoria piu'
+    # complicata e piu' lenta, e quando non serve a niente il solutore la
+    # sceglierebbe comunque -- una qualunque fra le tante soluzioni ottime --
+    # mettendo nel file una sosta di zero secondi che nessuno ha voluto e che
+    # non si puo' nemmeno togliere a posteriori (il vincolo di non collisione
+    # protegge il percorso CON la sosta, non quello diritto).
+    #
+    # Il peso e' n_moves + 1 perche' le soste vere non possono essere piu' di
+    # una per mossa: cosi' un tick di takt time in meno vale sempre piu' di
+    # qualunque numero di soste risparmiate, e l'ordine fra i due obiettivi e'
+    # garantito invece che sperato.
+    if sel_soste:
+        model.Minimize(Tv * (data.n_moves + 1) + sum(sel_soste))
+    else:
+        model.Minimize(Tv)
 
     solver = cp_model.CpSolver()
     solver.parameters.max_time_in_seconds = time_limit_s
@@ -2160,26 +2583,38 @@ def solve(
                     break
                 order.append(cur)
 
-        # Quanto il carroponte e' rimasto fermo dove ha consegnato, arco per
-        # arco del giro scelto. E' l'unica parte della traiettoria che non
-        # discende dalle fasi: si legge qui e si porta dietro nel piano.
+        # Quanto il carroponte e' rimasto fermo dove ha consegnato, e se si e'
+        # fermato in una vasca in mezzo, arco per arco del giro scelto. Sono le
+        # sole parti della traiettoria che non discendono dalle fasi: si leggono
+        # qui e si portano dietro nel piano.
         attese = {}
+        soste = {}
         for i, k1 in enumerate(order):
             k2 = order[(i + 1) % len(order)]
-            t_emp = data.empty_leg_seconds(k1 + 1, k2)
-            if k1 == z.hi:
-                partenza_val = dep_hi_val
-            elif k2 == z.lo:
-                partenza_val = arr_lo_val - t_emp
-            else:
-                partenza_val = data.to_seconds(
-                    solver.Value(zd["partenze"][(k1, k2)])
-                )
+            arco = zd["archi"][(k1, k2)]
+            partenza_val = data.to_seconds(solver.Value(arco["dep"]))
             attese[k1] = max(0.0, partenza_val - fin_val[k1])
+            # L'alternativa scelta e' quella col selettore vero; senza
+            # alternative il selettore e' il literal dell'arco (o None con una
+            # mossa sola), e non c'e' nessuna sosta da leggere.
+            for opz in arco["opzioni"]:
+                if opz["sosta"] is None:
+                    continue
+                if not solver.Value(opz["sel"]):
+                    continue
+                (_, m, _, arrivo_m), (_, _, ripartenza, _) = opz["tappe"]
+                soste[k1] = SostaIntermedia(
+                    stazione=m,
+                    secondi=max(
+                        0.0,
+                        data.to_seconds(solver.Value(ripartenza))
+                        - data.to_seconds(solver.Value(arrivo_m)),
+                    ),
+                )
 
         segs = _build_zone_trajectory(
             data, z, order, lp_val, dep_hi_val, arr_lo_val, T_seconds,
-            attese=attese,
+            attese=attese, soste=soste,
         )
         segments_per_hoist.append(segs)
         plans.append(
@@ -2191,6 +2626,7 @@ def solve(
                 dep_hi=dep_hi_val,
                 arr_lo=arr_lo_val,
                 attese=attese,
+                soste_intermedie=soste,
             )
         )
 
@@ -2229,6 +2665,7 @@ def build_solution(
     tollerante: bool = False,
     mosse_attive: Optional[set] = None,
     attese: Optional[dict[int, float]] = None,
+    soste: Optional[dict[int, SostaIntermedia]] = None,
 ) -> Solution:
     """Costruisce una Solution completa dai soli gradi di liberta' di un
     ciclogramma: il takt time e l'istante di prelievo (fase, in [0,T)) di
@@ -2250,7 +2687,12 @@ def build_solution(
       grado di liberta': non discende dalle fasi, quindi o arriva da fuori --
       dal solutore, o dal file in cui era stato salvato -- oppure si ripiega
       sulla regola predefinita, che e' aspettare dove si e' consegnato tranne
-      che sulle vasche di confine.
+      che sulle vasche di confine;
+    - `soste[k]` dice se in quel rientro il carroponte si ferma in una vasca IN
+      MEZZO, e per quanto (quinto grado di liberta', vedi SostaIntermedia).
+      Assente = rientro diritto. La regola predefinita non ne propone: una
+      sosta per strada ha senso solo guardando dov'e' il vicino, e quello lo sa
+      il solutore.
 
     Solleva ValueError se la disposizione non e' realizzabile (per esempio se
     un carroponte dovrebbe essere in due posti insieme).
@@ -2283,7 +2725,7 @@ def build_solution(
         )
         local_pick = {k: _fase_nel_periodo(actual_time[k], T, data) for k in chiavi}
         return _assembla(
-            data, T, local_pick, actual_time, status, incoerenze, attese
+            data, T, local_pick, actual_time, status, incoerenze, attese, soste
         )
 
     if local_pick is None:
@@ -2316,7 +2758,7 @@ def build_solution(
         actual_time[k] += (n_giri + extra_periods.get(k, 0)) * T
 
     return _assembla(
-        data, T, local_pick, actual_time, status, incoerenze, attese
+        data, T, local_pick, actual_time, status, incoerenze, attese, soste
     )
 
 
@@ -2347,6 +2789,7 @@ def _assembla(
     status: str,
     incoerenze: Optional[list[str]],
     attese: Optional[dict[int, float]] = None,
+    soste: Optional[dict[int, SostaIntermedia]] = None,
 ) -> Solution:
     """Da fasi e tempi assoluti alle traiettorie di ciascun carroponte."""
     segments_per_hoist = []
@@ -2377,8 +2820,12 @@ def _assembla(
         # disegno (`_aspetta_dove_ha_consegnato`), altrimenti descriverebbero
         # una traiettoria diversa da quella che si vede.
         def quando(k1: int, k2: int) -> tuple[float, float]:
-            """(partenza, arrivo) del rientro a vuoto dalla mossa k1 alla k2."""
-            vuoto = data.empty_leg_seconds(k1 + 1, k2)
+            """(partenza, arrivo) del rientro a vuoto dalla mossa k1 alla k2.
+
+            Una sosta in una vasca in mezzo allunga il rientro -- due traslate
+            invece di una, piu' il tempo fermi -- e il conto va fatto su quel
+            totale: e' cosi' che il disegno decide quando partire."""
+            vuoto = _durata_rientro(data, k1 + 1, k2, sst.get(k1))
             if attese is not None:
                 # c'e' una scelta gia' fatta -- dal solutore, o salvata nel
                 # file -- e si usa quella: e' l'unico modo perche' il
@@ -2397,6 +2844,22 @@ def _assembla(
         # le mosse assegnate, e allora si ripiega su quelle che ci sono.
         dopo = {k: order[(i + 1) % len(order)] for i, k in enumerate(order)}
         prima = {v: k for k, v in dopo.items()}
+        # Le soste in mezzo di QUESTA zona, e solo quelle che stanno in piedi:
+        # arrivano dal file, dove le puo' aver scritte una persona, e vanno
+        # controllate PRIMA di calcolarci sopra i tempi. Non c'e' nessuna regola
+        # predefinita che ne inventi: o le ha scelte il solutore, o il rientro e'
+        # diritto.
+        sst = {}
+        for k, sosta in (soste or {}).items():
+            if k not in lp or sosta is None:
+                continue
+            guaio = _perche_la_sosta_non_va(data, z, k, dopo[k], sosta)
+            if guaio is None:
+                sst[k] = sosta
+            elif incoerenze is None:
+                raise ValueError(f"Valori incoerenti: {guaio}")
+            else:
+                incoerenze.append(guaio)
         basso = z.lo if z.lo in lp else riferimento
         alto = z.hi if z.hi in lp else max(moves)
         arr_lo = quando(prima[basso], basso)[1]
@@ -2412,9 +2875,12 @@ def _assembla(
                 data, z, order, lp, dep_hi, arr_lo, T, incoerenze,
                 attesa_alla_partenza=attese is None,
                 attese=None if attese is None else att,
+                soste=sst,
             )
         )
-        plans.append(HoistPlan(z, order, lp, finish, dep_hi, arr_lo, att))
+        plans.append(
+            HoistPlan(z, order, lp, finish, dep_hi, arr_lo, att, sst)
+        )
 
     raw = {"origine": "costruita da build_solution"}
     if incoerenze is not None:
@@ -2431,24 +2897,35 @@ def _assembla(
 
 def estrai_gradi_di_liberta(
     data: ProblemData, solution: Solution
-) -> tuple[float, dict[int, float], dict[int, int], dict[int, float]]:
+) -> tuple[
+    float,
+    dict[int, float],
+    dict[int, int],
+    dict[int, float],
+    dict[int, SostaIntermedia],
+]:
     """Estrae da una soluzione i soli valori che servono a ricostruirla: takt
     time, fase di prelievo di ogni mossa, periodi in piu' rispetto al minimo
-    trascorsi in ciascuna vasca, e quanto ogni carroponte resta fermo dove ha
-    consegnato.
+    trascorsi in ciascuna vasca, quanto ogni carroponte resta fermo dove ha
+    consegnato, e dove si ferma per strada quando lo fa.
 
-    Nessuno dei due ultimi e' deducibile dalle fasi, ed e' proprio per questo
+    Nessuno degli ultimi tre e' deducibile dalle fasi, ed e' proprio per questo
     che stanno qui.
 
     I periodi in piu': il solutore puo' benissimo lasciare il pezzo in vasca un
     takt in piu' del necessario, e la fase resta la stessa. Senza, la
     ricostruzione tornerebbe al minimo e cambierebbe le permanenze.
 
-    Le soste: a parita' di tutto il resto il carroponte puo' ripartire subito e
+    Le attese: a parita' di tutto il resto il carroponte puo' ripartire subito e
     aspettare a destinazione, oppure restare fermo dove ha consegnato e partire
     all'ultimo momento. Sono traiettorie diverse, con collisioni diverse.
     Ricostruire senza questo valore ha prodotto, su 50 soluzioni verificate
     pulite, 14 ciclogrammi che collidevano -- uno con i carri sovrapposti.
+
+    Le soste in mezzo: dove il carroponte si e' fermato per strada, quando l'ha
+    fatto. Vale lo stesso discorso, e in piu' cambia il PERCORSO: senza, il
+    rientro si ricostruirebbe diritto, piu' corto di quanto e' -- e non
+    tornerebbero nemmeno i tempi.
 
     Il risultato e' pensato per essere passato a build_solution: e' lo stato
     modificabile di un ciclogramma.
@@ -2473,7 +2950,12 @@ def estrai_gradi_di_liberta(
         if n_reale > n_min:
             extra[k] = n_reale - n_min
     attese = {k: v for p in solution.plans for k, v in p.attese.items()}
-    return T, local_pick, extra, attese
+    soste = {
+        k: v
+        for p in solution.plans
+        for k, v in p.soste_intermedie.items()
+    }
+    return T, local_pick, extra, attese, soste
 
 
 def proposta_semplice(
@@ -2642,6 +3124,7 @@ def _build_zone_trajectory(
     incoerenze: Optional[list[str]] = None,
     attesa_alla_partenza: bool = False,
     attese: Optional[dict[int, float]] = None,
+    soste: Optional[dict[int, SostaIntermedia]] = None,
 ) -> list[Segment]:
     """incoerenze: se e' una lista, i valori impossibili non sollevano piu'
     un'eccezione ma vengono descritti li' dentro e la traiettoria viene
@@ -2663,6 +3146,15 @@ def _build_zone_trajectory(
         valore SCELTO dal solutore, e ricostruire la traiettoria con una
         convenzione al posto suo darebbe un disegno diverso da quello
         verificato. E' anche il motivo per cui va salvato nel file.
+
+    soste[k]: la vasca in cui il carroponte va ad aspettare durante il rientro
+        che segue la mossa k, e per quanto (vedi SostaIntermedia).
+        Assente = rientro diretto. Anche questa e' una scelta del solutore, e
+        vale quel che si e' detto di `attese`: senza, il rientro verrebbe
+        disegnato diritto e piu' corto di quanto e', e la traiettoria non
+        sarebbe quella verificata. La regola predefinita non ne propone mai:
+        sostare per strada serve a stare lontani dal vicino, e questo lo sa
+        valutare solo chi guarda tutti i carroponti insieme.
 
     attesa_alla_partenza: usato solo quando `attese` non c'e'. Dove il
         carroponte passa il tempo che gli avanza sul rientro a vuoto. False
@@ -2717,7 +3209,27 @@ def _build_zone_trajectory(
         is_last = i == n - 1
         nxt_k = order[0] if is_last else order[i + 1]
         x1_next = data.approach_position(nxt_k)
-        travel_e = data.empty_leg_seconds(k + 1, nxt_k)
+        # Il rientro a vuoto, diritto o con una sosta in una vasca in mezzo.
+        # `travel_e` e' quanto passa fra la partenza e l'arrivo: con una sosta
+        # comprende i secondi fermi la' dentro, perche' e' con quel totale che
+        # si decide quando partire.
+        sosta = None if soste is None else soste.get(k)
+        messaggio = (
+            None
+            if sosta is None
+            else _perche_la_sosta_non_va(data, zone, k, nxt_k, sosta)
+        )
+        if messaggio is not None:
+            if incoerenze is None:
+                raise ValueError(f"Valori incoerenti: {messaggio}")
+            incoerenze.append(messaggio)
+            sosta = None
+        if sosta is None:
+            travel_e = data.empty_leg_seconds(k + 1, nxt_k)
+        else:
+            t_verso_sosta = data.empty_leg_seconds(k + 1, sosta.stazione)
+            t_dalla_sosta = data.empty_leg_seconds(sosta.stazione, nxt_k)
+            travel_e = t_verso_sosta + max(0.0, sosta.secondi) + t_dalla_sosta
 
         # `dep_hi` e `arr_lo` sono i due istanti di CONFINE della zona -- la
         # partenza dall'estremo alto e l'arrivo a quello basso -- e sono legati
@@ -2789,7 +3301,31 @@ def _build_zone_trajectory(
             depart_t = t1  # scarto minuscolo di arrotondamento, non un errore reale
         if depart_t > t1 + EPS:
             segs.append(Segment("wait", t1, depart_t, x1, x1, None))
-        if abs(x1_next - x1) > 1e-9:
+        if sosta is not None:
+            # rientro in due pezzi, con la sosta nella vasca in mezzo. La sosta
+            # e' un tratto FERMO come le altre attese: quel che la distingue e'
+            # solo dove avviene.
+            x_sosta = data.approach_position(sosta.stazione)
+            t_arrivo_sosta = depart_t + t_verso_sosta
+            t_ripartenza = t_arrivo_sosta + max(0.0, sosta.secondi)
+            segs.extend(
+                _segmenti_rientro(
+                    data, k + 1, sosta.stazione, depart_t, t_arrivo_sosta
+                )
+            )
+            if t_ripartenza > t_arrivo_sosta + EPS:
+                segs.append(
+                    Segment(
+                        "wait", t_arrivo_sosta, t_ripartenza,
+                        x_sosta, x_sosta, None,
+                    )
+                )
+            segs.extend(
+                _segmenti_rientro(
+                    data, sosta.stazione, nxt_k, t_ripartenza, arrive_t
+                )
+            )
+        elif abs(x1_next - x1) > 1e-9:
             segs.extend(
                 _segmenti_rientro(data, k + 1, nxt_k, depart_t, arrive_t)
             )
@@ -3546,12 +4082,18 @@ def solve_auto_hoists(
 #    confrontare le posizioni di TUTTE le coppie di carroponti su tutto il
 #    percorso, non solo attorno ai confini.
 #
-# 5. Posizione di parcheggio scelta dal solver: oggi, per convenzione, un
-#    carroponte che ha consegnato riparte subito e attende alla stazione
-#    della mossa successiva. Poterlo far attendere altrove darebbe piu'
-#    liberta' per allontanarsi dal vicino, a parita' di tutto il resto.
+# 5. Sosta a QUALUNQUE punto della rotaia, e non solo sopra una vasca del
+#    percorso: oggi il carroponte che si ferma per strada si ferma su una
+#    tappa (vedi `soste_candidate`). Un punto qualsiasi sarebbe una variabile
+#    di posizione continua, e il vincolo di non collisione passerebbe da
+#    "tratte note" a distanze variabili -- un modello di un altro genere.
 #
 # GIA' IMPLEMENTATI (erano punti di questo elenco):
+# - posizione di attesa scelta dal solver: l'istante di partenza e' una
+#   variabile (aspettare dove si e' consegnato, dove si deve andare, o un po' e
+#   un po'), e con `max_soste_intermedie > 0` il carroponte puo' anche fermarsi
+#   in una VASCA IN MEZZO -- che e' l'unico posto sensato quando i due estremi
+#   del viaggio sono entrambi vasche di confine;
 # - tempo di presa e rilascio del pezzo (`pick_time`/`release_time`): NON si
 #   somma allo spostamento a vuoto, sarebbe doppio conteggio -- vedi il
 #   commento su `empty_leg_seconds`;

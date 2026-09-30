@@ -166,6 +166,7 @@ def componi(
     assegnazione: dict[int, int],
     n_carroponti: int,
     attese: Optional[dict[int, float]] = None,
+    soste: Optional[dict] = None,
 ) -> tuple[Solution, ProblemData, list[str]]:
     """Costruisce il ciclogramma dal disegno manuale.
 
@@ -176,7 +177,12 @@ def componi(
 
     `attese`: dove ogni carroponte passa il tempo morto del rientro a vuoto,
     quando la scelta arriva gia' fatta -- da un calcolo automatico, o da un
-    file che la portava scritta. Assente = la regola predefinita."""
+    file che la portava scritta. Assente = la regola predefinita.
+
+    `soste`: le fermate in una vasca IN MEZZO al rientro (model.SostaIntermedia),
+    per le mosse che ne hanno una. Anche queste arrivano gia' fatte: il disegno
+    manuale non ne inventa, perche' sostare per strada ha senso solo guardando
+    dov'e' il carroponte vicino."""
     tempi = catena_pezzo(data, permanenze)
     dati = dataclasses.replace(data, zones=zone_coprenti(data, assegnazione))
     sol = build_solution(
@@ -187,6 +193,7 @@ def componi(
         tollerante=True,
         mosse_attive=set(assegnazione),
         attese=attese,
+        soste=soste,
     )
     incoerenze = list(sol.raw.get("incoerenze", []))
     scoperte = [k for k in range(data.n_moves) if k not in assegnazione]

@@ -168,6 +168,13 @@ def main(argv=None) -> int:
                 "attese": {
                     k: v for p in solution.plans for k, v in p.attese.items()
                 },
+                # e dove si sono fermati per strada, quando l'hanno fatto: li'
+                # cambia anche il percorso, non solo quando si muovono
+                "soste": {
+                    k: v
+                    for p in solution.plans
+                    for k, v in p.soste_intermedie.items()
+                },
             },
         )
         print(f"Risultati salvati in {destinazione}")

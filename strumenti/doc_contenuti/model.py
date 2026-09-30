@@ -1268,7 +1268,7 @@ SOLVE = [
      "una finestra e la successiva."),
 
     ("h3", "Le mosse"),
-    ("c", "model.solve", '        for k in zd["moves"]:', '        for arc in zd["arcs"]:'),
+    ("c", "model.solve", '        for k in zd["moves"]:', '        for arco in zd["archi"].values():'),
     ("p",
      "Ogni mossa in tre pezzi: la presa (fase per fase), la traslazione col "
      "pezzo fra i due punti di APPROCCIO, il rilascio (fase per fase). Il "
@@ -1276,11 +1276,15 @@ SOLVE = [
      "quale arco il solutore sceglie."),
 
     ("h3", "Gli archi"),
-    ("c", "model.solve", '        for arc in zd["arcs"]:', "    # Quante traslazioni di T servono"),
+    ("c", "model.solve", '        for arco in zd["archi"].values():', "    # Quante traslazioni di T servono"),
     ("p",
-     "Per ogni arco possibile: l'attesa prima di partire, le tratte del "
-     "rientro una per una, l'attesa dopo essere arrivati. Tutto sotto il "
-     "letterale dell'arco, quindi vincolante solo se quell'arco viene scelto."),
+     "Per ogni arco possibile, e per ogni ALTERNATIVA di quell'arco: l'attesa "
+     "prima di partire, le tappe del rientro una per una, la sosta nella vasca "
+     "in mezzo se l'alternativa ne prevede una, l'attesa dopo essere arrivati. "
+     "Tutto sotto il letterale dell'alternativa, quindi vincolante solo se il "
+     "solutore sceglie quell'arco percorso in quel modo. Con "
+     "max_soste_intermedie a zero -- o su un arco senza vasche candidate -- "
+     "l'alternativa e' una sola e questo giro e' identico a quello di prima."),
     ("p",
      "Le tratte si distinguono per forma: `xa == xb` e' una corsa verticale, e "
      "va trattata come una sosta -- lungo la rotaia il carroponte e' fermo. E' "
@@ -1412,7 +1416,15 @@ COSTRUZIONE = [
      "ricostruzione delle traiettorie, e vanno lette come un contratto: il "
      "carroponte visita le mosse nell'ordine dei loro prelievi; il pezzo si "
      "preleva al primo istante compatibile con la fase scelta; e dove passa "
-     "il tempo morto lo dice `attese`, se c'e'."),
+     "il tempo morto lo dicono `attese` e `soste`, se ci sono."),
+    ("p",
+     "`soste` e' il quinto grado di liberta': la fermata in una vasca IN MEZZO "
+     "durante il rientro a vuoto (model.SostaIntermedia). Vale quel che si dice "
+     "qui sotto di `attese`, e di piu': la' cambia QUANDO il carroponte si "
+     "muove, qui cambia DOVE passa. Senza, il rientro si ricostruirebbe "
+     "diritto, piu' corto di quanto e', e non tornerebbero nemmeno i tempi. "
+     "Nessuna regola predefinita ne inventa: sostare per strada ha senso solo "
+     "guardando dov'e' il vicino, e quello lo sa il solutore."),
     ("q",
      "L'ULTIMA VOCE ERA UNA CONVENZIONE, ADESSO E' UN DATO. Diceva: dal "
      "confine alto si riparte appena consegnato, e il margine diventa attesa "

@@ -812,8 +812,10 @@ def test_ricostruzione_fedele():
         if r is None:
             check(False, f"spaziatura {spacing}: {sol.status}, niente da ricostruire")
             continue
-        T, fasi, giri, soste = estrai_gradi_di_liberta(data, sol)
-        rifatta = build_solution(data, T, fasi, extra_periods=giri, attese=soste)
+        T, fasi, giri, attese, soste = estrai_gradi_di_liberta(data, sol)
+        rifatta = build_solution(
+            data, T, fasi, extra_periods=giri, attese=attese, soste=soste
+        )
         r2 = verify_solution(data, rifatta)
 
         def permanenze(s):
@@ -870,10 +872,10 @@ def test_dove_sosta_il_carro():
     if r is None:
         check(False, sol.status + ": niente da ricostruire")
         return
-    T, fasi, giri, soste = estrai_gradi_di_liberta(data, sol)
+    T, fasi, giri, attese, soste = estrai_gradi_di_liberta(data, sol)
     check(
-        set(soste) == set(range(data.n_moves)),
-        f"ogni mossa porta con se' la sua sosta ({len(soste)} su {data.n_moves})",
+        set(attese) == set(range(data.n_moves)),
+        f"ogni mossa porta con se' la sua attesa ({len(attese)} su {data.n_moves})",
     )
 
     def dopo_la_consegna(soluzione, h, k):
@@ -904,7 +906,7 @@ def test_dove_sosta_il_carro():
     # La mossa su cui provare non si sceglie a priori: si prende quella che
     # ha davvero del tempo morto da collocare. Su un'altra il controllo
     # direbbe "nessuna differenza" solo perche' non c'era niente da spostare.
-    zero = {j: 0.0 for j in soste}
+    zero = {j: 0.0 for j in attese}
     disegno = build_solution(data, T, fasi, extra_periods=giri, attese=zero)
     margini = {
         (h, k): dopo_la_consegna(disegno, h, k)
@@ -937,15 +939,250 @@ def test_dove_sosta_il_carro():
             f"{ritardo:.2f} s piu' tardi",
         )
 
-    # E la soluzione del solutore si ricostruisce identica con le sue soste.
+    # E la soluzione del solutore si ricostruisce identica con le sue attese.
     con = verify_solution(
-        data, build_solution(data, T, fasi, extra_periods=giri, attese=soste)
+        data,
+        build_solution(
+            data, T, fasi, extra_periods=giri, attese=attese, soste=soste
+        ),
     )
     check(
         abs(con.min_separation - r.min_separation) < 1e-6 and con.ok == r.ok,
-        f"con le soste salvate la separazione torna identica "
+        f"con le attese salvate la separazione torna identica "
         f"({con.min_separation:.3f})",
     )
+
+
+def test_dove_va_ad_aspettare_il_carro():
+    print()
+    print("[9-quater] il carroponte puo' andare ad aspettare in un'altra vasca")
+    # Il quinto grado di liberta'. Fra la consegna di una mossa e il prelievo
+    # della successiva il carroponte puo' andare a fermarsi in un'altra vasca
+    # della propria zona: serve quando nessuno dei due estremi e' un buon posto
+    # dove stare fermi, perche' tutti e due sono dentro la fascia di un vicino.
+    import dataclasses
+
+    from model import SostaIntermedia, soste_candidate
+
+    # -- 1) quali vasche sono candidate, e perche' --------------------------
+    #
+    # Zona di MEZZO: i suoi due estremi sono confini, quindi il rientro
+    # dall'uno all'altro e' esattamente il caso che la sosta serve a
+    # risolvere.
+    tre = linea(
+        5, 2000, [HoistZone(0, 0), HoistZone(1, 3), HoistZone(4, 4)],
+        dwell=(20, 400), capacity=10, takt_min=30.0, takt_max=60.0,
+        hoist_extent_pos=600, hoist_extent_neg=600, safety_distance=600,
+    )
+    mezzo = tre.zones[1]
+    # `quante` esplicito: il default del progetto e' 1 e questi controlli
+    # guardano il criterio, non il default.
+    check(
+        soste_candidate(tre, mezzo, 4, 1, quante=2) == [2, 3],
+        f"fra i due confini si puo' sostare nelle vasche in mezzo "
+        f"({soste_candidate(tre, mezzo, 4, 1, quante=2)})",
+    )
+    # IL CASO CHE CONTA DI PIU': due mosse consecutive che condividono la
+    # vasca. Il carroponte consegna e riprende nello stesso posto, quindi non
+    # si sposta affatto e non esiste nessun "in mezzo" -- se quella vasca e'
+    # sotto il naso del vicino, l'unica via d'uscita e' andarsene e tornare.
+    # Pretendere una vasca in mezzo lasciava fuori proprio questo, che sulla
+    # linea vera e' quello che produce la collisione.
+    stretto = dataclasses.replace(tre, safety_distance=1400)  # D = 2600 > passo
+    z_stretto = stretto.zones[1]
+    fermo_dove_consegna = soste_candidate(stretto, z_stretto, 2, 2, quante=2)
+    check(
+        fermo_dove_consegna == [3, 1],
+        f"si consegna e si riprende nella stessa vasca: si puo' comunque "
+        f"andare ad aspettare altrove ({fermo_dove_consegna}), a cominciare "
+        f"dalla meno esposta",
+    )
+    # E una vasca esposta quanto l'estremo NON si scarta: le due esposizioni
+    # possono guardare confini diversi, e spostarsi dall'una all'altra risolve
+    # se il vicino di quel lato in quel momento e' altrove.
+    check(
+        1 in fermo_dove_consegna or 4 in fermo_dove_consegna
+        or soste_candidate(stretto, z_stretto, 2, 2, quante=4) == [3, 1, 4],
+        f"anche le vasche esposte quanto l'estremo restano candidate "
+        f"({soste_candidate(stretto, z_stretto, 2, 2, quante=4)})",
+    )
+    # Un estremo AL RIPARO (piu' lontano dal confine della distanza di
+    # sicurezza) rende la sosta inutile: partendo nello stesso istante il
+    # rientro diritto attraversa la fascia negli stessi momenti, e poi aspetta
+    # in un punto sicuro invece che in un altro. Solo modello piu' grande.
+    larga = linea(
+        7, 2000, [HoistZone(0, 4), HoistZone(5, 6)],
+        dwell=(20, 400), capacity=10, takt_min=30.0, takt_max=120.0,
+        hoist_extent_pos=600, hoist_extent_neg=600, safety_distance=600,
+    )
+    check(
+        soste_candidate(larga, larga.zones[0], 5, 0) == [],
+        "se un estremo e' al riparo dal confine non c'e' niente da guadagnare",
+    )
+    check(
+        soste_candidate(tre, tre.zones[1], 4, 1, quante=0) == []
+        and soste_candidate(
+            dataclasses.replace(tre, zones=[HoistZone(0, 4)]),
+            HoistZone(0, 4), 5, 0,
+        )
+        == [],
+        "a zero candidati, e con un carroponte solo, non si sosta mai",
+    )
+
+    # -- 2) una sosta imposta si vede nel disegno --------------------------
+    #
+    # Con un carroponte solo non ci sono collisioni: la sosta non serve a
+    # niente, ma e' l'unico modo di provare il DISEGNO senza dipendere da
+    # quello che il solutore decidera'. Il giro e' lungo e il takt time
+    # larghissimo: di tempo morto da spendere ce n'e' quanto basta.
+    solo = linea(
+        # takt time tenuto alto di proposito: il solutore lo minimizza, e con
+        # un takt stretto non resterebbe tempo morto da spendere in una sosta
+        4, 2000, [HoistZone(0, 3)], dwell=(20, 600), capacity=10,
+        takt_min=200.0, takt_max=260.0,
+        # corsa verticale e tempi morti veri: senza, presa e rilascio durano
+        # zero e non ci sono i tratti da cui il controllo qui sotto parte
+        lift_height=600, drain_time=3.0,
+        kin_lift_empty=Kinematics(v_max=500, a_max=800),
+        kin_lift_loaded=Kinematics(v_max=300, a_max=500),
+        engage_time=2.0, disengage_time=1.0,
+    )
+    sol, r = risolvi_e_verifica(solo, "carroponte solo")
+    if r is None:
+        check(False, sol.status + ": niente su cui imporre una sosta")
+        return
+    T, fasi, giri, attese, soste = estrai_gradi_di_liberta(solo, sol)
+    check(soste == {}, "senza vicini il solutore non fa sostare nessuno")
+
+    # Il rientro a vuoto e' quello che chiude il giro: dall'ultima stazione
+    # alla prima. Ci si ferma nella vasca di mezzo.
+    ultimo = sol.plans[0].order[-1]
+    in_mezzo = 2
+    durata = 5.0
+    # Le attese si azzerano: il tempo morto va tutto lasciato libero, altrimenti
+    # la sosta non avrebbe dove starci e il controllo misurerebbe quello.
+    zero = {k: 0.0 for k in attese}
+    imposta = build_solution(
+        solo, T, fasi, extra_periods=giri, attese=zero,
+        soste={ultimo: SostaIntermedia(stazione=in_mezzo, secondi=durata)},
+    )
+    segs = sorted(imposta.segments_per_hoist[0], key=lambda s: s.t_start)
+    # i tratti dopo l'ultimo rilascio e prima della prima presa del giro dopo
+    i_rel = max(
+        j for j, sg in enumerate(segs)
+        if sg.kind == "release" and sg.move == ultimo
+    )
+    rientro = []
+    for sg in segs[i_rel + 1:]:
+        if sg.kind == "pick":
+            break
+        rientro.append(sg)
+    x_mezzo = solo.approach_position(in_mezzo)
+    ferme = [
+        sg for sg in rientro
+        if sg.kind == "wait" and abs(sg.x_start - x_mezzo) < 1e-6
+    ]
+    check(
+        len(ferme) == 1 and abs((ferme[0].t_end - ferme[0].t_start) - durata) < 1e-6,
+        f"il disegno ha una sosta di {durata:.0f} s sulla vasca "
+        f"{solo.route[in_mezzo].tank_id}",
+    )
+    tratte = [sg for sg in rientro if sg.kind == "empty"]
+    check(
+        len(tratte) == 2
+        and abs(tratte[0].x_end - x_mezzo) < 1e-6
+        and abs(tratte[1].x_start - x_mezzo) < 1e-6,
+        f"e il rientro e' spezzato in due traslate ({len(tratte)}), "
+        f"che si toccano proprio la'",
+    )
+    check(
+        verify_solution(solo, imposta).ok,
+        "la traiettoria con la sosta supera la verifica indipendente",
+    )
+    # Il verificatore deve misurare il percorso VERO: una sosta piu' lunga del
+    # tempo morto disponibile non ci sta, e dirlo e' il suo mestiere.
+    troppo = build_solution(
+        solo, T, fasi, extra_periods=giri, attese=zero, tollerante=True,
+        soste={ultimo: SostaIntermedia(stazione=in_mezzo, secondi=2 * T)},
+    )
+    errori = [v for v in verify_solution(solo, troppo).violations if v.kind == "transfer"]
+    check(
+        bool(errori),
+        "una sosta piu' lunga del tempo disponibile viene segnalata: "
+        + (errori[0].message[:60] if errori else "NESSUN ERRORE"),
+    )
+    # E una sosta fuori dalla zona del carroponte non e' una sosta piu' lunga:
+    # e' un carro che entra in casa del vicino.
+    fuori = build_solution(
+        tre, 60.0, {k: 0.0 for k in range(tre.n_moves)},
+        tollerante=True, attese={k: 0.0 for k in range(tre.n_moves)},
+        # la mossa 1 e' del carroponte di mezzo, che arriva fino alla stazione
+        # 4: la 5 e' del vicino
+        soste={1: SostaIntermedia(stazione=5, secondi=1.0)},
+    )
+    check(
+        any("fuori dalla zona" in m for m in fuori.raw.get("incoerenze", [])),
+        "una sosta fuori dalla zona viene segnalata come incoerenza",
+    )
+
+    # -- 3) e serve: su una linea stretta ABBASSA il takt time -------------
+    #
+    # Tre carroponti, vasche a 1500 mm e distanza di sicurezza tale che la
+    # fascia di esclusione copre la vasca accanto al confine: il carro di mezzo
+    # consegna su un confine e va a prelevare sull'altro, e i due estremi sono
+    # entrambi posti in cui il vicino deve passare. Potendo fermarsi nella
+    # vasca in mezzo il ciclo si chiude piu' corto.
+    #
+    # Il rientro diritto resta fra le alternative, quindi lo spazio di ricerca
+    # solo si allarga: il takt time ottimo non puo' salire. Se sale, qualche
+    # vincolo sta guardando il percorso sbagliato.
+    stretta = dict(
+        takt_min=40.0, takt_max=60.0, dwell=(20, 900), capacity=20,
+        hoist_extent_pos=600, hoist_extent_neg=600, safety_distance=900,
+        lift_height=400, drain_time=3.0,
+        kin_lift_empty=Kinematics(v_max=400, a_max=600),
+        kin_lift_loaded=Kinematics(v_max=200, a_max=300),
+        engage_time=2.0, disengage_time=1.0, clearance_step_mm=300.0,
+    )
+    zone_tre = [HoistZone(0, 1), HoistZone(2, 3), HoistZone(4, 5)]
+    # Limite di tempo largo di proposito: la domanda e' quale sia l'OTTIMO, non
+    # quanto in fretta lo si trova. Il modello con le soste e' piu' grande, e
+    # con un limite stretto si fermerebbe prima -- che e' vero, ed e' scritto
+    # nel README, ma non e' quello che si prova qui.
+    senza = solve(
+        linea(6, 1500, zone_tre, max_soste_intermedie=0, **stretta),
+        time_limit_s=120.0,
+    )
+    d_con = linea(6, 1500, zone_tre, max_soste_intermedie=2, **stretta)
+    con = solve(d_con, time_limit_s=120.0)
+    if senza.status == "OPTIMAL" and con.status == "OPTIMAL":
+        check(
+            con.T <= senza.T + 1e-6,
+            f"col posto in mezzo il takt time non peggiora "
+            f"({con.T:.2f} s contro {senza.T:.2f} s)",
+        )
+        check(
+            con.T < senza.T - 0.5
+            and sum(len(p.soste_intermedie) for p in con.plans) > 0,
+            f"e su questa linea lo MIGLIORA, fermandosi per strada: "
+            f"{con.T:.2f} s contro {senza.T:.2f} s",
+        )
+        for h, p in enumerate(con.plans):
+            if p.soste_intermedie:
+                print(
+                    f"       carro {h + 1}: "
+                    + ", ".join(
+                        f"{v.secondi:.1f} s in {d_con.route[v.stazione].tank_id} "
+                        f"dopo la mossa {k}"
+                        for k, v in sorted(p.soste_intermedie.items())
+                    )
+                )
+    else:
+        check(False, f"la linea stretta non si e' risolta "
+                     f"({senza.status} / {con.status})")
+    if con.plans:
+        rep = verify_solution(d_con, con)
+        check(rep.ok, _esito(con, rep, "e la soluzione con la sosta e' valida"))
 
 
 def test_pezzo_in_vasca():
@@ -1271,6 +1508,7 @@ def main():
     test_vasca_ripetuta()
     test_ricostruzione_fedele()
     test_dove_sosta_il_carro()
+    test_dove_va_ad_aspettare_il_carro()
     test_pezzo_in_vasca()
     test_frecce_delle_corse_verticali()
     test_ferma_il_calcolo()

@@ -182,7 +182,11 @@ LiftPhase       name, duration, z_start, z_end, kin, loaded,
                 x_start, x_end, kin_x
 ProblemData     tutto il problema
 Segment         kind, t_start, t_end, x_start, x_end, kin, move
-HoistPlan       zone, order, local_pick, finish, dep_hi, arr_lo
+SostaIntermedia stazione, secondi                    (dove il carro si ferma
+                                                    durante un rientro, e per
+                                                    quanto)
+HoistPlan       zone, order, local_pick, finish, dep_hi, arr_lo, attese,
+                soste_intermedie
 Solution        status, T, segments_per_hoist, raw, plans, actual_time
 ```
 
@@ -388,6 +392,9 @@ due volte vorrebbe dire che uno dei due valori viene ignorato in silenzio.
 | `local_pick[k]` | la **fase** dello stesso prelievo dentro `[0, T)` |
 | `finish[k]` | `local_pick[k] + loaded_leg` |
 | `dep_hi`, `arr_lo` | quando il carroponte lascia il confine alto e torna a quello basso |
+| `dep`, `arr` (per arco) | partenza e arrivo dello spostamento a vuoto di quell'arco; sui due archi di confine **sono** `dep_hi` e `arr_lo` |
+| `sosta_..._i` (per arco e candidata) | il selettore dell'alternativa: rientro diritto, oppure con sosta in quella vasca in mezzo |
+| `ripart_..._i` | quando il carroponte riparte dalla vasca in mezzo |
 
 Il legame `local_pick[k] = actual_time[k] − m·Tv` e' realizzato con una
 `AddExactlyOne` su letterali, uno per traslazione possibile: e' la parte piu'
@@ -401,7 +408,24 @@ validarla.
    costante intera e `Tv` una variabile: il prodotto resta **lineare**.
 3. **Circuito del carroponte** — un giro che parte e torna a `zone.lo`, con i
    trasferimenti a vuoto che devono arrivare in tempo.
-4. **Non collisione** — vedi sotto.
+4. **Alternative del rientro** (`rientro`, dentro `solve`) — per ogni arco, una
+   sola fra: diritto, oppure con una sosta in una delle vasche candidate
+   (`soste_candidate`). `sum(selettori) == literal dell'arco`: se l'arco non si
+   percorre non se ne sceglie nessuna, altrimenti i suoi intervalli entrerebbero
+   nel vincolo di non collisione come se il carroponte fosse in due giri
+   insieme. Ogni alternativa si racconta come una lista di **tappe**
+   `(da, a, partenza, arrivo)`, ed e' da quelle che discendono sia il disegno sia
+   gli intervalli del punto 5.
+5. **Non collisione** — vedi sotto.
+
+**L'obiettivo** e' `Minimize(Tv)`, e quando ci sono soste in mezzo fra cui
+scegliere diventa `Minimize(Tv · (n_moves + 1) + numero di soste)`. Il peso e'
+`n_moves + 1` perche' le soste non possono essere piu' di una per mossa: cosi'
+l'ordine fra i due obiettivi e' garantito invece che sperato. Serve perche' a
+parita' di takt time il solutore prenderebbe una qualunque delle soluzioni
+ottime, e una sosta di zero secondi che nessuno ha voluto non si potrebbe
+nemmeno togliere a posteriori — il vincolo di non collisione protegge il percorso
+CON la sosta, non quello diritto.
 
 ### 5.3 La fascia di esclusione — il vincolo difficile
 
@@ -481,10 +505,10 @@ nasconderebbe un movimento vero, e chi campiona le posizioni lo crederebbe fermo
 
 ### 6.1 I gradi di liberta', e la trappola del modulo
 
-Un ciclogramma ha **quattro** gradi di liberta' reali: takt time, tempo in
-vasca di ogni tappa, assegnazione delle mosse, e la **sosta** di ogni
-carroponte dove ha consegnato, prima del rientro a vuoto. Tutto il resto e'
-conseguenza.
+Un ciclogramma ha **cinque** gradi di liberta' reali: takt time, tempo in
+vasca di ogni tappa, assegnazione delle mosse, l'**attesa** di ogni carroponte
+dove ha consegnato prima del rientro a vuoto, e l'eventuale **sosta in una vasca
+in mezzo** durante quel rientro. Tutto il resto e' conseguenza.
 
 La sosta e' arrivata per ultima e per necessita': `dep_hi` era gia' una
 variabile libera del solutore — il carroponte poteva sostare sul confine alto —
@@ -492,6 +516,41 @@ ma quel valore non veniva salvato, e la ricostruzione lo rifaceva con una
 convenzione. Su 50 soluzioni verificate pulite, riaperte come fa il programma,
 **14 collidevano**, una con i due carri sovrapposti (0 mm invece di 1200), dopo
 una sosta di 374 s che il file non registrava. Salvando le soste: 0 su 54.
+
+La **sosta** (`SostaIntermedia`, quinto grado di liberta') e' arrivata dopo, e
+per un motivo diverso: quando tutti e due gli estremi del rientro sono dentro la
+fascia di un vicino, nessuno dei due e' un buon posto dove restare fermi. Li' il
+solutore puo' spezzare il rientro in due traslate e aspettare altrove. Vale quel
+che si e' detto dell'attesa, e di piu': qui non cambia solo QUANDO il carroponte
+si muove, cambia DOVE passa -- senza salvarla, il rientro si ricostruirebbe
+diritto, piu' corto di quanto e', e non tornerebbero nemmeno i tempi.
+
+**Non e' detto che la vasca stia FRA le due**, e il caso piu' frequente e'
+proprio quello in cui un "fra" non esiste: due mosse consecutive che condividono
+la vasca (si consegna in FO1 e dalla stessa FO1 si riprende). Li' il carroponte
+non si sposta affatto, e se quella vasca e' sotto il naso del vicino ci resta
+fermo per minuti: l'unica via d'uscita e' andarsene e tornare. Pretendere una
+vasca "in mezzo" lasciava fuori esattamente questo caso, che e' quello che sulla
+linea vera produce la collisione.
+
+Quali vasche siano candidate lo decide `soste_candidate`, e non sono tutte: se
+uno dei due estremi e' AL RIPARO la sosta non puo' servire, perche' partire
+subito e passare li' tutto il tempo morto e' gia' nel modello e fa meglio (vedi
+il README).
+
+**Il primo candidato e' quasi gratis, il secondo no**, e la ragione sta nel
+vincolo di non collisione: `soste_candidate` mette per primo un posto al riparo
+da tutti e due i confini, e una sosta fuori dalle fasce non genera nessuna
+finestra. Dal secondo in poi si prendono vasche ancora esposte, e li' la sosta
+e' una finestra LUNGA che si accoppia con tutte quelle del vicino. Misurato su
+una linea da 14 mosse e 4 carroponti: 43.264 vincoli di separazione a zero
+candidati, 60.684 a uno (+40%), 120.120 a due. Per questo
+`max_soste_intermedie` vale **1** di default.
+
+Per lo stesso motivo le due attese LUNGHE di un arco -- quella prima di partire
+e quella dopo essere arrivati -- si scrivono una volta sola sotto il letterale
+dell'arco e non una per alternativa: partenza e arrivo sono le stesse per tutte,
+e ripeterle triplicherebbe proprio gli intervalli che generano piu' coppie.
 
 `build_solution` accetta due parametrizzazioni equivalenti:
 
@@ -526,6 +585,11 @@ non un crash.
 I controlli, in ordine: strutturali → layout → coerenza per carroponte →
 copertura delle mosse → fase → permanenze → trasferimenti → **collisioni** →
 capienza.
+
+Il controllo dei **trasferimenti** misura il percorso SCELTO, sosta in mezzo
+compresa: guardare il rientro diritto sarebbe piu' permissivo del vero, cioe'
+esattamente il tipo di svista per cui questo file esiste. La durata delle singole
+traslate invece si ricontrolla dai segmenti, uno per uno, come sempre.
 
 **Il campionamento e' rigoroso.** L'insieme dei campioni e' `{0, T} ∪ {tutti gli
 spigoli cinematici modulo T} ∪ {griglia di passo dt}`, e l'errore e' limitato
@@ -593,6 +657,8 @@ La classe `Applicazione(tk.Tk)` e' tutta la finestra. Lo stato utile:
 ```python
 T_corrente, permanenze, assegnazione, n_carroponti   # i gradi di liberta'
 attese              # dove ogni carro sosta; None = decide la regola
+soste               # le fermate in una vasca in mezzo; {} = nessuna, e non
+                    # c'e' nessuna regola che le inventi
 soluzione, dati, report, incoerenze
 vista               # "ciclogramma" | "pettine"
 modifica_aperta     # se la scheda Ciclogramma e' aperta
@@ -814,7 +880,7 @@ lascia il pulsante vuoto.
 
 ---
 
-## 11. I test — 515 asserzioni, cinque suite
+## 11. I test — 543 asserzioni, cinque suite
 
 Nessun pytest: ogni file si lancia da solo, stampa cosa ha provato e restituisce
 un codice d'uscita.
@@ -822,9 +888,9 @@ un codice d'uscita.
 | file | asserzioni | richiede | domanda a cui risponde |
 | --- | ---: | --- | --- |
 | `test/test_verify.py` | 123 | — | il verificatore trova davvero quello che deve? |
-| `test/test_excel_io.py` | 102 | — | un file compilato male viene respinto con un messaggio utile? |
+| `test/test_excel_io.py` | 114 | — | un file compilato male viene respinto con un messaggio utile? |
 | `test/test_simulazione.py` | 84 | — | la simulazione mostra il ciclogramma che c'e'? |
-| `test/test_model.py` | 78 | OR-Tools | il modello produce soluzioni fisicamente valide? |
+| `test/test_model.py` | 94 | OR-Tools | il modello produce soluzioni fisicamente valide? |
 | `test/test_interfaccia.py` | 128 | OR-Tools + grafica | l'interfaccia si comporta come deve? |
 
 > `test_model.py` risolve davvero, con limiti di tempo dell'ordine del minuto.
@@ -874,7 +940,17 @@ filtro e' su `_STATI_SENZA_SOLUZIONE`.
 
 **Segmenti degeneri di durata nulla** quando due mosse consecutive condividono
 la stazione: sommati allo scarto di arrotondamento si ordinano male e spezzano
-la traiettoria. Non si emettono.
+la traiettoria. Non si emettono. Lo stesso vale per una **sosta in mezzo
+indicata su un estremo** del viaggio a vuoto — che dal file puo' arrivare,
+perche' la' la scrive una persona: sarebbe una traslata di lunghezza zero, e
+`_perche_la_sosta_non_va` la respinge come incoerenza invece di disegnarla.
+
+**Una sosta in mezzo NON si puo' togliere a posteriori.** Il vincolo di non
+collisione protegge il percorso CON la sosta; ripiegare sul rientro diritto --
+per esempio perche' la sosta dura zero secondi e sembra inutile -- vorrebbe dire
+disegnare una traiettoria che nessuno ha verificato, con il carroponte in posti
+diversi negli stessi istanti. Per questo le soste inutili si evitano
+nell'OBIETTIVO (§5.2), prima che esistano, e non dopo.
 
 **`plans` disallineato con `segments_per_hoist`.** In `_assembla`, una zona
 senza mosse assegnate aggiunge `[]` ai segmenti ma **salta** il piano. Con

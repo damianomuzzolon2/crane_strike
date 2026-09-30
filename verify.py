@@ -17,7 +17,8 @@ Cosa controlla:
   4. copertura delle mosse e durate delle tratte
   5. coerenza di fase (la linearizzazione modulo T del modello)
   6. permanenze min/max in vasca
-  7. fattibilita' dei trasferimenti a vuoto
+  7. fattibilita' dei trasferimenti a vuoto, comprese le soste in una vasca
+     in mezzo (che allungano il percorso, invece di accorciarlo)
   8. COLLISIONI REALI: distanza fra ogni coppia di carroponti campionata
      finemente nel tempo con il profilo cinematico vero (position_profile)
   9. capienza delle vasche (quanti pezzi ci stanno contemporaneamente)
@@ -1022,7 +1023,37 @@ def _check_transfers(data, plans, T, time_tol, add):
             k2 = order[(i + 1) % len(order)]
             if k1 not in plan.finish or k2 not in plan.local_pick:
                 continue
-            t_emp = data.empty_leg_seconds(k1 + 1, k2)
+            # Una sosta in una vasca in mezzo cambia il percorso: due traslate
+            # invece di una, piu' il tempo fermi la'. Misurare il rientro
+            # diretto sarebbe piu' permissivo del vero -- proprio il tipo di
+            # svista che questo file esiste per intercettare.
+            sosta = plan.soste_intermedie.get(k1)
+            dove = ""
+            if sosta is None:
+                t_emp = data.empty_leg_seconds(k1 + 1, k2)
+            else:
+                zona = plan.zone
+                if not zona.lo <= sosta.stazione <= zona.hi + 1:
+                    add(
+                        "transfer",
+                        "error",
+                        f"il carroponte {h + 1} dovrebbe sostare nella "
+                        f"stazione {sosta.stazione}, che non e' nella sua zona "
+                        f"({zona.lo}..{zona.hi + 1}): quel pezzo di rotaia e' "
+                        f"del vicino",
+                        hoists=(h,),
+                        move=k1,
+                        station=sosta.stazione,
+                    )
+                t_emp = (
+                    data.empty_leg_seconds(k1 + 1, sosta.stazione)
+                    + max(0.0, sosta.secondi)
+                    + data.empty_leg_seconds(sosta.stazione, k2)
+                )
+                dove = (
+                    f", sostando {sosta.secondi:.2f}s in "
+                    f"{data.route[sosta.stazione].tank_id}"
+                )
             arrivo = plan.finish[k1] + t_emp
             target = plan.local_pick[k2] + (T if k2 == order[0] else 0.0)
             if arrivo > target + time_tol:
@@ -1031,7 +1062,7 @@ def _check_transfers(data, plans, T, time_tol, add):
                     "error",
                     f"il carroponte {h + 1} non arriva in tempo dalla mossa "
                     f"{k1} (finisce in {data.route[k1 + 1].tank_id}) alla "
-                    f"mossa {k2} (parte da {data.route[k2].tank_id}): "
+                    f"mossa {k2} (parte da {data.route[k2].tank_id}){dove}: "
                     f"pronto a {arrivo:.2f}s, prelievo a {target:.2f}s",
                     hoists=(h,),
                     move=k2,
