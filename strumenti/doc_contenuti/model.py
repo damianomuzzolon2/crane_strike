@@ -188,6 +188,17 @@ STRUTTURE = [
      "spostamento a vuoto successivo non paga nulla, perche' la corsa del "
      "gancio scarico e' gia' contata qui dentro. Contarla due volte e' "
      "l'errore piu' facile da fare estendendo il modello."),
+    ("p",
+     "Subito sotto stanno v_approach_lift e d_approach_lift, la ZONA DI "
+     "AVVICINAMENTO del sollevamento: i millimetri attorno al punto di presa "
+     "o deposito che si percorrono a velocita' ridotta, e quella velocita'. "
+     "Sono due e vanno insieme -- uno solo dei due non descrive niente, e "
+     "__post_init__ lo rifiuta. Non sono sdoppiati fra vuoto e carico come "
+     "v_max e a_max, perche' la precisione che serve e' la stessa nei due "
+     "casi: a imporla e' il punto di accoppiamento, non il carico appeso. "
+     "Sono numeri della LINEA e non ancora un profilo: il verso, che e' "
+     "quello che li rende una cinematica, lo mette kin_avvicinamento (secondo "
+     "documento)."),
     ("q",
      "clearance_step_mm NON E' UN MARGINE DI SICUREZZA. Il commento insiste "
      "perche' il nome inganna. E' ogni quanti millimetri viene verificata la "
@@ -373,6 +384,16 @@ STRUTTURE = [
      "sulla stazione k, il rilascio sulla k+1 -- e da li' si ricavano corsa e "
      "sgocciolamento. Dedurlo dalla posizione sbaglierebbe appena due vasche "
      "stessero alla stessa quota, che e' un caso ammesso."),
+    ("q",
+     "DUE CINEMATICHE, NON UNA. `kin` e' quella ORIZZONTALE, e sui tratti "
+     "'lift_empty' e' None perche' lungo la rotaia il carroponte sta fermo. "
+     "Verticalmente pero' si muove eccome, e il profilo di quel movimento sta "
+     "in `kin_z`. Tenere i due campi separati non e' pignoleria: verify.py "
+     "cerca collisioni guardando le posizioni sulla ROTAIA, e conta i "
+     "segmenti con `kin` non nullo. Mettere la cinematica verticale dentro "
+     "`kin` avrebbe fatto entrare una corsa del gancio nel conto "
+     "dell'accelerazione massima orizzontale, allargando il limite d'errore "
+     "del verificatore per un movimento che quel limite non riguarda."),
     ("c", "model.HoistPlan"),
     ("p",
      "I valori risolti, cosi' come li ha decisi il solutore. Il docstring "
@@ -485,6 +506,43 @@ FASI = [
      "le stesse funzioni delle vasche, e ne escono con durate zero."),
 
     # ==================================================================
+    ("h2", "0-bis. La zona di avvicinamento, e chi le da' il verso"),
+    ("p",
+     "Vicino al punto in cui il telaio viene agganciato o posato il gancio va "
+     "piano: la linea dichiara una velocita' di avvicinamento e la lunghezza "
+     "del tratto su cui vale. La fisica sta in kinematics.py (la classe "
+     "Approach); qui sta la sola cosa che kinematics.py non puo' sapere -- a "
+     "quale capo della corsa cade la zona, e su quali stazioni si applica."),
+    ("c", "model.ProblemData.kin_avvicinamento"),
+    ("p",
+     "Tre righe, e sono un passaggio obbligato. Ogni fase verticale del "
+     "modulo prende la propria cinematica da qui, e non da kin_lift_loaded o "
+     "kin_lift_empty direttamente: cosi' la durata che finisce nel "
+     "ciclogramma, il profilo che finisce nel disegno e quello che finisce "
+     "nella simulazione sono per costruzione lo stesso movimento. Una fase "
+     "che non passasse di qui durerebbe una cosa e se ne disegnerebbe "
+     "un'altra."),
+    ("q",
+     "LA ZONA STA SEMPRE AL CAPO BASSO, MAI IN CIMA. `scendendo=True` la "
+     "mette in fondo alla corsa, `scendendo=False` in testa -- e in tutti e "
+     "due i casi e' lo stesso punto fisico, quello dove gancio e telaio si "
+     "accoppiano. Non e' il verso a scegliere dove rallentare: e' il punto di "
+     "accoppiamento, che sta in fondo e non si sposta. Passare il verso "
+     "sbagliato non produce nessun errore -- produce un telaio che entra in "
+     "vasca a velocita' piena e rallenta in cima, dove non serve a nulla."),
+    ("p",
+     "L'esclusione delle stazioni con una zona di CAMBIO QUOTA e' una riga "
+     "sola, ed e' una scelta di merito: li' il giro verticale e' fatto di "
+     "quote di transito -- si sale a una quota intermedia per traslare, si "
+     "scende a un'altra per posare -- e rallentare a ognuna sarebbe tempo "
+     "regalato su quote dove non c'e' niente da accoppiare con precisione."),
+    ("p",
+     "Quando la linea non dichiara i due parametri, `avvicinandosi` "
+     "restituisce la cinematica invariata e tutto resta il trapezio di "
+     "sempre: il caso 'nessun avvicinamento' non e' un ramo dei chiamanti, "
+     "passa da qui come tutti gli altri."),
+
+    # ==================================================================
     ("h2", "1. Le fasi, non le durate"),
     ("c", "model.ProblemData.pick_phases"),
     ("p",
@@ -512,10 +570,18 @@ FASI = [
      "alla quota di trasporto). Si noti che `loaded` diventa True dal "
      "sollevamento in poi: e' il campo da cui la simulazione sa quando il "
      "pezzo comincia ad appartenere al carroponte."),
+    ("p",
+     "Il sollevamento parte dal fondo, quindi la zona di avvicinamento sta in "
+     "TESTA alla corsa: il telaio si stacca dal bagno piano e accelera solo "
+     "dopo. E' la riga `scendendo=False` prima della lista, e la stessa "
+     "cinematica cosi' ottenuta viene passata sia a _lift_seconds, per la "
+     "durata, sia alla LiftPhase, per il profilo."),
     ("c", "model.ProblemData.release_phases"),
     ("p",
      "Speculare, con due sole fasi: immersione e sgancio. Non c'e' la risalita "
-     "del gancio scarico, per la ragione simmetrica a quella della presa."),
+     "del gancio scarico, per la ragione simmetrica a quella della presa. E "
+     "specularmente la zona di avvicinamento sta alla FINE della corsa: "
+     "`scendendo=True`, perche' qui il telaio in fondo ci arriva."),
 
     # ==================================================================
     ("h2", "2. Il giro con la zona di cambio quota"),
@@ -618,11 +684,32 @@ FASI = [
      "entrambe, e verify.py le usa tutte e due sullo stesso tratto proprio "
      "perche' controllare solo il totale lascerebbe passare una traslazione "
      "impossibile compensata da una presa piu' lunga."),
+    ("c", "model.ProblemData.kin_lift_empty_at"),
     ("c", "model.ProblemData.empty_lift_seconds"),
     ("p",
      "Quanto costa UNA corsa verticale a gancio scarico. Il docstring "
      "chiarisce che qui c'e' solo il costo: se qualcuno la faccia davvero lo "
      "decide serve_alto, ed e' argomento del terzo documento."),
+    ("q",
+     "IL VERSO E' UN ARGOMENTO, E NON E' PEDANTERIA. Fino a quando il profilo "
+     "era un trapezio, salire e scendere della stessa corsa durava "
+     "esattamente uguale, e una funzione sola bastava per tutte e due. Con "
+     "una zona di avvicinamento non e' piu' vero: la zona lenta cade una "
+     "volta in coda e una volta in testa, e su un carroponte che frena "
+     "diversamente da come accelera i due conti danno numeri diversi. Il "
+     "parametro `scendendo` e' obbligatorio e nominato apposta -- un valore "
+     "di default avrebbe lasciato che meta' dei chiamanti usasse il verso "
+     "sbagliato senza accorgersene. I due chiamanti veri stanno in "
+     "tratte_rientro, che sa quale delle due corse verticali sale e quale "
+     "scende."),
+    ("p",
+     "kin_lift_empty_at e' la cinematica corrispondente, ed esiste per una "
+     "ragione pratica: chi DISEGNA quella corsa -- la simulazione -- non "
+     "riceve l'indice di stazione, riceve un Segment. La cinematica orientata "
+     "viene quindi messa nel Segment (campo kin_z) da chi lo costruisce, che "
+     "la stazione ce l'ha. Ricavarla dal dato globale kin_lift_empty "
+     "perderebbe la zona di avvicinamento, e il gancio arriverebbe in fondo "
+     "prima della fine del tratto."),
     ("q",
      "SU UNA ZONA DI CAMBIO QUOTA LA CORSA E' L'INTERA CORSA DEL CARROPONTE. "
      "Non quella della vasca -- che li' e' obbligatoriamente zero -- ma "

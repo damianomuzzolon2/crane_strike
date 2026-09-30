@@ -8,7 +8,8 @@ che spostano pezzi attraverso una sequenza di vasche, rispettando:
 - tempi di permanenza min/max per vasca (tolleranza di processo),
 - un takt time target con tolleranza,
 - velocita', accelerazione e decelerazione massime diverse per carroponte
-  vuoto e carico,
+  vuoto e carico, con una zona di avvicinamento a velocita' ridotta vicino al
+  punto di presa e deposito,
 - vincoli di non collisione fra carroponti sulla stessa rotaia.
 
 Si usa da **interfaccia grafica**, da riga di comando o come libreria Python.
@@ -76,7 +77,7 @@ OR-Tools installato.
 
 | file | righe | contenuto |
 | --- | ---: | --- |
-| `kinematics.py` | 187 | La fisica del movimento, in millimetri e secondi. Accelerazione e decelerazione sono due numeri distinti. `travel_time()` da' il tempo per percorrere una distanza con profilo trapezoidale o triangolare; `position_profile()` la posizione istante per istante; `profile_breakpoints()` gli spigoli della curva, che servono al verificatore per limitare in modo rigoroso l'errore di campionamento. Non sa nulla del resto del progetto. |
+| `kinematics.py` | 413 | La fisica del movimento, in millimetri e secondi. Accelerazione e decelerazione sono due numeri distinti, e il sollevamento puo' avere una zona di avvicinamento a velocita' ridotta. `travel_time()` da' il tempo per percorrere una distanza con profilo trapezoidale o triangolare; `position_profile()` la posizione istante per istante; `profile_breakpoints()` gli spigoli della curva, che servono al verificatore per limitare in modo rigoroso l'errore di campionamento. Non sa nulla del resto del progetto. |
 | `model.py` | 2052 | Il cuore. Contiene le **strutture dati** (`Tank`, `StationSpec`, `HoistZone`, `ProblemData`, `Segment`, `Solution`), la costruzione e risoluzione del **modello CP-SAT** (`solve`), la scelta automatica di zone e numero di carroponti (`solve_auto_zones`, `solve_auto_hoists`), e la costruzione di un ciclogramma **senza risolvere** a partire dai suoi gradi di liberta' (`build_solution`, `estrai_gradi_di_liberta`) — quest'ultima e' cio' che rende possibile l'editor. |
 | `verify.py` | 1043 | Il **verificatore indipendente**: `verify_solution()` ricontrolla una soluzione in Python puro, senza CP-SAT, campionando le posizioni reali dei carroponti. Restituisce un `VerificationReport` con l'elenco delle `Violation` divise per gravita'. E' la rete di sicurezza contro gli errori nella formulazione del modello. |
 | `manuale.py` | 260 | Il ciclogramma nei termini in cui si modifica: il "pettine" dei pezzi (`pettine`, `catena_pezzo`), la composizione libera del ciclogramma (`componi`) e il controllo che i carroponti non si scavalchino sulla rotaia (`perche_non_va`). |
@@ -1079,7 +1080,9 @@ attesa tutte le volte. La cartella si copia tale e quale e parte subito.
 3. **Cinematica**: `Kinematics(v_max, a_max, d_max)` separata per carroponte
    vuoto e carico. `d_max` e' la decelerazione ed e' **facoltativa**: lasciata
    vuota si frena con `a_max`, che e' come si comportava il programma prima
-   che il parametro esistesse.
+   che il parametro esistesse. Per il solo sollevamento si possono aggiungere
+   `v_approach_lift` e `d_approach_lift` su `ProblemData`: il verso lo mette
+   il modello, non chi costruisce la cinematica.
 4. **Takt time**: `takt_min`, `takt_max` (puoi calcolarli da
    `nominale ± tolleranza`).
 5. **Carroponti e zone** (`HoistZone`): ogni carroponte serve una **zona
@@ -1190,6 +1193,8 @@ Del **carroponte** (uguali su tutta la linea, in `ProblemData`):
 
 - `kin_lift_empty`, `kin_lift_loaded` — velocita', accelerazione e
   decelerazione massime di sollevamento, a gancio scarico e col telaio;
+- `v_approach_lift`, `d_approach_lift` — la zona di avvicinamento, una sola
+  per tutte e due;
 - `engage_time` — aggancio del telaio, prima del sollevamento (tempo morto);
 - `disengage_time` — sgancio, dopo l'immersione (tempo morto).
 
@@ -1290,6 +1295,59 @@ Sul carroponte vuoto dell'esempio — 1600 mm/s con 900 mm/s^2 — la soglia fra
 profilo triangolare e trapezoidale sta a 2844 mm; dichiarando una frenata a
 1200 mm/s^2 scende a 2489 mm. Un salto di 2500 mm cambia cosi' di **profilo**,
 non solo di durata: da triangolare a 3,33 s a trapezoidale a 3,12 s.
+
+### La zona di avvicinamento del sollevamento
+
+Vicino al punto in cui il telaio viene agganciato o posato la velocita' non e'
+limitata dal motore ma dalla **precisione**: il gancio deve infilarsi nel
+telaio, e il telaio deve entrare nella vasca senza sbattere. Su quegli ultimi
+millimetri si va piano per scelta. Due parametri, nel foglio `Parametri`:
+
+| parametro | cosa contiene |
+|---|---|
+| `v_approach_sollevamento_mm_s` | la velocita' ridotta, in mm/s |
+| `d_approach_sollevamento_mm` | quanti millimetri di corsa si percorrono a quella velocita' |
+
+La regola ha due facce, una per verso, e in tutti e due i casi il tratto lento
+sta al capo **basso** della corsa — quello dove gancio e telaio si accoppiano:
+
+- il carroponte **scende** a posare: viaggia con la cinematica piena finche'
+  mancano `d_approach` millimetri al fondo; da li' e' gia' alla velocita' di
+  avvicinamento, la tiene costante, e frena solo all'ultimo, quando la frenata
+  diventa necessaria per fermarsi;
+- il carroponte **sale** a prelevare: parte piano e resta alla velocita' di
+  avvicinamento per i primi `d_approach` millimetri; solo dopo accelera verso
+  la velocita' massima e prosegue con la cinematica piena.
+
+Valgono **sia col telaio sia a gancio scarico** — la precisione che serve e'
+la stessa — e percio' sono due parametri e non quattro.
+
+I due valori vanno **insieme**: uno solo dei due viene rifiutato alla lettura,
+perche' una velocita' senza la distanza su cui vale non descrive niente.
+Lasciandoli **entrambi in bianco** il sollevamento resta il trapezio di sempre,
+e un file gia' compilato da' esattamente gli stessi tempi di prima. Anche una
+velocita' di avvicinamento piu' alta di quella massima di sollevamento viene
+rifiutata: non e' un avvicinamento, e' quasi sempre un refuso.
+
+> **Non valgono sulle zone di cambio quota.** Li' il giro verticale e' fatto di
+> quote di transito — si sale a una quota per traslare, si scende a un'altra
+> per posare — e rallentare a ognuna sarebbe tempo regalato.
+
+Quanto costa, col sollevamento del modello d'esempio (gancio scarico a 500
+mm/s e 800 mm/s^2, telaio a 300 mm/s e 500 mm/s^2) e una zona di 150 mm a
+80 mm/s:
+
+| corsa | a gancio scarico | col telaio |
+|---|---|---|
+| 900 mm, senza avvicinamento | 2,43 s | 3,60 s |
+| 900 mm, con avvicinamento | 3,96 s | 4,92 s |
+| 1 500 mm, senza avvicinamento | 3,63 s | 5,60 s |
+| 1 500 mm, con avvicinamento | 5,16 s | 6,92 s |
+
+Il sovrapprezzo non dipende dalla corsa — sono sempre gli stessi millimetri a
+velocita' ridotta — ma una mossa completa ne contiene piu' d'una, e il takt
+time deve contenerle tutte. E' esattamente il motivo per cui il parametro
+esiste invece di essere un margine messo a occhio.
 
 ### Cosa comprende la permanenza in vasca
 

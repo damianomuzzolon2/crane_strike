@@ -119,23 +119,27 @@ niente si scrive `0`, che e' una dichiarazione; una cella vuota no.
 
 ---
 
-## 3. `kinematics.py` — la fisica, 187 righe
+## 3. `kinematics.py` — la fisica, 413 righe
 
-Tre funzioni pure, nessuno stato, piu' due private che tengono in un posto
-solo i due conti che tutte e tre rifanno:
+Tre funzioni pure, nessuno stato, e sotto di loro **un motore solo**: la corsa
+spezzata in tratti ad accelerazione costante.
 
 | funzione | cosa da |
 | --- | --- |
 | `travel_time(distance, kin)` | tempo minimo con profilo trapezoidale o triangolare |
 | `position_profile(t, distance, kin)` | spazio percorso a `t`, **senza segno**, con `t` clampato in `[0, t_total]` |
 | `profile_breakpoints(distance, kin)` | gli spigoli della curva |
-| `_distanza_rampe(kin)` | la soglia fra trapezio e triangolo, `v²/(2a) + v²/(2d)` |
-| `_picco_triangolare(d, kin)` | la velocita' di picco quando la crociera non c'e' |
+| `_tratti(d, kin)` | il profilo completo, tratto per tratto — **con cache** |
+| `_limiti(d, kin)` | la corsa spezzata nei pezzi a limite di velocita' costante |
+| `_velocita_di_confine(limiti, kin)` | con che velocita' si attraversa ogni confine |
+| `_distanza_rampe(v_cap, v_in, v_out, kin)` | la soglia fra trapezio e triangolo, per un pezzo |
+| `_picco_triangolare(lung, v_in, v_out, kin)` | la velocita' di picco quando la crociera non c'e' |
+| `_tratti_di_pezzo(...)` | un pezzo risolto come trapezio con entrata e uscita assegnate |
 
-`Kinematics` porta `v_max`, `a_max` e `d_max`. **La decelerazione e' un numero
-a se'**, facoltativo: `None` significa "frena come accelera", e la proprieta'
-`decel` e' l'unico punto in cui quel `None` diventa un valore. Tutto il resto
-del modulo legge `decel`, mai `a_max`, per la frenata — cosi' il caso
+`Kinematics` porta `v_max`, `a_max`, `d_max` e `approach`. **La decelerazione
+e' un numero a se'**, facoltativo: `None` significa "frena come accelera", e la
+proprieta' `decel` e' l'unico punto in cui quel `None` diventa un valore. Tutto
+il resto del modulo legge `decel`, mai `a_max`, per la frenata — cosi' il caso
 simmetrico non e' un ramo di codice parallelo che prima o poi diverge.
 
 Con rampe diverse cadono due semplificazioni che il modulo faceva:
@@ -146,6 +150,33 @@ Con rampe diverse cadono due semplificazioni che il modulo faceva:
   finisce l'accelerazione. `profile_breakpoints` lo restituisce li': prenderlo
   a `t_total/2` lascerebbe il vero spigolo fra due campioni e farebbe decadere
   in silenzio la garanzia sull'errore descritta sotto.
+
+### La zona di avvicinamento
+
+`Approach(speed, distance, at_end)` e' il **limite di velocita' in funzione
+della posizione** che il sollevamento ha vicino al punto di presa o deposito:
+`distance` millimetri percorsi a `speed`, al capo BASSO della corsa. `at_end`
+dice a quale estremo cade — in fondo scendendo a posare, in testa salendo a
+prelevare — ed e' una proprieta' del **movimento**, non del carroponte: la
+mette `model.ProblemData.kin_avvicinamento`, che sa in che verso va il gancio.
+Si costruisce solo attraverso `Kinematics.avvicinandosi(v, d, scendendo=...)`.
+
+Con una zona di avvicinamento il profilo non e' piu' *un* trapezio ma una
+successione di trapezi, saldati in un punto che **non e' un arresto**. Per non
+avere due motori di calcolo destinati a divergere, il modulo ne ha uno solo e
+il caso di sempre e' quel motore con un pezzo soltanto — con formule identiche,
+numero per numero, a quelle di prima.
+
+L'algoritmo sta in `_velocita_di_confine`: tre passate (limite del confine,
+accelerazione in avanti, frenata all'indietro) che fissano la velocita' di
+attraversamento di ogni confine. La terza e' quella che **assorbe tutti i casi
+degeneri** — zona piu' corta del proprio spazio di frenata, corsa piu' corta
+della zona — senza un solo ramo dedicato.
+
+`_tratti` e' decorata con `lru_cache`: il verificatore campiona la stessa
+tratta centinaia di volte, e le distanze di una linea sono poche e sempre le
+stesse. E' per questo che `Kinematics` e `Approach` **devono** restare frozen:
+sono chiavi di cache.
 
 Due dettagli che il resto del progetto sfrutta:
 
@@ -181,7 +212,8 @@ ZonaCambioQuota position, intermediate1, intermediate2, corsa_totale
 LiftPhase       name, duration, z_start, z_end, kin, loaded,
                 x_start, x_end, kin_x
 ProblemData     tutto il problema
-Segment         kind, t_start, t_end, x_start, x_end, kin, move
+Segment         kind, t_start, t_end, x_start, x_end, kin, move,
+                sale, kin_z
 SostaIntermedia stazione, secondi                    (dove il carro si ferma
                                                     durante un rientro, e per
                                                     quanto)
@@ -219,6 +251,14 @@ delle tratte di `tratte_rientro` e' la salita (la 1) e quale la discesa (la 3);
 dedurlo dopo dai tratti vicini e' ambiguo quando una delle due corse manca. Lo
 legge `plotting.corse_verticali` per le frecce del ciclogramma.
 
+`kin_z` e' valorizzato anch'esso solo per `lift_empty`, ed e' la cinematica
+**verticale** del tratto — orientata nel verso giusto, zona di avvicinamento
+compresa. `kin` resta quella ORIZZONTALE, e su questi tratti e' `None` perche'
+lungo la rotaia il carroponte sta fermo. Tenerle separate non e' pignoleria:
+`verify.Trajectory.max_accel` conta i segmenti con `kin` non nullo per il
+limite d'errore sulle posizioni di rotaia, e una corsa del gancio li' dentro
+allargherebbe quel limite per un movimento che non lo riguarda.
+
 ### 4.2 Le durate: **un solo punto in cui sono definite**
 
 E' l'invariante centrale del progetto. Tutto — modello CP-SAT, ricostruzione
@@ -235,6 +275,9 @@ horizontal_loaded_seconds(k)
 loaded_leg_seconds(k)       # presa(k) + traslazione + rilascio(k+1)
 tratte_rientro(data, a, b)  # il rientro a vuoto: DA DOVE A DOVE, e quanto dura
 empty_leg_seconds(a, b)     # = somma delle durate delle sue tratte
+empty_lift_seconds(station, scendendo=...)   # UNA corsa verticale a vuoto
+kin_avvicinamento(kin, station, scendendo=...)  # la zona di avvicinamento, orientata
+kin_lift_empty_at(station, scendendo=...)    # la stessa, per il gancio scarico
 serve_alto(a, b)            # se quel rientro deve passare alto
 horizontal_empty_seconds(x, y)  # la singola tratta orizzontale
 bath_extra_seconds(station)
@@ -249,6 +292,20 @@ totale, alla simulazione serve sapere dove sta il gancio istante per istante, e
 derivando l'uno dall'altre i due usi non possono divergere. `tratte_rientro` fa
 la stessa cosa per il rientro a vuoto, e ne discendono tutte e tre le cose che
 se ne devono sapere: quanto dura, che aspetto ha, dove passa e quando (§5.3).
+
+**Ogni fase verticale passa da `kin_avvicinamento`.** E' l'unico punto in cui
+`v_approach_lift` e `d_approach_lift` (§3) entrano nel calcolo, ed e' passaggio
+obbligato per durata, disegno e simulazione insieme: una fase che non ci
+passasse durerebbe una cosa e se ne disegnerebbe un'altra. Il metodo esclude le
+stazioni servite da una zona di cambio quota (§4.5), dove le quote intermedie
+sono di transito e non punti di presa.
+
+**`empty_lift_seconds` vuole il verso.** Fino a quando il profilo era un
+trapezio, salire e scendere della stessa corsa durava esattamente uguale. Con
+una zona di avvicinamento la zona lenta cade una volta in coda e una volta in
+testa, e su un carroponte che frena diversamente da come accelera i due conti
+danno numeri diversi. Il parametro `scendendo` e' obbligatorio e nominato: un
+default avrebbe lasciato passare il verso sbagliato in silenzio.
 
 **`approach_position` contro `station_position`.** Il punto di APPROCCIO e' dove
 il carroponte si trova prima di cominciare la presa e dopo aver finito il
@@ -295,6 +352,23 @@ dwell_max = T_(spec.dwell_max) - extra
 
 Presa e rilascio **non contengono mai** corse a vuoto del gancio: quelle
 avvengono fra due mosse, e le paga il rientro.
+
+**La zona di avvicinamento.** `ProblemData.v_approach_lift` e
+`d_approach_lift` sono i millimetri attorno al punto di presa o deposito che si
+percorrono a velocita' ridotta, e quella velocita'. Sono facoltativi e vanno
+insieme (`__post_init__` rifiuta uno solo dei due) e **non** sono sdoppiati fra
+vuoto e carico: a imporre la precisione e' il punto di accoppiamento fra gancio
+e telaio, non il carico appeso. La regola che ne discende ha due facce, e la
+zona lenta sta sempre al capo BASSO della corsa:
+
+- **scendendo** a posare: si viaggia normalmente finche' mancano `d_approach`
+  millimetri, li' si e' gia' alla velocita' di avvicinamento, la si tiene, e si
+  frena solo all'ultimo;
+- **salendo** a prelevare: si parte piano e si resta a quella velocita' per i
+  primi `d_approach` millimetri, poi si accelera come sempre.
+
+Il verso lo mette `kin_avvicinamento` (§4.2), che esclude anche le stazioni
+servite da una zona di cambio quota (§4.5).
 
 **Il gancio basso e' una proprieta' della VASCA** (`Tank.gancio_basso`, default
 `True`), non della linea. Una vasca a `False` e' un OSTACOLO: sopra di lei il
@@ -378,6 +452,12 @@ zona piu' di quanto gia' non lo sia il punto di cambio quota.
 La corsa verticale della vasca servita deve essere `0`: li' la corsa la
 definisce la zona (`corsa_telaio = intermediate2 - intermediate1`), e dichiararla
 due volte vorrebbe dire che uno dei due valori viene ignorato in silenzio.
+
+**Niente zona di avvicinamento qui.** Su queste due tappe il giro verticale e'
+fatto di quote di TRANSITO — si sale a una quota per traslare, si scende a
+un'altra per posare — e rallentare a ognuna sarebbe tempo regalato su quote
+dove non c'e' niente da accoppiare con precisione. E' l'unica esclusione, e sta
+in una riga di `kin_avvicinamento`.
 
 ---
 

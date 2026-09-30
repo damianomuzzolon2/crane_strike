@@ -372,6 +372,21 @@ class ProblemData:
     # Corsa e sgocciolamento no: cambiano da vasca a vasca e si dichiarano li'.
     kin_lift_empty: Optional[Kinematics] = None  # sollevamento a gancio scarico
     kin_lift_loaded: Optional[Kinematics] = None  # sollevamento col telaio
+    # ZONA DI AVVICINAMENTO del sollevamento (vedi kinematics.Approach). Sono
+    # i millimetri di corsa attorno al punto in cui il telaio viene preso o
+    # posato che si percorrono a velocita' ridotta -- scendendo ci si arriva
+    # gia' piano, salendo si riparte piano -- e la velocita' con cui si
+    # percorrono. Valgono sia col telaio sia a gancio scarico: la precisione
+    # che serve e' la stessa, ed e' il punto basso a imporla, non il carico.
+    #
+    # Vanno insieme: o tutte e due, o nessuna delle due, e allora il
+    # sollevamento resta il trapezio di sempre.
+    #
+    # NON si applicano alle stazioni servite da una zona di CAMBIO QUOTA: li'
+    # il giro verticale e' fatto di quote di transito, non di punti di presa,
+    # e rallentare a ognuna sarebbe tempo regalato.
+    v_approach_lift: Optional[float] = None  # [mm/s]
+    d_approach_lift: Optional[float] = None  # [mm]
     # NOTA: la traslazione a gancio basso NON e' piu' un parametro della linea.
     # E' una proprieta' di ogni VASCA (`Tank.gancio_basso`), perche' un
     # impianto ha di solito qualche vasca che il gancio calato non puo'
@@ -457,6 +472,29 @@ class ProblemData:
             raise ValueError("takt_min > takt_max")
         if self.engage_time < 0 or self.disengage_time < 0:
             raise ValueError("engage_time e disengage_time devono essere >= 0")
+        # La zona di avvicinamento e' fatta di due numeri, e uno solo dei due
+        # non descrive niente: meglio fermarsi che tirare a indovinare l'altro
+        if (self.v_approach_lift is None) != (self.d_approach_lift is None):
+            raise ValueError(
+                "velocita' e distanza di avvicinamento del sollevamento vanno "
+                "dichiarate insieme: o tutte e due, o nessuna delle due"
+            )
+        if self.v_approach_lift is not None:
+            if self.v_approach_lift <= 0 or self.d_approach_lift <= 0:
+                raise ValueError(
+                    "velocita' e distanza di avvicinamento devono essere > 0"
+                )
+            for nome, kin in (
+                ("a gancio scarico", self.kin_lift_empty),
+                ("col telaio", self.kin_lift_loaded),
+            ):
+                if kin is not None and self.v_approach_lift > kin.v_max:
+                    raise ValueError(
+                        f"la velocita' di avvicinamento "
+                        f"({self.v_approach_lift} mm/s) supera la velocita' "
+                        f"massima di sollevamento {nome} ({kin.v_max} mm/s): "
+                        f"non e' un avvicinamento, e' un refuso"
+                    )
         for t in self.tanks.values():
             if t.lift_height < 0:
                 raise ValueError(
@@ -840,6 +878,31 @@ class ProblemData:
             return 0.0
         return _travel_time_seconds(height, kin)
 
+    def kin_avvicinamento(
+        self, kin: Optional[Kinematics], station_idx: int, *, scendendo: bool
+    ) -> Optional[Kinematics]:
+        """La cinematica di sollevamento `kin` con la zona di avvicinamento
+        orientata nel verso del movimento, dove quella zona si applica.
+
+        E' L'UNICO punto in cui la zona entra nel calcolo, ed e' passaggio
+        obbligato per tutti: durata nel ciclogramma, profilo nel disegno,
+        profilo nella simulazione. Una fase verticale che non passasse di qui
+        durerebbe una cosa e se ne disegnerebbe un'altra.
+
+        `scendendo` dice dove cade la zona lenta: in fondo alla corsa se il
+        gancio scende a posare, in testa se sale a prelevare. E' sempre il
+        capo BASSO -- il punto di accoppiamento fra telaio e gancio -- perche'
+        e' quello, e non il verso, a imporre la precisione.
+
+        Le stazioni servite da una zona di CAMBIO QUOTA restano fuori: il loro
+        giro verticale e' fatto di quote di transito, e li' andare piano non
+        comprerebbe niente."""
+        if kin is None or self.zona_cambio_quota(station_idx) is not None:
+            return kin
+        return kin.avvicinandosi(
+            self.v_approach_lift, self.d_approach_lift, scendendo=scendendo
+        )
+
     def drain_time_at(self, station_idx: int) -> float:
         """Sgocciolamento [s] sopra la vasca della tappa data."""
         return self.tanks[self.route[station_idx].tank_id].drain_time
@@ -861,14 +924,17 @@ class ProblemData:
         if zona is not None:
             return self._pick_phases_cambio_quota(station_idx, zona)
         h = self.lift_height_at(station_idx)
+        # il telaio parte dal fondo: la zona di avvicinamento sta in TESTA alla
+        # corsa, e si stacca dal bagno piano
+        kin = self.kin_avvicinamento(self.kin_lift_loaded, station_idx, scendendo=False)
         return [
             LiftPhase("aggancio", self.engage_time, -h, -h, None, False),
             LiftPhase(
                 "sollevamento del telaio",
-                self._lift_seconds(h, self.kin_lift_loaded),
+                self._lift_seconds(h, kin),
                 -h,
                 0.0,
-                self.kin_lift_loaded,
+                kin,
                 True,
             ),
             LiftPhase(
@@ -886,13 +952,16 @@ class ProblemData:
         if zona is not None:
             return self._release_phases_cambio_quota(station_idx, zona)
         h = self.lift_height_at(station_idx)
+        # il telaio arriva in fondo: la zona di avvicinamento sta alla FINE
+        # della corsa, e l'ultimo tratto verso il bagno si fa piano
+        kin = self.kin_avvicinamento(self.kin_lift_loaded, station_idx, scendendo=True)
         return [
             LiftPhase(
                 "immersione del telaio",
-                self._lift_seconds(h, self.kin_lift_loaded),
+                self._lift_seconds(h, kin),
                 0.0,
                 -h,
-                self.kin_lift_loaded,
+                kin,
                 True,
             ),
             LiftPhase("sgancio", self.disengage_time, -h, -h, None, True),
@@ -1098,10 +1167,28 @@ class ProblemData:
         cade nell'intervallo, e li' e' gia' contato."""
         return self.disengage_time + self.engage_time
 
-    def empty_lift_seconds(self, station_idx: int) -> float:
+    def kin_lift_empty_at(
+        self, station_idx: int, *, scendendo: bool
+    ) -> Optional[Kinematics]:
+        """La cinematica del gancio SCARICO per la corsa verticale alla
+        stazione data, nel verso dato: la stessa di sempre, piu' la zona di
+        avvicinamento dove si applica."""
+        return self.kin_avvicinamento(
+            self.kin_lift_empty, station_idx, scendendo=scendendo
+        )
+
+    def empty_lift_seconds(self, station_idx: int, *, scendendo: bool) -> float:
         """Durata [s] di UNA corsa verticale a gancio scarico, alla stazione
-        data: quella che il gancio fa per risalire dopo lo sgancio, e di nuovo
-        per ricalare prima dell'aggancio.
+        data: quella che il gancio fa per risalire dopo lo sgancio
+        (`scendendo=False`), e di nuovo per ricalare prima dell'aggancio
+        (`scendendo=True`).
+
+        Il verso e' un argomento e non un dettaglio: con una zona di
+        avvicinamento le due corse non durano piu' uguale, perche' la zona
+        lenta cade una volta in coda e una volta in testa, e su un carroponte
+        che frena diversamente da come accelera i due conti danno numeri
+        diversi. Senza zona di avvicinamento danno lo stesso numero, e il
+        verso non cambia niente.
 
         Non e' detto che qualcuno la faccia: dipende dal rientro, e lo decide
         `serve_alto`. Qui c'e' solo quanto costerebbe.
@@ -1110,7 +1197,8 @@ class ProblemData:
         quella della vasca ma l'INTERA corsa del carroponte: li' il gancio
         arriva fino in fondo, ed e' da li' che deve ripartire."""
         return self._lift_seconds(
-            self.corsa_verticale(station_idx), self.kin_lift_empty
+            self.corsa_verticale(station_idx),
+            self.kin_lift_empty_at(station_idx, scendendo=scendendo),
         )
 
     def serve_alto(self, station_a: int, station_b: int) -> bool:
@@ -1264,9 +1352,12 @@ def tratte_rientro(
     sv_b = data.svincolo_verso(stazione_b, pos_a)
     return [
         (pos_a, sv_a, data.horizontal_empty_seconds(pos_a, sv_a)),
-        (sv_a, sv_a, data.empty_lift_seconds(stazione_a)),
+        # dalla stazione di partenza il gancio SALE sullo svincolo, su quella
+        # di arrivo SCENDE: i due versi non durano uguale appena c'e' una zona
+        # di avvicinamento
+        (sv_a, sv_a, data.empty_lift_seconds(stazione_a, scendendo=False)),
         (sv_a, sv_b, data.horizontal_empty_seconds(sv_a, sv_b)),
-        (sv_b, sv_b, data.empty_lift_seconds(stazione_b)),
+        (sv_b, sv_b, data.empty_lift_seconds(stazione_b, scendendo=True)),
         (sv_b, pos_b, data.horizontal_empty_seconds(sv_b, pos_b)),
     ]
 
@@ -1529,6 +1620,15 @@ class Segment:
     # tratti vicini ha casi ambigui: se una delle due corse manca perche' la
     # vasca non ne ha, quella che resta non dice da sola da che parte va.
     sale: Optional[bool] = None
+    # Per i soli tratti 'lift_empty': con quale cinematica il gancio percorre
+    # la corsa VERTICALE. `kin` qui sopra e' quella orizzontale, e su questi
+    # tratti e' None perche' lungo la rotaia il carroponte sta fermo -- ma
+    # verticalmente si muove eccome, e il profilo di quel movimento dipende
+    # dal verso (vedi `empty_lift_seconds`). Chi disegna la quota deve leggerlo
+    # da qui: ricavarlo da `data.kin_lift_empty` perderebbe la zona di
+    # avvicinamento, e la simulazione mostrerebbe una corsa che dura meno di
+    # quella che il ciclogramma ha pagato.
+    kin_z: Optional[Kinematics] = None
 
 
 @dataclass
@@ -3036,9 +3136,22 @@ def _segmenti_rientro(
         # movimento, e la simulazione deve poterlo mostrare per quello che e'.
         # Il verso lo dice la posizione nella sequenza di `tratte_rientro`:
         # la tratta 1 sale sullo svincolo di partenza, la 3 scende su quello
-        # di arrivo.
+        # di arrivo. Lo stesso verso sceglie la cinematica verticale, che con
+        # una zona di avvicinamento non e' la stessa nei due sensi.
+        sale = i == 1
         segs.append(
-            Segment("lift_empty", t, fine, xa, xb, None, sale=(i == 1))
+            Segment(
+                "lift_empty",
+                t,
+                fine,
+                xa,
+                xb,
+                None,
+                sale=sale,
+                kin_z=data.kin_lift_empty_at(
+                    stazione_a if sale else stazione_b, scendendo=not sale
+                ),
+            )
             if xa == xb
             else Segment("empty", t, fine, xa, xb, data.kin_empty)
         )

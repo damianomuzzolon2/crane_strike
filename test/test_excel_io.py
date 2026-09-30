@@ -494,7 +494,7 @@ def test_sollevamento_incoerente():
         wb.save(p)
         cfg = leggi_problema(p)
         check(
-            cfg.data.empty_lift_seconds(1) == 0.0,
+            cfg.data.empty_lift_seconds(1, scendendo=True) == 0.0,
             "senza sollevamento a vuoto la linea si legge lo stesso",
         )
         # ...ma dichiarando una vasca OSTACOLO il gancio deve salire e
@@ -1297,6 +1297,171 @@ def test_decelerazione_separata():
         os.unlink(p)
 
 
+def test_avvicinamento_sollevamento():
+    """La zona di avvicinamento: si legge, costa tempo, e sa da che parte sta."""
+    print("\n[29] zona di avvicinamento del sollevamento")
+    import dataclasses
+
+    from openpyxl import load_workbook
+
+    def scrivi_parametri(percorso, valori: dict):
+        wb = load_workbook(percorso)
+        ws = wb[FOGLIO_PARAMETRI]
+        for riga in range(2, ws.max_row + 1):
+            nome = ws.cell(riga, 1).value
+            if nome in valori:
+                ws.cell(riga, 2).value = valori[nome]
+        wb.save(percorso)
+
+    p = modello_temporaneo()
+    try:
+        cfg = leggi_problema(p)
+        d = cfg.data
+        check(
+            d.v_approach_lift == 80 and d.d_approach_lift == 150,
+            f"i due parametri si leggono ({d.v_approach_lift} mm/s per "
+            f"{d.d_approach_lift} mm)",
+        )
+
+        # Da che parte sta la zona lo dice il MOVIMENTO, non il file: salendo a
+        # prelevare sta in testa alla corsa, scendendo a posare sta in fondo.
+        salita = [f for f in d.pick_phases(1) if f.kin is not None][0]
+        discesa = [f for f in d.release_phases(1) if f.kin is not None][0]
+        check(
+            salita.kin.approach is not None
+            and not salita.kin.approach.at_end
+            and discesa.kin.approach is not None
+            and discesa.kin.approach.at_end,
+            "salendo la zona e' in testa alla corsa, scendendo e' in fondo",
+        )
+        check(
+            salita.kin.approach.speed == 80
+            and salita.kin.approach.distance == 150,
+            "e porta i due numeri dichiarati nel file",
+        )
+
+        # La leva vera: senza i due parametri le stesse corse durano meno.
+        senza = dataclasses.replace(
+            d, v_approach_lift=None, d_approach_lift=None
+        )
+        check(
+            d.pick_time_at(1) > senza.pick_time_at(1) + 1e-6
+            and d.release_time_at(1) > senza.release_time_at(1) + 1e-6,
+            f"presa e rilascio si allungano (presa {senza.pick_time_at(1):.3f} s "
+            f"-> {d.pick_time_at(1):.3f} s)",
+        )
+
+        # Salita e discesa a gancio scarico smettono di durare uguale appena
+        # la frenata e' diversa dall'accelerazione: la zona lenta cade una
+        # volta in coda e una volta in testa, e i due conti non si specchiano
+        # piu'. (Nel modello d'esempio le due sono uguali, e infatti li' i due
+        # versi coincidono: e' il caso di sopra.)
+        asimm = dataclasses.replace(
+            d,
+            kin_lift_empty=dataclasses.replace(d.kin_lift_empty, d_max=2000),
+        )
+        su = asimm.empty_lift_seconds(1, scendendo=False)
+        giu = asimm.empty_lift_seconds(1, scendendo=True)
+        check(
+            abs(su - giu) > 1e-6,
+            f"frenando diversamente, a vuoto salita e discesa si separano "
+            f"({su:.3f} s contro {giu:.3f} s)",
+        )
+        check(
+            senza.empty_lift_seconds(1, scendendo=False)
+            == senza.empty_lift_seconds(1, scendendo=True),
+            "senza avvicinamento tornano identiche, e il verso non conta",
+        )
+
+        # Round trip: i due numeri sopravvivono alla scrittura.
+        fd, rifatto = tempfile.mkstemp(suffix=".xlsx")
+        os.close(fd)
+        try:
+            from excel_io import scrivi_linea
+
+            scrivi_linea(rifatto, cfg)
+            check(
+                leggi_problema(rifatto).data == d,
+                "e la linea riscritta e' identica a quella letta",
+            )
+        finally:
+            os.unlink(rifatto)
+    finally:
+        os.unlink(p)
+
+    # Su una stazione servita da una zona di cambio quota la zona lenta non
+    # c'e': li' le quote sono di transito, non punti di presa.
+    p = modello_temporaneo()
+    try:
+        from excel_io import scrivi_linea
+        from model import ZonaCambioQuota
+
+        cfg = leggi_problema(p)
+        con = dataclasses.replace(
+            cfg,
+            data=dataclasses.replace(
+                cfg.data, cambio_quota_carico=ZonaCambioQuota(1200, 350, 1650, 2400)
+            ),
+        )
+        d = con.data
+        check(
+            all(f.kin is None or f.kin.approach is None for f in d.pick_phases(0)),
+            "sul carico con cambio quota nessuna fase rallenta",
+        )
+        check(
+            any(
+                f.kin is not None and f.kin.approach is not None
+                for f in d.pick_phases(1)
+            ),
+            "mentre sulla vasca accanto, che zona non ne ha, la zona c'e'",
+        )
+    finally:
+        os.unlink(p)
+
+    # I due numeri vanno insieme, e non possono essere assurdi.
+    for valori, atteso in (
+        ({"d_approach_sollevamento_mm": None}, "insieme"),
+        ({"v_approach_sollevamento_mm_s": None}, "insieme"),
+        ({"v_approach_sollevamento_mm_s": 0}, "> 0"),
+        ({"v_approach_sollevamento_mm_s": 9000}, "supera la velocita'"),
+    ):
+        p = modello_temporaneo()
+        try:
+            scrivi_parametri(p, valori)
+            msg = errore_leggendo(p)
+            check(
+                atteso in msg,
+                f"{list(valori.items())[0]} respinto: \"{msg[:70]}\"",
+            )
+        finally:
+            os.unlink(p)
+
+    # Celle vuote: tutto come prima che il parametro esistesse.
+    p = modello_temporaneo()
+    try:
+        scrivi_parametri(
+            p,
+            {
+                "v_approach_sollevamento_mm_s": None,
+                "d_approach_sollevamento_mm": None,
+            },
+        )
+        d = leggi_problema(p).data
+        check(
+            d.v_approach_lift is None and d.d_approach_lift is None,
+            "lasciati vuoti, il sollevamento resta il trapezio di sempre",
+        )
+        check(
+            all(
+                f.kin is None or f.kin.approach is None
+                for f in d.pick_phases(1) + d.release_phases(1)
+            ),
+            "e nessuna fase verticale porta una zona di avvicinamento",
+        )
+    finally:
+        os.unlink(p)
+
+
 def main():
     print("=" * 72)
     print("TEST DI LETTURA E SCRITTURA EXCEL (richiede openpyxl, non OR-Tools)")
@@ -1329,6 +1494,7 @@ def main():
     test_ordine_svincoli()
     test_misure_di_disegno()
     test_decelerazione_separata()
+    test_avvicinamento_sollevamento()
     print("\n" + "=" * 72)
     print(f"RISULTATO: {_n_pass} ok, {_n_fail} falliti")
     print("=" * 72)

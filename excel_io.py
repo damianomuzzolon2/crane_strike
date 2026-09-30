@@ -126,6 +126,20 @@ _PARAMETRI = {
         "decelerazione max di sollevamento col telaio; vuoto = come "
         "l'accelerazione",
     ),
+    "v_approach_sollevamento_mm_s": (
+        "mm/s",
+        False,
+        None,
+        "velocita' di avvicinamento del sollevamento, vicino al punto di "
+        "presa/deposito; vuoto = nessun avvicinamento",
+    ),
+    "d_approach_sollevamento_mm": (
+        "mm",
+        False,
+        None,
+        "quanta corsa si percorre alla velocita' di avvicinamento; va "
+        "dichiarata insieme alla velocita'",
+    ),
     "tempo_aggancio_s": (
         "s",
         False,
@@ -407,6 +421,8 @@ def leggi_problema(percorso_file: str) -> Configurazione:
 
             kin_lift_empty=_kin_sollevamento("vuoto"),
             kin_lift_loaded=_kin_sollevamento("carico"),
+            v_approach_lift=par.get("v_approach_sollevamento_mm_s"),
+            d_approach_lift=par.get("d_approach_sollevamento_mm"),
             engage_time=par["tempo_aggancio_s"],
             disengage_time=par["tempo_sgancio_s"],
 
@@ -1079,6 +1095,8 @@ def _righe_esempio():
         "v_max_sollevamento_carico_mm_s": 300,
         "a_max_sollevamento_carico_mm_s2": 500,
         "d_max_sollevamento_carico_mm_s2": 500,
+        "v_approach_sollevamento_mm_s": 80,
+        "d_approach_sollevamento_mm": 150,
         "tempo_aggancio_s": 2,
         "tempo_sgancio_s": 1,
         "risoluzione_tick_per_s": 100,
@@ -1138,6 +1156,8 @@ def _righe_da_configurazione(cfg: Configurazione):
         "v_max_sollevamento_carico_mm_s": cinematica(d.kin_lift_loaded, "v_max"),
         "a_max_sollevamento_carico_mm_s2": cinematica(d.kin_lift_loaded, "a_max"),
         "d_max_sollevamento_carico_mm_s2": cinematica(d.kin_lift_loaded, "d_max"),
+        "v_approach_sollevamento_mm_s": d.v_approach_lift,
+        "d_approach_sollevamento_mm": d.d_approach_lift,
         "tempo_aggancio_s": d.engage_time,
         "tempo_sgancio_s": d.disengage_time,
         "risoluzione_tick_per_s": d.time_scale,
@@ -1395,6 +1415,41 @@ def _aggiungi_fogli_linea(
         (
             "                  con l'accelerazione, com'era prima che questo "
             "parametro esistesse.",
+            None,
+        ),
+        (
+            "  v_approach_sollevamento_mm_s e d_approach_sollevamento_mm: la "
+            "zona di AVVICINAMENTO.",
+            None,
+        ),
+        (
+            "                  Sono gli ultimi millimetri di corsa verso il "
+            "punto in cui il telaio",
+            None,
+        ),
+        (
+            "                  viene preso o posato, e la velocita' ridotta "
+            "con cui si percorrono.",
+            None,
+        ),
+        (
+            "                  Scendendo il gancio ci arriva gia' a quella "
+            "velocita' e la tiene fino",
+            None,
+        ),
+        (
+            "                  all'ultima frenata; salendo riparte piano e "
+            "accelera solo dopo.",
+            None,
+        ),
+        (
+            "                  Valgono col telaio e a gancio scarico, e NON "
+            "sulle stazioni servite",
+            None,
+        ),
+        (
+            "                  da una zona di cambio quota. O tutte e due, o "
+            "nessuna delle due.",
             None,
         ),
         ("", None),
@@ -2304,14 +2359,18 @@ def scrivi_risultati(
             # deposto risale, e ancora immerso mentre quello che verra' a
             # riprenderlo ricala. La permanenza e' la differenza fra i due, ed
             # e' su quella che valgono i limiti di processo.
-            a_vuoto = data.empty_lift_seconds(s)
+            # due corse diverse, non due volte la stessa: dopo lo sgancio il
+            # gancio SALE, prima dell'aggancio SCENDE, e con una zona di
+            # avvicinamento i due versi non durano uguale
+            risalita = data.empty_lift_seconds(s, scendendo=False)
+            discesa = data.empty_lift_seconds(s, scendendo=True)
             arrivo = (
                 at[s - 1]
                 + data.loaded_leg_seconds(s - 1)
                 - data.disengage_time
-                - a_vuoto
+                - risalita
             )
-            partenza = at[s] + a_vuoto + data.engage_time
+            partenza = at[s] + discesa + data.engage_time
             permanenza = partenza - arrivo
         else:
             arrivo = at[s - 1] + data.loaded_leg_seconds(s - 1) if at else 0.0

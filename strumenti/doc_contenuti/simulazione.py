@@ -401,6 +401,16 @@ STATO = [
      "riferimento e poi si interpola in millimetri. La frazione resta il "
      "riferimento perche' e' quella che si DISEGNA: due quote diverse su corse "
      "diverse possono benissimo essere tutte e due 'in fondo'."),
+    ("q",
+     "LA CINEMATICA VERTICALE SI LEGGE DAL TRATTO. Sui tratti `lift_empty` il "
+     "profilo non viene da data.kin_lift_empty ma da s.kin_z, che il tratto "
+     "porta con se'. La differenza si vede solo quando la linea dichiara una "
+     "zona di avvicinamento: il campo kin_z la contiene gia' orientata nel "
+     "verso giusto -- lenta in fondo se il gancio scende, lenta in testa se "
+     "sale -- ed e' la stessa cinematica con cui il ciclogramma ha calcolato "
+     "la durata del tratto. Prendere il dato globale disegnerebbe una corsa "
+     "piu' veloce di quella pagata, e il gancio arriverebbe in fondo prima "
+     "della fine del tratto, per poi restare fermo ad aspettare."),
 
     ("h3", "Le tre ricerche di postazione"),
     ("c", "simulazione.Simulazione._vasca_a"),

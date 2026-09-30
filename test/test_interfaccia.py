@@ -264,8 +264,12 @@ def test_calcolo_automatico(percorso_linea):
         # due volte il conto della permanenza: prima contandoci le corse a
         # vuoto del gancio (che il pezzo passa immerso), poi togliendole del
         # tutto, perche' il gancio scarico trasla basso e non le fa.
+        # Poi e' risalito a 115.29 con la zona di avvicinamento del
+        # sollevamento, che il modello d'esempio dichiara: le corse verticali
+        # perdono circa un secondo e mezzo l'una, e il minimo dichiarato non
+        # basta piu' a contenerle -- non e' quindi piu' lui a decidere il takt.
         check(
-            len(app.dati.zones) == 2 and abs(app.soluzione.T - 110.00) < 1.0,
+            len(app.dati.zones) == 2 and abs(app.soluzione.T - 115.29) < 1.0,
             f"{len(app.dati.zones)} carroponti, T={app.soluzione.T:.2f}s "
             f"(come da riga di comando)",
         )

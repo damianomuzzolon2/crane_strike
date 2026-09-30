@@ -59,6 +59,23 @@ LETTURA = [
      "doverlo cambiare -- una linea che esce INFEASIBLE o un takt time troppo "
      "alto. E' la forma che dovrebbe avere ogni descrizione di parametro: non "
      "cosa significa, ma quando toccarlo."),
+    ("p",
+     "Le cinematiche seguono uno schema regolare: v_max, a_max e d_max, "
+     "sdoppiati fra vuoto e carico, per la traslazione e per il sollevamento. "
+     "Le due eccezioni sono v_approach_sollevamento_mm_s e "
+     "d_approach_sollevamento_mm, che NON sono sdoppiate: la zona di "
+     "avvicinamento e' una sola, e vale sia col telaio sia a gancio scarico. "
+     "Non e' una semplificazione -- la precisione che serve avvicinandosi al "
+     "telaio e' la stessa che serve avvicinandosi col telaio, perche' a "
+     "imporla e' il punto di accoppiamento e non il carico appeso."),
+    ("q",
+     "DUE PARAMETRI FACOLTATIVI CHE NON SONO INDIPENDENTI. La tabella sa dire "
+     "'obbligatorio' o 'facoltativo' di un parametro alla volta, e non sa "
+     "esprimere 'o tutti e due o nessuno dei due'. Il controllo sta quindi "
+     "piu' avanti, in ProblemData.__post_init__, ed e' il caso in cui la "
+     "regola di dichiarare tutto qui non basta: una velocita' di "
+     "avvicinamento senza la distanza su cui vale non descrive niente, e "
+     "indovinare la distanza mancante sarebbe peggio che fermarsi."),
 
     ("h3", "I nomi vecchi, e perche' sono ancora qui"),
     ("c", "excel_io", "_INTERI = ", "@dataclass"),

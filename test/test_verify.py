@@ -1504,7 +1504,10 @@ def test_ostacolo_allo_scarico():
         data.serve_alto(ultima, 0)
         and tratte[0][:2] == (15000, 14100)
         and verticali
-        and verticali[0] == (14100, data.empty_lift_seconds(ultima)),
+        and verticali[0] == (
+            14100,
+            data.empty_lift_seconds(ultima, scendendo=False),
+        ),
         f"lasciando lo scarico il gancio va allo svincolo e sale li', non sul "
         f"posto ({[(round(da), round(a)) for da, a, _ in tratte]})",
     )

@@ -718,7 +718,12 @@ class Simulazione:
                 etichetta = (
                     "risalita del gancio" if f1 < f0 else "discesa del gancio"
                 )
-                kin = d.kin_lift_empty
+                # dal TRATTO, non da `d.kin_lift_empty`: il tratto porta la
+                # cinematica gia' orientata nel verso giusto, ed e' quella con
+                # cui il ciclogramma ha calcolato la durata. Prenderla da
+                # `data` perderebbe la zona di avvicinamento, e il gancio
+                # arriverebbe in fondo prima della fine del tratto.
+                kin = s.kin_z if s.kin_z is not None else d.kin_lift_empty
             else:
                 etichetta = "rientro a vuoto" if s.kind == "empty" else "attesa"
                 kin = None

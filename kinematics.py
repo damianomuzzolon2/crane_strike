@@ -13,14 +13,62 @@ l'accelerazione anche per frenare sbagliava ogni trasporto di quanto le due
 grandezze differiscono. Chi non ha il dato non deve fare niente: lasciando
 `d_max` a None si decelera con `a_max`, che e' il comportamento di prima.
 
+Sul SOLLEVAMENTO c'e' una cosa in piu': la zona di AVVICINAMENTO (`Approach`).
+Vicino al punto in cui il telaio viene preso o posato la velocita' non e'
+limitata dal motore ma dalla precisione, e la si tiene bassa per un tratto
+fisso di corsa. Il profilo smette allora di essere un solo trapezio e diventa
+una successione di trapezi, uno per ogni pezzo di corsa a limite di velocita'
+diverso.
+
+Per non avere due motori di calcolo -- uno per il caso semplice e uno per
+quello con avvicinamento, destinati a divergere -- il modulo ne ha uno solo:
+la corsa viene spezzata in pezzi a limite di velocita' costante e risolta
+pezzo per pezzo. Senza avvicinamento il pezzo e' uno, e i conti che ne escono
+sono ESATTAMENTE le formule del trapezio di sempre.
+
 Tutte le funzioni lavorano nelle unita' del progetto (millimetri, mm/s, mm/s^2,
 secondi). La conversione in "tick" interi per CP-SAT avviene altrove.
 """
 
 from __future__ import annotations
+import functools
 import math
 from dataclasses import dataclass
 from typing import Optional
+
+
+@dataclass(frozen=True)
+class Approach:
+    """Zona di AVVICINAMENTO: il tratto di corsa adiacente al punto in cui il
+    telaio viene preso o posato, che si percorre a velocita' ridotta.
+
+    Sono millimetri, non una frazione della corsa: il motivo per andare piano
+    e' la precisione dell'accoppiamento fra telaio e gancio, e quella non sa
+    nulla di quanto sia profonda la vasca.
+
+    `at_end` dice a quale capo della corsa sta la zona, ed e' una proprieta'
+    del MOVIMENTO, non del carroponte:
+
+      - si SCENDE a depositare -> la zona sta in fondo (True): si viaggia
+        normalmente finche' mancano `distance` millimetri, si entra nella zona
+        gia' a `speed`, si prosegue a `speed` e si frena solo all'ultimo;
+      - si SALE a prelevare    -> la zona sta in testa (False): si parte piano,
+        si resta a `speed` per `distance` millimetri e solo dopo si accelera
+        verso la velocita' massima.
+
+    E' per questo che la stessa cinematica genera due oggetti diversi nei due
+    versi, e che a costruirli e' chi conosce il verso (model.py) e non chi
+    legge il file Excel."""
+
+    speed: float  # [mm/s] velocita' di avvicinamento
+    distance: float  # [mm] quanta corsa si percorre a quella velocita'
+    at_end: bool  # True = zona in fondo alla corsa (discesa), False = in testa
+
+    def __post_init__(self):
+        if self.speed <= 0:
+            raise ValueError("la velocita' di avvicinamento deve essere > 0")
+        if self.distance <= 0:
+            raise ValueError("la distanza di avvicinamento deve essere > 0")
 
 
 @dataclass(frozen=True)
@@ -33,6 +81,10 @@ class Kinematics:
     # di chi non ha il dato, e di tutti i file compilati prima che questo
     # parametro esistesse.
     d_max: Optional[float] = None
+    # Zona di avvicinamento, se questo movimento ne ha una. None e' il caso
+    # normale -- traslazione orizzontale, e sollevamento di chi non ha
+    # dichiarato i due parametri -- e riporta il profilo al trapezio di sempre.
+    approach: Optional[Approach] = None
 
     def __post_init__(self):
         if self.v_max <= 0 or self.a_max <= 0:
@@ -47,47 +99,203 @@ class Kinematics:
         conto con due numeri uguali."""
         return self.a_max if self.d_max is None else self.d_max
 
+    def avvicinandosi(
+        self,
+        speed: Optional[float],
+        distance: Optional[float],
+        *,
+        scendendo: bool,
+    ) -> "Kinematics":
+        """La stessa cinematica, con in piu' la zona di avvicinamento orientata
+        nel verso dato. Restituisce se stessa se i due dati non ci sono.
 
-def _distanza_rampe(kin: Kinematics) -> float:
-    """Spazio minimo per arrivare a v_max e tornare a zero: la soglia fra il
-    profilo trapezoidale e quello triangolare.
+        E' l'unico modo previsto per mettere un `Approach` dentro una
+        `Kinematics`: cosi' il verso lo decide chi conosce il movimento, e non
+        puo' restare per distrazione quello del movimento precedente."""
+        if speed is None or distance is None:
+            return self
+        return Kinematics(
+            v_max=self.v_max,
+            a_max=self.a_max,
+            d_max=self.d_max,
+            approach=Approach(speed, distance, at_end=scendendo),
+        )
 
-    Con accelerazione e decelerazione uguali vale v_max^2 / a_max, cioe'
+
+# --------------------------------------------------------------------------
+# Il motore: la corsa spezzata in tratti ad accelerazione costante
+# --------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class _Tratto:
+    """Un pezzo di profilo ad accelerazione COSTANTE: dura `dt`, comincia a
+    velocita' `v0` e prosegue con accelerazione `a` (negativa in frenata, nulla
+    in crociera).
+
+    Fra i suoi estremi la posizione e' un polinomio di grado <= 2 in t. E' da
+    qui che discende la garanzia di `profile_breakpoints`: gli spigoli del
+    profilo sono esattamente i confini fra un tratto e il successivo."""
+
+    dt: float  # [s]
+    v0: float  # [mm/s]
+    a: float  # [mm/s^2], col segno
+
+
+def _limiti(d: float, kin: Kinematics) -> tuple[tuple[float, float], ...]:
+    """La corsa spezzata in pezzi a limite di velocita' costante:
+    `((lunghezza, v_cap), ...)` nell'ordine in cui si percorrono.
+
+    Senza avvicinamento il pezzo e' uno solo e vale tutta la corsa: e' da qui
+    che il caso di sempre rientra nel caso generale senza costare niente."""
+    app = kin.approach
+    if app is None:
+        return ((d, kin.v_max),)
+    # Una velocita' di avvicinamento piu' alta della massima non e' un dato,
+    # e' un refuso: non vincola niente, e si ignora prendendo la piu' bassa.
+    v_app = min(app.speed, kin.v_max)
+    # Una zona piu' lunga della corsa non e' un errore: vuol dire che la corsa
+    # sta tutta dentro la zona, e allora si fa tutta piano.
+    lenta = min(app.distance, d)
+    if lenta >= d:
+        return ((d, v_app),)
+    veloce = d - lenta
+    return (
+        ((veloce, kin.v_max), (lenta, v_app))
+        if app.at_end
+        else ((lenta, v_app), (veloce, kin.v_max))
+    )
+
+
+def _velocita_di_confine(
+    limiti: tuple[tuple[float, float], ...], kin: Kinematics
+) -> list[float]:
+    """La velocita' con cui si attraversa ogni confine fra un pezzo e l'altro,
+    estremi della corsa compresi -- dove vale zero: si parte e si arriva fermi.
+
+    Tre passate, ed e' l'ordine a renderle esatte:
+
+      1. un confine non puo' essere attraversato piu' in fretta del piu' basso
+         dei due limiti che vi si affacciano;
+      2. in avanti: ne' piu' in fretta di quanto l'accelerazione consenta di
+         arrivarci partendo dal confine precedente;
+      3. all'indietro: ne' piu' in fretta di quanto la frenata consenta di
+         rallentare in tempo per il confine successivo.
+
+    La terza passata e' quella che risolve da sola tutti i casi degeneri --
+    zona di avvicinamento piu' corta del proprio spazio di frenata, corsa piu'
+    corta della zona -- senza un solo ramo dedicato: dove non c'e' spazio per
+    entrare nella zona a velocita' di avvicinamento, il limite scende da se'.
+    """
+    n = len(limiti)
+    v = [0.0] * (n + 1)
+    for i in range(1, n):
+        v[i] = min(limiti[i - 1][1], limiti[i][1])
+    for i in range(n):
+        v[i + 1] = min(v[i + 1], math.sqrt(v[i] ** 2 + 2 * kin.a_max * limiti[i][0]))
+    for i in range(n - 1, -1, -1):
+        v[i] = min(v[i], math.sqrt(v[i + 1] ** 2 + 2 * kin.decel * limiti[i][0]))
+    return v
+
+
+def _distanza_rampe(v_cap: float, v_in: float, v_out: float, kin: Kinematics) -> float:
+    """Spazio minimo per salire da `v_in` a `v_cap` e tornare giu' a `v_out`:
+    la soglia fra il profilo trapezoidale e quello triangolare.
+
+    Con v_in = v_out = 0 e v_cap = v_max vale v_max^2/(2a) + v_max^2/(2d), cioe'
     esattamente la formula di prima."""
-    return kin.v_max**2 / (2 * kin.a_max) + kin.v_max**2 / (2 * kin.decel)
+    return (v_cap**2 - v_in**2) / (2 * kin.a_max) + (v_cap**2 - v_out**2) / (
+        2 * kin.decel
+    )
 
 
-def _picco_triangolare(d: float, kin: Kinematics) -> float:
-    """Velocita' massima raggiunta quando la distanza non basta alla crociera:
+def _picco_triangolare(
+    lung: float, v_in: float, v_out: float, kin: Kinematics
+) -> float:
+    """Velocita' massima raggiunta quando la lunghezza non basta alla crociera:
     si accelera fino a v_p e da li' si frena, senza tratto piatto.
 
-    v_p^2/(2a) + v_p^2/(2d) = distanza, da cui la radice qui sotto."""
-    return math.sqrt(2 * d * kin.a_max * kin.decel / (kin.a_max + kin.decel))
+    (v_p^2 - v_in^2)/(2a) + (v_p^2 - v_out^2)/(2d) = lunghezza, da cui la radice
+    qui sotto. Le passate di `_velocita_di_confine` garantiscono che il
+    risultato non stia mai sotto v_in ne' sotto v_out: il max e' li' solo per
+    il pelo di errore numerico."""
+    v_p = math.sqrt(
+        (lung + v_in**2 / (2 * kin.a_max) + v_out**2 / (2 * kin.decel))
+        * 2
+        * kin.a_max
+        * kin.decel
+        / (kin.a_max + kin.decel)
+    )
+    return max(v_p, v_in, v_out)
+
+
+def _tratti_di_pezzo(
+    lung: float, v_cap: float, v_in: float, v_out: float, kin: Kinematics
+) -> tuple[_Tratto, ...]:
+    """I tratti ad accelerazione costante con cui si percorre UN pezzo a limite
+    di velocita' costante, entrandoci a `v_in` e uscendone a `v_out`."""
+    if lung <= 0:
+        return ()
+    d_rampe = _distanza_rampe(v_cap, v_in, v_out, kin)
+    if lung >= d_rampe:
+        # trapezoidale
+        v_p = v_cap
+        t_cruise = (lung - d_rampe) / v_cap
+    else:
+        # triangolare (non si raggiunge il limite di velocita')
+        v_p = _picco_triangolare(lung, v_in, v_out, kin)
+        t_cruise = 0.0
+    out = []
+    if v_p > v_in:
+        out.append(_Tratto((v_p - v_in) / kin.a_max, v_in, kin.a_max))
+    if t_cruise > 0:
+        out.append(_Tratto(t_cruise, v_p, 0.0))
+    if v_p > v_out:
+        out.append(_Tratto((v_p - v_out) / kin.decel, v_p, -kin.decel))
+    return tuple(out)
+
+
+# La cache non e' un'ottimizzazione di comodo: il verificatore campiona la
+# stessa tratta centinaia di volte, e ogni campione rifarebbe da capo lo stesso
+# profilo. La chiave e' (distanza, cinematica), ed e' per poterla usare come
+# chiave che `Kinematics` e `Approach` sono congelate.
+@functools.lru_cache(maxsize=8192)
+def _tratti(d: float, kin: Kinematics) -> tuple[_Tratto, ...]:
+    """Il profilo completo della corsa `d`, tratto per tratto."""
+    if d <= 0:
+        return ()
+    limiti = _limiti(d, kin)
+    v = _velocita_di_confine(limiti, kin)
+    out: list[_Tratto] = []
+    for i, (lung, v_cap) in enumerate(limiti):
+        out.extend(_tratti_di_pezzo(lung, v_cap, v[i], v[i + 1], kin))
+    return tuple(out)
+
+
+# --------------------------------------------------------------------------
+# Le tre funzioni pubbliche
+# --------------------------------------------------------------------------
 
 
 def travel_time(distance: float, kin: Kinematics) -> float:
-    """Tempo minimo [s] per percorrere `distance` [m] rispettando v_max, a_max
-    e la decelerazione.
+    """Tempo minimo [s] per percorrere `distance` [m] rispettando v_max, a_max,
+    la decelerazione e -- dove c'e' -- la zona di avvicinamento.
 
     - Se la distanza e' sufficiente a raggiungere v_max, il profilo e'
       trapezoidale: accelerazione, tratto a velocita' costante, decelerazione.
     - Altrimenti il profilo e' triangolare: si accelera e poi si decelera
       subito, senza mai raggiungere v_max.
+    - Con una zona di avvicinamento i profili diventano due, uno per pezzo di
+      corsa, e il tempo e' la somma: il confine fra i due NON e' un punto di
+      arresto, lo si attraversa alla velocita' di avvicinamento.
 
-    Le due rampe hanno pendenze diverse, quindi durate diverse: non si puo'
-    piu' contarne una e moltiplicarla per due.
+    Le rampe hanno pendenze diverse, quindi durate diverse: non si puo'
+    contarne una e moltiplicarla per due.
     """
     d = abs(distance)
     if d == 0:
         return 0.0
-    d_rampe = _distanza_rampe(kin)
-    if d >= d_rampe:
-        # trapezoidale
-        t_cruise = (d - d_rampe) / kin.v_max
-        return kin.v_max / kin.a_max + t_cruise + kin.v_max / kin.decel
-    # triangolare (non si raggiunge v_max)
-    v_p = _picco_triangolare(d, kin)
-    return v_p / kin.a_max + v_p / kin.decel
+    return sum(tr.dt for tr in _tratti(d, kin))
 
 
 def position_profile(t: float, distance: float, kin: Kinematics) -> float:
@@ -95,36 +303,25 @@ def position_profile(t: float, distance: float, kin: Kinematics) -> float:
     (0 <= t <= travel_time(distance, kin)). Il segno di `distance` non conta:
     restituisce sempre uno spostamento positivo, e' compito del chiamante
     orientarlo nella direzione giusta (posizione_iniziale +/- risultato).
+
+    Il VERSO del movimento, dove serve saperlo, sta nella cinematica e non qui:
+    e' `Approach.at_end` a dire a quale capo della corsa cade la zona lenta.
     """
     d = abs(distance)
     if d == 0:
         return 0.0
-    t_total = travel_time(d, kin)
-    t = max(0.0, min(t, t_total))
-
-    if d >= _distanza_rampe(kin):
-        t_su = kin.v_max / kin.a_max
-        t_giu = kin.v_max / kin.decel
-        t_cruise = t_total - t_su - t_giu
-        d_su = 0.5 * kin.a_max * t_su**2
-        if t <= t_su:
-            return 0.5 * kin.a_max * t**2
-        if t <= t_su + t_cruise:
-            return d_su + kin.v_max * (t - t_su)
-        t_dec = t - (t_su + t_cruise)
-        return (
-            d_su
-            + kin.v_max * t_cruise
-            + kin.v_max * t_dec
-            - 0.5 * kin.decel * t_dec**2
-        )
-    v_p = _picco_triangolare(d, kin)
-    t_su = v_p / kin.a_max
-    if t <= t_su:
-        return 0.5 * kin.a_max * t**2
-    t_dec = t - t_su
-    d_su = 0.5 * kin.a_max * t_su**2
-    return d_su + v_p * t_dec - 0.5 * kin.decel * t_dec**2
+    s = 0.0
+    rimasto = t
+    for tr in _tratti(d, kin):
+        if rimasto <= 0:
+            break
+        dt = tr.dt if rimasto >= tr.dt else rimasto
+        s += tr.v0 * dt + 0.5 * tr.a * dt * dt
+        rimasto -= dt
+    # Il clamp e' la stessa cortesia di prima verso chi chiede un istante fuori
+    # intervallo -- lo faceva il vecchio `min(t, t_total)` -- piu' la difesa
+    # dall'ultimo bit di errore accumulato sommando i tratti.
+    return min(max(s, 0.0), d)
 
 
 def profile_breakpoints(distance: float, kin: Kinematics) -> tuple[float, ...]:
@@ -134,12 +331,13 @@ def profile_breakpoints(distance: float, kin: Kinematics) -> tuple[float, ...]:
     - profilo trapezoidale: (0, t_su, t_su + t_cruise, t_total)
     - profilo triangolare:  (0, t_su, t_total)
     - distanza nulla:       (0.0,)
+    - con avvicinamento:    gli spigoli di un pezzo di seguito a quelli
+                            dell'altro, confine compreso
 
-    Lo spigolo del triangolo NON e' piu' a meta' durata: con due rampe di
-    pendenza diversa il picco cade dove finisce l'accelerazione, e prenderlo
-    a t_total/2 metterebbe il campione nel posto sbagliato -- che e' proprio
-    il caso in cui la stima rigorosa dell'errore smetterebbe di essere
-    rigorosa.
+    Lo spigolo del triangolo NON e' a meta' durata: con due rampe di pendenza
+    diversa il picco cade dove finisce l'accelerazione, e prenderlo a
+    t_total/2 metterebbe il campione nel posto sbagliato -- che e' proprio il
+    caso in cui la stima rigorosa dell'errore smetterebbe di essere rigorosa.
 
     Fra due spigoli consecutivi la posizione e' un polinomio di grado <= 2 in
     t. Campionando anche tutti gli spigoli si puo' quindi limitare in modo
@@ -148,22 +346,30 @@ def profile_breakpoints(distance: float, kin: Kinematics) -> tuple[float, ...]:
     d = abs(distance)
     if d == 0:
         return (0.0,)
-    t_total = travel_time(d, kin)
-    if d >= _distanza_rampe(kin):
-        t_su = kin.v_max / kin.a_max
-        t_cruise = t_total - t_su - kin.v_max / kin.decel
-        return (0.0, t_su, t_su + t_cruise, t_total)
-    return (0.0, _picco_triangolare(d, kin) / kin.a_max, t_total)
+    out = [0.0]
+    for tr in _tratti(d, kin):
+        out.append(out[-1] + tr.dt)
+    return tuple(out)
 
 
 if __name__ == "__main__":
-    # Auto-test rapido: il caso simmetrico di sempre, e due asimmetrici.
-    for k in (
+    # Auto-test rapido: il caso simmetrico di sempre, due asimmetrici, e gli
+    # stessi tre con una zona di avvicinamento in ciascuno dei due versi.
+    base = (
         Kinematics(v_max=1.0, a_max=0.5),
         Kinematics(v_max=1.0, a_max=0.5, d_max=2.0),
         Kinematics(v_max=1.0, a_max=2.0, d_max=0.5),
-    ):
-        print(f"\nv_max={k.v_max}  a_max={k.a_max}  decel={k.decel}")
+    )
+    tutte = base + tuple(
+        b.avvicinandosi(0.2, 3.0, scendendo=giu) for b in base for giu in (True, False)
+    )
+    for k in tutte:
+        app = k.approach
+        dove = "-" if app is None else ("in fondo" if app.at_end else "in testa")
+        print(
+            f"\nv_max={k.v_max}  a_max={k.a_max}  decel={k.decel}  "
+            f"approach={'no' if app is None else app.speed} zona={dove}"
+        )
         for dist in [0.1, 1.0, 5.0, 20.0]:
             T = travel_time(dist, k)
             # la posizione al tempo T deve combaciare con la distanza totale
@@ -179,9 +385,29 @@ if __name__ == "__main__":
             bps = profile_breakpoints(dist, k)
             assert bps[0] == 0.0 and abs(bps[-1] - T) < 1e-9, "spigoli incoerenti con T"
             assert list(bps) == sorted(bps), "gli spigoli devono essere crescenti"
-            # il profilo deve essere monotono: non si torna mai indietro
-            campioni = [position_profile(T * i / 200, dist, k) for i in range(201)]
+            # il profilo deve essere monotono: non si torna mai indietro, e
+            # nessun tratto puo' superare la velocita' massima
+            passo = T / 2000
+            campioni = [position_profile(passo * i, dist, k) for i in range(2001)]
             assert all(
                 b >= a - 1e-9 for a, b in zip(campioni, campioni[1:])
             ), "il profilo non puo' tornare indietro"
+            for a_, b_ in zip(campioni, campioni[1:]):
+                v = (b_ - a_) / passo
+                assert v <= k.v_max + 1e-6, "velocita' oltre il massimo"
+                if app is None or app.distance >= dist:
+                    continue
+                # dentro la zona di avvicinamento nemmeno la velocita' di
+                # avvicinamento puo' essere superata. Si guarda l'estremo del
+                # campione PIU' LONTANO dal capo lento: cosi' si controllano
+                # solo gli intervalli interamente dentro la zona, e non quello
+                # che la attraversa -- li' la media e' legittimamente piu' alta
+                da_capo = dist - a_ if app.at_end else b_
+                if da_capo <= app.distance:
+                    assert (
+                        v <= min(app.speed, k.v_max) + 1e-6
+                    ), "velocita' oltre quella di avvicinamento dentro la zona"
+    # la zona di avvicinamento costa tempo, e non puo' farne guadagnare
+    for b, k in zip(base, tutte[len(base):]):
+        assert travel_time(20.0, k) > travel_time(20.0, b), "l'avvicinamento deve costare"
     print("\nOK: kinematics.py funziona correttamente")
