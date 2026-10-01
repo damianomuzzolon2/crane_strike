@@ -942,7 +942,7 @@ fogli (sei se ci si salva dentro un ciclogramma):
 | `Istruzioni` | come compilare gli altri fogli |
 | `Vasche` | una riga per vasca: id, posizione lungo la rotaia **in millimetri**, numero di posti, corsa verticale, sgocciolamento. Corsa e sgocciolamento sono **obbligatori** (0 dove non servono) |
 | `Percorso` | sequenza di vasche attraversate, con le permanenze |
-| `Parametri` | quello che vale per tutta la linea: takt time, cinematiche del carroponte, ingombri, tempi di aggancio/sgancio, opzioni di calcolo |
+| `Parametri` | quello che vale per tutta la linea: takt time (teorico piu' i due delta, come le permanenze), cinematiche del carroponte, ingombri, tempi di aggancio/sgancio, opzioni di calcolo |
 | `Zone` | facoltativo: suddivisione manuale delle mosse fra i carroponti. **Lasciandolo vuoto** numero di carroponti e zone vengono scelti automaticamente |
 | `Ciclogramma` | facoltativo: il ciclogramma gia' composto. Lo scrive il programma quando salvi, e riaprendo il file si riprende da li' |
 
@@ -1083,8 +1083,14 @@ attesa tutte le volte. La cartella si copia tale e quale e parte subito.
    che il parametro esistesse. Per il solo sollevamento si possono aggiungere
    `v_approach_lift` e `d_approach_lift` su `ProblemData`: il verso lo mette
    il modello, non chi costruisce la cinematica.
-4. **Takt time**: `takt_min`, `takt_max` (puoi calcolarli da
-   `nominale ± tolleranza`).
+4. **Takt time**: si dichiara come le permanenze, cioe' **un valore
+   teorico piu' due tolleranze** (`takt_teorico_s`, `takt_delta_negativo_s`,
+   `takt_delta_positivo_s` nel foglio Excel). Le soglie su cui lavora il
+   modello — `takt_min` e `takt_max` — sono `teorico - delta_negativo` e
+   `teorico + delta_positivo`; il teorico resta su `ProblemData.takt_nominal`,
+   perche' da min e max soli non ci si risale e il file va poi riscritto
+   com'era stato compilato. Costruendo a mano si possono passare solo le due
+   soglie: il teorico diventa allora il centro della banda.
 5. **Carroponti e zone** (`HoistZone`): ogni carroponte serve una **zona
    contigua** di mosse (indici di trasporto, non di vasca). Ci sono tre
    modi per specificarli, dal piu' al meno automatico:
@@ -1788,8 +1794,9 @@ sono le verifiche che stanno stringendo.
 **Attenzione alla larghezza della banda di takt time.** Il numero di copie
 traslate da generare e' calcolato sul caso peggiore `T = takt_min`, quindi una
 banda molto larga (`takt_max` molte volte `takt_min`) fa crescere parecchio il
-modello. Se la risoluzione diventa lenta, stringere la tolleranza sul takt time
-e' la prima cosa da provare.
+modello. Se la risoluzione diventa lenta, stringere i due delta
+(`takt_delta_negativo_s` e `takt_delta_positivo_s`) e' la prima cosa da
+provare.
 
 ### Dove il carroponte passa il tempo morto (`max_soste_intermedie`)
 

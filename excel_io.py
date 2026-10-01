@@ -52,8 +52,24 @@ _VERSI_CAMBIO_QUOTA = ("carico", "scarico")
 
 # nome parametro -> (unita', obbligatorio, default, descrizione)
 _PARAMETRI = {
-    "takt_min_s": ("s", True, None, "takt time minimo accettabile"),
-    "takt_max_s": ("s", True, None, "takt time massimo accettabile"),
+    "takt_teorico_s": (
+        "s",
+        True,
+        None,
+        "takt time TEORICO: il ciclo a cui la linea e' pensata",
+    ),
+    "takt_delta_negativo_s": (
+        "s",
+        True,
+        None,
+        "di quanto il ciclo puo' scendere sotto il teorico (ampiezza, positiva)",
+    ),
+    "takt_delta_positivo_s": (
+        "s",
+        True,
+        None,
+        "di quanto il ciclo puo' salire sopra il teorico (ampiezza, positiva)",
+    ),
     "v_max_vuoto_mm_s": ("mm/s", True, None, "velocita' max del carroponte scarico"),
     "a_max_vuoto_mm_s2": ("mm/s^2", True, None, "accelerazione max del carroponte scarico"),
     "d_max_vuoto_mm_s2": (
@@ -256,6 +272,21 @@ _NOMI_SOSTITUITI = {
         "nella colonna 'sgocciolamento_s' del foglio Vasche, una riga per "
         "vasca, obbligatorio: 0 dove non serve"
     ),
+    "takt_min_s": (
+        "'takt_min_s' e 'takt_max_s' non esistono piu': il takt time si "
+        "dichiara come le permanenze delle vasche, cioe' un valore TEORICO "
+        "piu' due tolleranze -- 'takt_teorico_s', 'takt_delta_negativo_s' e "
+        "'takt_delta_positivo_s'. Si converte scegliendo il ciclo che si vuole "
+        "davvero come teorico e scrivendo le due ampiezze: con i vecchi 110 e "
+        "150 si puo' scrivere teorico 130 con delta 20 e 20, oppure teorico "
+        "110 con delta 0 e 40 se 110 era il valore a cui si mirava"
+    ),
+    "takt_max_s": (
+        "'takt_max_s' e 'takt_min_s' non esistono piu': il takt time si "
+        "dichiara come le permanenze delle vasche, cioe' un valore TEORICO "
+        "piu' due tolleranze -- 'takt_teorico_s', 'takt_delta_negativo_s' e "
+        "'takt_delta_positivo_s'. Vedi il messaggio su 'takt_min_s'"
+    ),
     "margine_calcolo_percento": (
         "'margine_calcolo_percento' non esiste piu': la stessa cosa si dichiara "
         "adesso in millimetri invece che in percentuale, come "
@@ -401,8 +432,11 @@ def leggi_problema(percorso_file: str) -> Configurazione:
         data = ProblemData(
             tanks=tanks,
             route=route,
-            takt_min=par["takt_min_s"],
-            takt_max=par["takt_max_s"],
+            # le soglie su cui lavora il modello, ricavate dal teorico e
+            # dalle due ampiezze come per le permanenze in vasca
+            takt_min=par["takt_teorico_s"] - par["takt_delta_negativo_s"],
+            takt_max=par["takt_teorico_s"] + par["takt_delta_positivo_s"],
+            takt_nominal=par["takt_teorico_s"],
             kin_empty=Kinematics(
                 v_max=par["v_max_vuoto_mm_s"],
                 a_max=par["a_max_vuoto_mm_s2"],
@@ -947,7 +981,50 @@ def _leggi_parametri(ws, errori: _Errori) -> dict:
             errori,
             intero=nome in _INTERI,
         )
+    _controlla_takt(par, grezzi, errori)
     return par
+
+
+def _controlla_takt(par: dict, grezzi: dict, errori: _Errori):
+    """Il takt time si dichiara come le permanenze delle vasche: un teorico e
+    due tolleranze. I controlli sono gli stessi del foglio Percorso, e per lo
+    stesso motivo -- i due delta sono AMPIEZZE, non estremi: si scrivono
+    positivi tutti e due, e il software li sottrae e li somma. Un delta
+    negativo scritto col segno meno darebbe una banda rovesciata senza dirlo."""
+
+    def cella(nome: str) -> str:
+        riga = grezzi.get(nome, (None, None))[1]
+        return f"B{riga}" if riga else "B"
+
+    teorico = par.get("takt_teorico_s")
+    dneg = par.get("takt_delta_negativo_s")
+    dpos = par.get("takt_delta_positivo_s")
+    if teorico is None or dneg is None or dpos is None:
+        return  # valori mancanti o illeggibili: l'errore e' gia' stato scritto
+    if teorico <= 0:
+        errori.aggiungi(
+            FOGLIO_PARAMETRI,
+            cella("takt_teorico_s"),
+            f"takt_teorico_s ({teorico}) deve essere > 0",
+        )
+    for nome, valore in (
+        ("takt_delta_negativo_s", dneg),
+        ("takt_delta_positivo_s", dpos),
+    ):
+        if valore < 0:
+            errori.aggiungi(
+                FOGLIO_PARAMETRI,
+                cella(nome),
+                f"{nome} ({valore}) negativo: i due delta sono ampiezze, si "
+                f"scrivono positivi ed e' il software a sottrarre e sommare",
+            )
+    if dneg >= teorico > 0:
+        errori.aggiungi(
+            FOGLIO_PARAMETRI,
+            cella("takt_delta_negativo_s"),
+            f"takt_delta_negativo_s ({dneg}) non minore del takt time teorico "
+            f"({teorico}): il ciclo minimo verrebbe nullo o negativo",
+        )
 
 
 def _leggi_zone(ws, n_moves: int, errori: _Errori) -> Optional[list[HoistZone]]:
@@ -1078,8 +1155,9 @@ def _righe_esempio():
         ("SCARICO", 0, 0, 0),
     ]
     parametri = {
-        "takt_min_s": 110,
-        "takt_max_s": 150,
+        "takt_teorico_s": 130,
+        "takt_delta_negativo_s": 20,
+        "takt_delta_positivo_s": 20,
         "v_max_vuoto_mm_s": 1600,
         "a_max_vuoto_mm_s2": 900,
         "d_max_vuoto_mm_s2": 1200,
@@ -1139,8 +1217,9 @@ def _righe_da_configurazione(cfg: Configurazione):
     ]
     percorso = [(s.tank_id, s.nominale, s.delta_neg, s.delta_pos) for s in d.route]
     parametri = {
-        "takt_min_s": d.takt_min,
-        "takt_max_s": d.takt_max,
+        "takt_teorico_s": d.takt_nominale,
+        "takt_delta_negativo_s": d.takt_delta_neg,
+        "takt_delta_positivo_s": d.takt_delta_pos,
         "v_max_vuoto_mm_s": d.kin_empty.v_max,
         "a_max_vuoto_mm_s2": d.kin_empty.a_max,
         "d_max_vuoto_mm_s2": d.kin_empty.d_max,
@@ -1407,6 +1486,36 @@ def _aggiungi_fogli_linea(
             None,
         ),
         ("si possono lasciare vuoti o cancellare del tutto.", None),
+        (
+            "  takt time       si dichiara come le permanenze: un valore "
+            "TEORICO piu' due tolleranze",
+            None,
+        ),
+        (
+            "                  (takt_teorico_s, takt_delta_negativo_s, "
+            "takt_delta_positivo_s). Il ciclo",
+            None,
+        ),
+        (
+            "                  trovato stara' fra teorico - delta_negativo e "
+            "teorico + delta_positivo.",
+            None,
+        ),
+        (
+            "                  I due delta sono ampiezze, si scrivono POSITIVI "
+            "tutti e due; a zero",
+            None,
+        ),
+        (
+            "                  significa takt time rigido. Una banda larga da' "
+            "piu' liberta' al calcolo",
+            None,
+        ),
+        (
+            "                  ma lo rende piu' lento: se non conclude, "
+            "stringila.",
+            None,
+        ),
         (
             "  d_max_...       la DECELERAZIONE, in frenata. E' facoltativa: "
             "lasciata vuota si frena",

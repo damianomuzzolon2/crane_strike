@@ -2042,7 +2042,7 @@ AUTOMATICA = [
      "IL MINIMO SI RIPORTA COME INTERVALLO. Trovato uno scalino che funziona, "
      "il minimo sta fra quello e lo scalino precedente che aveva fallito. "
      "Annunciare il valore trovato come 'il minimo' farebbe alzare "
-     "takt_max_s piu' del necessario. E' la stessa disciplina del limite "
+     "il takt time dichiarato piu' del necessario. E' la stessa disciplina del limite "
      "d'errore nel verificatore: si dichiara quello che si sa, con "
      "l'incertezza attaccata."),
     ("c", "model._vasche_che_bloccano"),

@@ -605,7 +605,9 @@ class Applicazione(tk.Tk):
         self._scrivi_riepilogo(
             f"Linea: {percorso}\n"
             f"Stazioni: {d.n_stations}   Mosse: {d.n_moves}\n"
-            f"Takt time ammesso: {d.takt_min:.1f} - {d.takt_max:.1f} s\n"
+            f"Takt time teorico: {d.takt_nominale:.1f} s "
+            f"(-{d.takt_delta_neg:.1f} / +{d.takt_delta_pos:.1f}), "
+            f"ammesso {d.takt_min:.1f} - {d.takt_max:.1f} s\n"
             f"Vasche: {', '.join(d.tanks)}\n\n"
             + (
                 f"Zone indicate a mano: "
@@ -1094,7 +1096,8 @@ class Applicazione(tk.Tk):
         righe += [
             "",
             "COSA SI PUO' FARE",
-            "  - allargare la tolleranza sul takt time (takt_min_s / takt_max_s)",
+            "  - allargare la tolleranza sul takt time "
+            "(takt_delta_negativo_s / takt_delta_positivo_s)",
             "  - aumentare max_carroponti",
             "  - aumentare i posti delle vasche piu' lente",
             "  - infittire passo_controllo_distanza_mm da 200 a 100: la distanza",

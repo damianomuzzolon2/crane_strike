@@ -341,6 +341,14 @@ class ProblemData:
     route: list[StationSpec]
     takt_min: float  # [s] limite inferiore tolleranza takt time
     takt_max: float  # [s] limite superiore tolleranza takt time
+    # Il takt time TEORICO, quello che si dichiara davvero: il ciclo a cui la
+    # linea e' pensata. Come `StationSpec.dwell_nominal`, le due soglie qui
+    # sopra non sono un dato indipendente -- sono `teorico - delta_negativo` e
+    # `teorico + delta_positivo` -- ma il modello continua a ragionare sulle
+    # soglie, perche' sono quelle il vincolo. Il valore nominale va conservato
+    # perche' da min e max soli non ci si risale, e il file va poi riscritto
+    # com'era stato compilato.
+    takt_nominal: Optional[float] = field(default=None, kw_only=True)
     kin_empty: Kinematics  # cinematica carroponte SENZA pezzo
     kin_loaded: Kinematics  # cinematica carroponte CON pezzo
     # Ingombro del carroponte lungo la rotaia, misurato dal PUNTO DI
@@ -470,6 +478,21 @@ class ProblemData:
                 )
         if self.takt_min > self.takt_max:
             raise ValueError("takt_min > takt_max")
+        if self.takt_min <= 0:
+            raise ValueError(
+                "takt_min non positivo: il delta negativo non puo' raggiungere "
+                "il takt time teorico"
+            )
+        # Un nominale fuori dalla banda vorrebbe dire che uno dei due delta e'
+        # stato scritto col segno sbagliato: le due letture della stessa cosa
+        # non tornerebbero, e il file riscritto direbbe un'altra linea.
+        if self.takt_nominal is not None and not (
+            self.takt_min <= self.takt_nominal <= self.takt_max
+        ):
+            raise ValueError(
+                f"takt time teorico ({self.takt_nominal}) fuori dalla banda "
+                f"[{self.takt_min}, {self.takt_max}]"
+            )
         if self.engage_time < 0 or self.disengage_time < 0:
             raise ValueError("engage_time e disengage_time devono essere >= 0")
         # La zona di avvicinamento e' fatta di due numeri, e uno solo dei due
@@ -747,7 +770,8 @@ class ProblemData:
                     f"e' {cap * self.takt_max:.1f}s. Aumenta la capacity della "
                     f"vasca (multi-posto), abbassa la permanenza minima "
                     f"({spec.dwell_min:.1f}s = teorico {spec.nominale:.1f}s - "
-                    f"delta negativo {spec.delta_neg:.1f}s), o alza takt_max."
+                    f"delta negativo {spec.delta_neg:.1f}s), o alza il takt "
+                    f"time massimo (takt_teorico_s + takt_delta_positivo_s)."
                 )
 
     # -- comodita' --------------------------------------------------------
@@ -762,6 +786,25 @@ class ProblemData:
         q - p - (pos + neg). Dove sia il gancio dentro il carrello non cambia
         nulla: conta solo la somma."""
         return self.hoist_extent_pos + self.hoist_extent_neg
+
+    @property
+    def takt_nominale(self) -> float:
+        """Il takt time teorico. Se la linea e' stata costruita dalle sole
+        soglie -- succede nei test e in chi costruisce a mano -- il centro
+        della banda e' l'unica risposta onesta."""
+        if self.takt_nominal is not None:
+            return self.takt_nominal
+        return (self.takt_min + self.takt_max) / 2
+
+    @property
+    def takt_delta_neg(self) -> float:
+        """Quanto il ciclo puo' stare SOTTO il takt time teorico."""
+        return self.takt_nominale - self.takt_min
+
+    @property
+    def takt_delta_pos(self) -> float:
+        """Quanto il ciclo puo' stare SOPRA il takt time teorico."""
+        return self.takt_max - self.takt_nominale
 
     @property
     def n_stations(self) -> int:
@@ -3845,22 +3888,26 @@ def diagnosi_zone(
     for fattore in (1.25, 1.5, 2.0, 3.0):
         basso = data.takt_max * fattore
         esito, t = _prova(
-            dataclasses.replace(data, takt_min=basso, takt_max=basso * 1.1),
+            dataclasses.replace(
+                data, takt_min=basso, takt_max=basso * 1.1, takt_nominal=None
+            ),
             zones, time_limit_s,
         )
         if esito == "si":
             # Si e' trovato un ciclo che basta, non il piu' corto che basti:
             # il minimo sta fra l'ultimo scalino fallito e questo. Dirlo come
             # intervallo e' l'unica forma onesta -- annunciare `t` come "il
-            # minimo" farebbe alzare takt_max_s piu' del necessario.
+            # minimo" farebbe alzare il takt time dichiarato piu' del
+            # necessario.
             fuori.append(
                 f"IL TAKT TIME E' TROPPO STRETTO: con un ciclo di {t:.0f} s "
                 f"queste zone funzionano, mentre il massimo dichiarato e' "
                 f"{data.takt_max:.0f} s. Il minimo che basta sta fra "
                 f"{precedente:.0f} e {t:.0f} s, cioe' servono da "
                 f"{max(0.0, precedente - data.takt_max):.0f} a "
-                f"{t - data.takt_max:.0f} s in piu'. Alza takt_max_s, oppure "
-                f"aggiungi un carroponte per accorciare i giri."
+                f"{t - data.takt_max:.0f} s in piu'. Alza takt_teorico_s "
+                f"(o takt_delta_positivo_s), oppure aggiungi un carroponte "
+                f"per accorciare i giri."
             )
             return fuori
         if esito == "boh":
@@ -3876,6 +3923,7 @@ def diagnosi_zone(
             data,
             takt_min=max(1.0, data.takt_min / 2),
             takt_max=data.takt_min,
+            takt_nominal=None,
         ),
         zones, time_limit_s,
     )
@@ -3884,7 +3932,8 @@ def diagnosi_zone(
             f"IL TAKT TIME MINIMO E' TROPPO ALTO: con un ciclo di {t:.0f} s -- "
             f"piu' corto del minimo dichiarato ({data.takt_min:.0f} s) -- la "
             f"linea si risolve. Un ciclo lungo tiene i pezzi in vasca oltre il "
-            f"tempo di processo: abbassa takt_min_s."
+            f"tempo di processo: abbassa takt_teorico_s, oppure allarga "
+            f"takt_delta_negativo_s."
         )
         return fuori
     if esito == "boh":

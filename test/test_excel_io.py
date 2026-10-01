@@ -95,7 +95,13 @@ def test_andata_e_ritorno():
         check(len(d.tanks) == 7 and d.n_stations == 7, "7 vasche e 7 stazioni")
         check(d.tanks["ZINCATURA"].capacity == 2, "ZINCATURA a 2 posti")
         check(
-            (d.takt_min, d.takt_max) == (110.0, 150.0), "banda di takt time 110-150 s"
+            (d.takt_nominale, d.takt_delta_neg, d.takt_delta_pos)
+            == (130.0, 20.0, 20.0),
+            "takt time 130 s teorici con 20 s di tolleranza per parte",
+        )
+        check(
+            (d.takt_min, d.takt_max) == (110.0, 150.0),
+            "e la banda che ne esce e' 110-150 s",
         )
         check(
             (d.kin_empty.v_max, d.kin_loaded.a_max) == (1600, 400),
@@ -328,12 +334,12 @@ def test_virgola_decimale():
     p = modello_temporaneo()
     try:
         modifica(p, FOGLIO_VASCHE, "B3", "2500,5")
-        modifica(p, FOGLIO_PARAMETRI, "B4", "1650,5")
+        modifica(p, FOGLIO_PARAMETRI, "B5", "1650,5")
         cfg = leggi_problema(p)
         check(cfg.data.tanks["SGRASSO"].position == 2500.5, "'2500,5' letto come 2500.5")
         check(
             cfg.data.kin_empty.v_max == 1650.5,
-            "'1650,5' letto come 1650.5 (B4 e' v_max_vuoto_mm_s)",
+            "'1650,5' letto come 1650.5 (B5 e' v_max_vuoto_mm_s)",
         )
     finally:
         os.unlink(p)
@@ -378,6 +384,59 @@ def test_parametro_sostituito():
             "indica il parametro che lo sostituisce",
         )
         check("si converte" in msg.lower(), "e dice come si converte il valore")
+    finally:
+        os.unlink(p)
+
+
+def test_takt_teorico_e_tolleranze():
+    print("\n[3d] il takt time si dichiara come le permanenze: teorico + delta")
+    # E' la stessa forma del foglio Percorso, e per lo stesso motivo: quello
+    # che il cliente dichiara e' il ciclo a cui la linea e' pensata, non i due
+    # estremi di una banda. Le soglie su cui lavora il modello sono derivate,
+    # e il file riscritto deve tornare a dire il teorico, non il centro.
+    p = modello_temporaneo()
+    try:
+        modifica(p, FOGLIO_PARAMETRI, "B2", 120)
+        modifica(p, FOGLIO_PARAMETRI, "B3", 10)
+        modifica(p, FOGLIO_PARAMETRI, "B4", 30)
+        d = leggi_problema(p).data
+        check(
+            (d.takt_min, d.takt_max) == (110.0, 150.0),
+            "teorico 120 con -10/+30 -> banda 110-150 s",
+        )
+        check(d.takt_nominale == 120.0, "e il teorico resta 120, non il centro (130)")
+
+        # I delta sono AMPIEZZE: scritti col segno meno darebbero una banda
+        # rovesciata senza dirlo, quindi vanno respinti nominando la cella.
+        modifica(p, FOGLIO_PARAMETRI, "B4", -30)
+        msg = errore_leggendo(p)
+        check(
+            "Parametri!B4" in msg and "ampiezze" in msg,
+            "un delta col segno meno viene respinto",
+        )
+
+        # Delta a zero = takt time rigido: e' lecito e deve restare leggibile.
+        modifica(p, FOGLIO_PARAMETRI, "B3", 0)
+        modifica(p, FOGLIO_PARAMETRI, "B4", 0)
+        d = leggi_problema(p).data
+        check(
+            (d.takt_min, d.takt_max, d.takt_nominale) == (120.0, 120.0, 120.0),
+            "delta a zero: takt time rigido a 120 s",
+        )
+    finally:
+        os.unlink(p)
+
+    # I nomi vecchi dicevano gli estremi: intercettati con il modo di convertirli
+    p = modello_temporaneo()
+    try:
+        modifica(p, FOGLIO_PARAMETRI, "A2", "takt_min_s")
+        modifica(p, FOGLIO_PARAMETRI, "A3", "takt_max_s")
+        msg = errore_leggendo(p)
+        check(
+            "takt_teorico_s" in msg and "non esistono piu'" in msg,
+            "'takt_min_s' e 'takt_max_s' rimandano ai nomi nuovi",
+        )
+        check("si converte" in msg.lower(), "e il messaggio dice come si converte")
     finally:
         os.unlink(p)
 
@@ -427,7 +486,7 @@ def test_parametro_sconosciuto():
         modifica(p, FOGLIO_PARAMETRI, "A2", "takt_minimo")
         msg = errore_leggendo(p)
         check("non riconosciuto" in msg, "nome non riconosciuto segnalato")
-        check("takt_min_s" in msg, "il messaggio elenca i nomi ammessi")
+        check("takt_teorico_s" in msg, "il messaggio elenca i nomi ammessi")
         check("obbligatorio" in msg, "e segnala che ne manca uno obbligatorio")
     finally:
         os.unlink(p)
@@ -617,9 +676,12 @@ def test_dati_incoerenti():
     print("\n[12] dati validi come numeri ma incoerenti fra loro")
     p = modello_temporaneo()
     try:
-        modifica(p, FOGLIO_PARAMETRI, "B2", 200)  # takt_min > takt_max
+        modifica(p, FOGLIO_PARAMETRI, "B3", 200)  # delta negativo > teorico
         msg = errore_leggendo(p)
-        check("takt_min > takt_max" in msg, "incoerenza dal modello, riportata")
+        check(
+            "Parametri!B3" in msg and "non minore del takt time teorico" in msg,
+            "delta negativo oltre il teorico, riportato con la cella",
+        )
     finally:
         os.unlink(p)
 
@@ -1526,6 +1588,7 @@ def main():
     test_virgola_decimale()
     test_file_in_metri()
     test_parametro_sostituito()
+    test_takt_teorico_e_tolleranze()
     test_vasca_inesistente()
     test_vasca_duplicata()
     test_percorso_riordinato()

@@ -91,7 +91,11 @@ def main(argv=None) -> int:
     data = cfg.data
     print(f"Linea letta da {args.file}")
     print(f"  stazioni: {data.n_stations}   mosse: {data.n_moves}")
-    print(f"  takt time ammesso: [{data.takt_min:.1f}, {data.takt_max:.1f}] s")
+    print(
+        f"  takt time: {data.takt_nominale:.1f} s teorici "
+        f"(-{data.takt_delta_neg:.1f} / +{data.takt_delta_pos:.1f}), "
+        f"cioe' fra {data.takt_min:.1f} e {data.takt_max:.1f} s"
+    )
 
     # -- risoluzione -------------------------------------------------------
     if cfg.zone_manuali is not None:
@@ -115,7 +119,10 @@ def main(argv=None) -> int:
         print()
         print(f"Nessuna soluzione trovata (stato: {solution.status}).")
         print("Cosa provare:")
-        print("  - allargare la tolleranza sul takt time (takt_min_s / takt_max_s)")
+        print(
+            "  - allargare la tolleranza sul takt time "
+            "(takt_delta_negativo_s / takt_delta_positivo_s)"
+        )
         print("  - aumentare max_carroponti")
         print("  - aumentare i posti delle vasche piu' lente")
         print("  - allungare tempo_limite_per_tentativo_s")

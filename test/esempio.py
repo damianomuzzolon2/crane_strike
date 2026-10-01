@@ -122,6 +122,7 @@ def main():
         route=route,
         takt_min=takt_nominale - takt_tolleranza,
         takt_max=takt_nominale + takt_tolleranza,
+        takt_nominal=takt_nominale,
         kin_empty=kin_empty,
         kin_loaded=kin_loaded,
         hoist_extent_pos=hoist_extent_pos,
@@ -143,7 +144,11 @@ def main():
         )
 
     print(f"Stazioni: {data.n_stations}  |  Mosse: {data.n_moves}")
-    print(f"Takt time ammesso: [{data.takt_min:.1f}, {data.takt_max:.1f}] s")
+    print(
+        f"Takt time: {data.takt_nominale:.1f} s teorici "
+        f"(-{data.takt_delta_neg:.1f} / +{data.takt_delta_pos:.1f}), "
+        f"cioe' [{data.takt_min:.1f}, {data.takt_max:.1f}] s"
+    )
 
     # ---------------------------------------------------------------
     # 6) Risoluzione: prova 1, 2, 3, ... carroponti (fino a max_hoists) e
