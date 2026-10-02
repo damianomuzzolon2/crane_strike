@@ -670,7 +670,53 @@ GRAFICO = [
     ("c", "interfaccia.Applicazione._mostra_ciclogramma"),
     ("p",
      "Sceglie quale dei due disegnare secondo `self.vista`, e riapplica "
-     "l'inquadratura se l'utente ne aveva scelta una."),
+     "l'inquadratura se l'utente ne aveva scelta una. Prima pero' ricalcola i "
+     "punti di avvio: e' il passaggio obbligato di ogni ridisegno, ed e' da "
+     "li' che il grafico e il riepilogo prendono lo stesso istante."),
+
+    # ==================================================================
+    ("h2", "1 bis. I punti di avvio, e il pulsante che li scorre"),
+    ("p",
+     "Gli istanti da cui la linea si puo' mettere in marcia (vedi avvio.py) non "
+     "sono uno: sono tutti quelli che sbagliano uguale, e stanno lontani fra "
+     "loro. Nessuno e' migliore degli altri, quindi il programma non ne sceglie "
+     "uno -- li mostra e lascia scegliere."),
+    ("c", "interfaccia.Applicazione._aggiorna_avvii"),
+    ("q",
+     "SI RICALCOLANO DA UN POSTO SOLO. Il grafico, il riepilogo e il "
+     "salvataggio devono mostrare lo STESSO istante: tre calcoli separati in "
+     "tre momenti diversi non lo garantirebbero, e si finirebbe per salvare un "
+     "istante diverso da quello che si ha davanti."),
+    ("p",
+     "L'indice di quello che si sta guardando si conserva solo se i punti di "
+     "avvio NON sono cambiati. Un ridisegno che non tocca il ciclogramma -- si "
+     "passa da una vista all'altra, si riapre la simulazione -- non deve far "
+     "saltare la linea nera altrove; un ciclogramma diverso invece ha istanti "
+     "diversi, e il terzo di prima non e' il terzo di adesso. Il confronto si fa "
+     "sui TEMPI e non sul numero: due liste lunghe uguale ma con istanti diversi "
+     "sono due cose diverse."),
+    ("c", "interfaccia.Applicazione._avvio_corrente"),
+    ("c", "interfaccia.Applicazione._prossimo_avvio"),
+    ("p",
+     "Scorre in tondo: dopo l'ultimo si torna al primo. Sono tutti equivalenti, "
+     "quindi non c'e' un ultimo oltre il quale si e' finito -- c'e' un giro di "
+     "istanti fra cui scegliere."),
+    ("p",
+     "Non passa da _mostra_ciclogramma: gli istanti sono gli stessi, cambia "
+     "solo quale si guarda, e ricalcolarli azzererebbe l'indice appena mosso. "
+     "Per la stessa ragione non tocca la simulazione: il punto di avvio non "
+     "cambia il ciclogramma, dice solo da dove lo si legge."),
+    ("c", "interfaccia.Applicazione._aggiorna_pulsante_avvio"),
+    ("p",
+     "A parte e non dentro _aggiorna_stato_pulsanti, che dipende da cosa c'e' "
+     "caricato e da cosa sta girando: questo dipende da quanti istanti sono "
+     "venuti fuori, che cambia in un altro momento. Lo chiamano tutti e due, "
+     "cosi' non resta indietro ne' nell'uno ne' nell'altro caso."),
+    ("p",
+     "L'etichetta porta il conto ('Avvio 1 di 5'): dice da sola che ce ne sono "
+     "altri, che altrimenti non si saprebbe. Larghezza fissa nel costruttore, se "
+     "no ballerebbe passando da 'di 5' a 'di 1'. Spento quando ce n'e' uno solo: "
+     "non c'e' niente dove andare."),
     ("c", "interfaccia.Applicazione._disegna_traiettorie"),
     ("p",
      "Il ciclogramma vero e proprio, delegato a plotting.plot_cyclogram sullo "

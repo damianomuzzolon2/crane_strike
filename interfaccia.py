@@ -39,6 +39,7 @@ from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolb
 from matplotlib.figure import Figure
 from matplotlib.lines import Line2D
 
+from avvio import righe_di_riepilogo, trova_avvii
 from excel_io import leggi_problema, scrivi_modello, scrivi_risultati
 from model import (
     Interruzione,
@@ -51,6 +52,7 @@ import manuale
 from plotting import (
     _HOIST_COLORS,
     _sample_segment,
+    disegna_avvio,
     eventi_del_trasporto,
     lettura_coordinate,
     plot_cyclogram,
@@ -173,6 +175,21 @@ class Applicazione(tk.Tk):
         # un risultato che non piace.
         self.durata_calcolo: float | None = None
 
+        # -- i punti di avvio -------------------------------------------------
+        # Gli istanti da cui la linea si puo' mettere in marcia: non uno, TUTTI
+        # quelli che sbagliano uguale (vedi avvio.trova_avvii). Si tengono qui
+        # perche' si rileggono da tre posti -- il grafico, il riepilogo e il
+        # salvataggio -- e ricalcolarli in ognuno vorrebbe dire ricalcolarli a
+        # ogni ridisegno, e soprattutto poter mostrare a schermo un istante e
+        # salvarne un altro.
+        #
+        # `indice_avvio` e' quello che si sta guardando. Torna a zero appena il
+        # ciclogramma cambia: sono istanti nuovi, e tenere il numero d'ordine
+        # vecchio vorrebbe dire puntare a un altro momento del giro senza averlo
+        # chiesto.
+        self.avvii: list = []
+        self.indice_avvio = 0
+
         # -- il ciclogramma, nei termini in cui si modifica -------------------
         # Un ciclogramma ha pochissimi gradi di liberta' reali, e sono gli
         # stessi che si usano tracciandolo a mano su carta: il takt time, il
@@ -290,6 +307,21 @@ class Applicazione(tk.Tk):
             barra, text="Simulazione", command=self._apri_simulazione
         )
         self.btn_simula.pack(side=tk.LEFT)
+
+        # Scorre i punti di avvio EQUIVALENTI -- quelli che sbagliano uguale --
+        # spostando la linea nera sul grafico. Non e' un'impostazione: nessuno
+        # di loro e' migliore degli altri, e quale convenga lo sa chi conosce
+        # l'impianto. Il pulsante serve a vederli tutti e fermarsi su quello che
+        # gli torna.
+        #
+        # L'etichetta porta il conto ("Avvio 1 di 3"): dice da sola che ce ne
+        # sono altri, che altrimenti non si saprebbe. Larghezza fissa, se no
+        # ballerebbe passando da "1 di 3" a "1 di 1". Spento quando ce n'e' uno
+        # solo: non c'e' niente dove andare.
+        self.btn_avvio = ttk.Button(
+            barra, text="Avvio", width=13, command=self._prossimo_avvio
+        )
+        self.btn_avvio.pack(side=tk.LEFT, padx=(6, 0))
 
         self.btn_salva = ttk.Button(
             barra, text="Salva risultati...", command=self._salva
@@ -785,6 +817,10 @@ class Applicazione(tk.Tk):
                     "attese": self.attese,
                     "soste": self.soste,
                 },
+                # quello che si sta guardando, non il primo: se l'utente ha
+                # scorso i punti di avvio, il file deve dire quello che ha
+                # scelto -- come il PNG che esce insieme
+                avvio=self._avvio_corrente(),
             )
             png = os.path.splitext(percorso)[0] + ".png"
             self._salva_immagine(png)
@@ -884,6 +920,7 @@ class Applicazione(tk.Tk):
                 n_cycles=2,
                 title=f"Ciclogramma - {os.path.basename(self.percorso_file or '')}",
                 ax=assi,
+                avvio=self._avvio_corrente(),
             )
         except ValueError:
             # niente da disegnare (per esempio nessun trasporto assegnato):
@@ -1606,11 +1643,84 @@ class Applicazione(tk.Tk):
 
     # -- presentazione --------------------------------------------------
 
+    def _aggiorna_avvii(self):
+        """Ricalcola i punti di avvio del ciclogramma che c'e' adesso.
+
+        Si chiama da un posto solo, prima di ogni ridisegno: il grafico, il
+        riepilogo e il salvataggio devono mostrare lo STESSO istante, e tre
+        calcoli separati in tre momenti diversi non lo garantirebbero.
+
+        L'istante che si sta guardando si conserva soltanto se i punti di avvio
+        non sono cambiati. Un ridisegno che non tocca il ciclogramma -- si passa
+        da una vista all'altra, si riapre la simulazione -- non deve far saltare
+        la linea nera altrove; un ciclogramma diverso invece ha istanti diversi,
+        e il terzo di prima non e' il terzo di adesso."""
+        prima = [a.t for a in self.avvii]
+        self.avvii = (
+            []
+            if self.soluzione is None or self.dati is None
+            else trova_avvii(self.dati, self.soluzione)
+        )
+        if [a.t for a in self.avvii] != prima:
+            self.indice_avvio = 0
+        elif self.avvii:
+            self.indice_avvio %= len(self.avvii)
+
+    def _avvio_corrente(self):
+        """Il punto di avvio che si sta guardando, o None se non ce n'e'."""
+        if not self.avvii:
+            return None
+        return self.avvii[self.indice_avvio % len(self.avvii)]
+
+    def _prossimo_avvio(self):
+        """Passa al punto di avvio successivo, e torna al primo dopo l'ultimo.
+
+        Sono tutti equivalenti -- stesso errore -- quindi scorrerli in tondo e'
+        la cosa giusta: non c'e' un ultimo oltre il quale si e' finito, c'e' un
+        giro di istanti fra cui scegliere."""
+        if len(self.avvii) < 2:
+            return
+        self.indice_avvio = (self.indice_avvio + 1) % len(self.avvii)
+        a = self._avvio_corrente()
+        self._stato(
+            f"Punto di avvio {a.indice + 1} di {a.totale}: {a.t:.2f} s"
+            + ("" if a.esatto else f"  (errore {a.errore:.2f} s)")
+        )
+        # Non passa da _mostra_ciclogramma: gli istanti sono gli stessi, cambia
+        # solo quale si guarda, e ricalcolarli azzererebbe l'indice appena
+        # mosso. La simulazione non la riguarda: il punto di avvio non cambia
+        # il ciclogramma, dice solo da dove lo si legge.
+        self._aggiorna_pulsante_avvio()
+        if self.vista == "pettine":
+            self._disegna_pettine()
+        else:
+            self._disegna_traiettorie()
+        self._aggiorna_banner_e_riepilogo()
+
+    def _aggiorna_pulsante_avvio(self):
+        """L'etichetta e lo stato del pulsante che scorre i punti di avvio.
+
+        A parte e non dentro `_aggiorna_stato_pulsanti`: quello dipende da cosa
+        c'e' caricato e da cosa sta girando, questo da quanti istanti sono
+        venuti fuori -- due cose che cambiano in momenti diversi. Chiamato da
+        tutti e due, cosi' non resta indietro ne' nell'uno ne' nell'altro
+        caso."""
+        a = self._avvio_corrente()
+        self.btn_avvio.configure(
+            text="Avvio" if a is None else f"Avvio {a.indice + 1} di {a.totale}",
+            state=tk.NORMAL if len(self.avvii) > 1 else tk.DISABLED,
+        )
+
     def _mostra_ciclogramma(self):
         if self.soluzione is None or self.dati is None:
+            self.avvii = []
+            self.indice_avvio = 0
+            self._aggiorna_pulsante_avvio()
             self._grafico_vuoto()
             self.tela.draw()
             return
+        self._aggiorna_avvii()
+        self._aggiorna_pulsante_avvio()
         if self.vista == "pettine":
             self._disegna_pettine()
         else:
@@ -1634,6 +1744,7 @@ class Applicazione(tk.Tk):
                 n_cycles=2,
                 title=f"Ciclogramma - {os.path.basename(self.percorso_file or '')}",
                 ax=self.assi,
+                avvio=self._avvio_corrente(),
             )
         except Exception as e:
             # Il caso normale, non un guasto: senza nessun trasporto assegnato
@@ -1774,6 +1885,15 @@ class Applicazione(tk.Tk):
         fine = manuale.RIPETIZIONI_PREDEFINITE * T + (
             scalinate[0][-1].t_end if scalinate else T
         )
+        # La linea nera del punto di avvio anche qui, e per tutte le ripetizioni
+        # disegnate: componendo si sposta il ciclogramma, e vedere dove va a
+        # finire l'istante di avvio mentre lo si fa e' meta' del motivo per cui
+        # esiste. Stessa funzione del ciclogramma, cosi' le due viste non
+        # possono metterla in due punti diversi.
+        disegna_avvio(
+            self.assi, self._avvio_corrente(), T, int(fine / T) + 1
+        )
+
         self.assi.set_xlim(0.0, fine)
         self.assi.set_xlabel("tempo [s]")
         self.assi.set_ylabel("posizione lungo la rotaia")
@@ -1937,6 +2057,21 @@ class Applicazione(tk.Tk):
                 f"({self.dati.route[z.lo].tank_id} -> "
                 f"{self.dati.route[z.hi + 1].tank_id})"
             )
+        # Il punto di avvio: la linea nera verticale che si vede sul grafico,
+        # scritta in chiaro. Sul disegno si legge QUANDO; qui si legge anche
+        # DOVE va portato ogni carroponte, che e' quello che serve a chi sta
+        # davanti all'impianto col pulsante in mano.
+        righe.append("")
+        for etichetta, valore, nota in righe_di_riepilogo(
+            self._avvio_corrente(), self._carri_delle_zone()
+        ):
+            # i secondi con due decimali come nel foglio Riepilogo, dove a
+            # darglieli e' il formato della cella: le due scritte si
+            # confrontano, e "16.6" accanto a "16,60" fa dubitare
+            if isinstance(valore, float):
+                valore = f"{valore:.2f}"
+            righe.append(f"{etichetta}: {valore}   ({nota})")
+
         # Le soste in una vasca in mezzo si vedono sul grafico -- un tratto
         # piatto sopra una vasca che non e' ne' la partenza ne' l'arrivo -- ma
         # a chi guarda sembrano una stranezza finche' non gli si dice che sono
@@ -2247,6 +2382,7 @@ class Applicazione(tk.Tk):
             state=tk.NORMAL if c_e_ciclogramma else tk.DISABLED,
             text="Fine modifica" if self.modifica_aperta else "Modifica",
         )
+        self._aggiorna_pulsante_avvio()
         self.btn_verifica.configure(
             state=tk.NORMAL if c_e_ciclogramma else tk.DISABLED
         )

@@ -472,8 +472,16 @@ def test_modifica_tempi_in_vasca(percorso_linea):
         # Il ciclogramma ricomposto ha stato "MANUALE": va disegnato come
         # qualunque altro. Se il grafico si svuota, modificarlo non serve piu'
         # a niente -- e' proprio quello che si vuole vedere.
+        #
+        # Il segno che si e' svuotato e' il CARTELLO di `_grafico_vuoto`: un
+        # testo al centro degli assi. Non basta piu' dire "nessun testo" --
+        # il ciclogramma ne scrive uno suo, l'etichetta del punto di avvio --
+        # e si guarda quindi se c'e' un testo piazzato in mezzo.
+        cartello = [
+            t for t in app.assi.texts if t.get_position() == (0.5, 0.5)
+        ]
         check(
-            len(app.assi.lines) > 0 and not app.assi.texts,
+            len(app.assi.lines) > 0 and not cartello,
             f"il grafico continua a mostrare il ciclogramma "
             f"({len(app.assi.lines)} linee, stato {app.soluzione.status})",
         )
@@ -894,10 +902,13 @@ def test_composizione_da_zero(percorso_linea):
         app.update()
         from interfaccia import _GRIGIO, _SOTTILE, _SPESSO
 
+        # Fuori le righe delle vasche (#dddddd) e le verticali NERE del punto
+        # di avvio: non sono traiettorie, e qui si guardano le traiettorie.
         linee = [
             (l.get_color(), round(l.get_linewidth(), 2))
             for l in app.assi.lines
-            if l.get_linestyle() != "None" and l.get_color() != "#dddddd"
+            if l.get_linestyle() != "None"
+            and l.get_color() not in ("#dddddd", "#000000")
         ]
         # Il grigio NON sparisce assegnando: e' il percorso dei pezzi, cioe'
         # lo sfondo su cui si lavora, e resta li' anche a lavoro finito.
@@ -1359,6 +1370,103 @@ def test_simulazione_dal_pulsante(percorso_linea):
         chiudi(app)
 
 
+def test_punti_di_avvio(percorso_linea):
+    print("\n[14] il pulsante che scorre i punti di avvio")
+    app = _app_risolta(percorso_linea)
+    try:
+        check(
+            len(app.avvii) > 1,
+            f"la linea di prova ha piu' di un punto di avvio ({len(app.avvii)})",
+        )
+        check(
+            app.indice_avvio == 0
+            and str(app.btn_avvio["state"]) == "normal"
+            and str(app.btn_avvio["text"]) == f"Avvio 1 di {len(app.avvii)}",
+            f"si parte dal primo e il pulsante lo dice "
+            f"({app.btn_avvio['text']})",
+        )
+
+        # Premendolo si passa al successivo, e la linea nera si sposta davvero:
+        # un pulsante che cambia l'etichetta senza muovere il disegno sarebbe
+        # peggio che non averlo.
+        def nera():
+            return [
+                round(float(l.get_xdata()[0]), 4)
+                for l in app.assi.lines
+                if l.get_color() == "#000000"
+            ]
+
+        prima_t, prima_x = app._avvio_corrente().t, nera()
+        app._prossimo_avvio()
+        app.update()
+        check(
+            app.indice_avvio == 1 and app._avvio_corrente().t != prima_t,
+            f"premendolo si passa al secondo ({prima_t:.2f} s -> "
+            f"{app._avvio_corrente().t:.2f} s)",
+        )
+        check(
+            bool(prima_x) and nera() != prima_x,
+            f"e la linea nera sul grafico si sposta con lui ({prima_x} -> "
+            f"{nera()})",
+        )
+        check(
+            f"Istante di avvio: {app._avvio_corrente().t:.2f}"
+            in app.testo_riepilogo.get("1.0", "end"),
+            "il riepilogo scrive l'istante che si sta guardando",
+        )
+
+        # Gli istanti sono tutti equivalenti: dopo l'ultimo si torna al primo.
+        for _ in range(len(app.avvii) - 1):
+            app._prossimo_avvio()
+        app.update()
+        check(
+            app.indice_avvio == 0 and abs(app._avvio_corrente().t - prima_t) < 1e-9,
+            "e dopo l'ultimo si torna al primo: e' un giro, non una fila",
+        )
+
+        # Un ridisegno che non tocca il ciclogramma non deve far saltare la
+        # linea nera altrove.
+        app._prossimo_avvio()
+        scelto = app._avvio_corrente().t
+        app._mostra_ciclogramma()
+        app.update()
+        check(
+            abs(app._avvio_corrente().t - scelto) < 1e-9,
+            f"un ridisegno lascia dov'era l'istante scelto ({scelto:.2f} s)",
+        )
+
+        # Un ciclogramma diverso ha istanti diversi: il numero d'ordine vecchio
+        # punterebbe a un altro momento del giro senza che nessuno l'abbia
+        # chiesto, e si riparte dal primo.
+        app.permanenze[1] += 10.0
+        app._ricomponi("prova", app._istantanea())
+        app.update()
+        check(
+            app.indice_avvio == 0,
+            "cambiato il ciclogramma, si riparte dal primo",
+        )
+
+        # Il file salvato dice l'istante che si sta guardando, non il primo.
+        if len(app.avvii) > 1:
+            app._prossimo_avvio()
+            app.update()
+            atteso = app._avvio_corrente()
+            fd, png = tempfile.mkstemp(suffix=".png")
+            os.close(fd)
+            try:
+                app._salva_immagine(png)
+                check(
+                    os.path.getsize(png) > 5000,
+                    f"l'immagine salvata con l'avvio "
+                    f"{atteso.indice + 1} di {atteso.totale} viene scritta",
+                )
+            finally:
+                if os.path.exists(png):
+                    os.unlink(png)
+    finally:
+        chiudi(app)
+
+
 def test_file_illeggibile():
     print("\n[3] file non valido: messaggio, non schianto")
     from interfaccia import Applicazione
@@ -1404,6 +1512,7 @@ def main():
         test_ferma_il_calcolo(linea)
         test_ciclogramma_si_riprende(linea)
         test_simulazione_dal_pulsante(linea)
+        test_punti_di_avvio(linea)
         test_file_illeggibile()
     finally:
         os.unlink(linea)

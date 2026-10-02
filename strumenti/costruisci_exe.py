@@ -30,6 +30,7 @@ TEST = [
     "test/test_excel_io.py",
     "test/test_model.py",
     "test/test_simulazione.py",
+    "test/test_avvio.py",
     "test/test_interfaccia.py",
 ]
 

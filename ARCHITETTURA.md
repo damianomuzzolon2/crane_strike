@@ -5,8 +5,8 @@ cosa fa il programma e come si usa; questo spiega com'e' fatto dentro, quali
 invarianti regge, e dove sono le trappole — comprese quelle in cui siamo gia'
 caduti, che sono la parte piu' utile.
 
-Stato al momento della scrittura: 16 file Python, 15.223 righe, cinque suite di
-test per **515 asserzioni** complessive.
+Stato al momento della scrittura: 20 file Python, 24.171 righe, sei suite di
+test per **612 asserzioni** complessive.
 
 ---
 
@@ -14,7 +14,7 @@ test per **515 asserzioni** complessive.
 
 ### Dove stanno i file
 
-In radice ci sono **solo i nove moduli** del programma, i due documenti,
+In radice ci sono **solo i dieci moduli** del programma, i due documenti,
 `CraneStrike.bat` e `requirements.txt`. Il resto sta in `test/`, `strumenti/`,
 `doc/`, `dati/` e `risorse/`.
 
@@ -43,8 +43,8 @@ lo fanno con tre righe in testa al file, il `.spec` con `SPECPATH`.
 ### La documentazione riga per riga
 
 In `doc/` c'e' una sottocartella per modulo con i documenti Word che lo
-spiegano funzione per funzione — ventiquattro documenti che coprono tutte e
-299 le fra funzioni e metodi — piu' `ALBERO_DELLE_CHIAMATE.docx`. Si
+spiegano funzione per funzione — venticinque documenti che coprono 345 delle
+355 fra funzioni e metodi — piu' `ALBERO_DELLE_CHIAMATE.docx`. Si
 rigenerano con `python strumenti/genera_doc.py`, e il testo sta in
 `strumenti/doc_contenuti/<modulo>.py`.
 
@@ -71,6 +71,8 @@ da solo la regola qui sotto: nessun modulo chiama quelli che gli stanno sopra.
         |          |          |         |          |
         +----------+----+-----+---------+----------+
                         |
+                    avvio.py                     <- letture della soluzione
+                        |
                     model.py                     <- motore (CP-SAT)
                         |
                   kinematics.py                  <- fisica
@@ -85,6 +87,11 @@ Le dipendenze vanno **in una direzione sola** ed e' un vincolo, non un caso:
   `test_verify.py` conta su questo.
 - `verify.py` non importa `ortools` **mai**. E' la ragione per cui esiste: un
   verificatore che usasse lo stesso solutore non verificherebbe niente.
+- `avvio.py` **legge e basta**: non importa `ortools`, non tocca la soluzione e
+  non ha niente da dire sul disegno. Sta sopra `model.py` perche' usa le fasi e
+  le posizioni, e sotto tutti gli altri perche' il punto di avvio si scrive in
+  quattro posti -- il grafico, il foglio Riepilogo, il pannello della finestra e
+  il terminale -- e deve essere lo stesso in tutti e quattro.
 
 Chi rompe questa direzione rompe la testabilita' del progetto.
 
@@ -662,6 +669,78 @@ su `2T` ci cade appena sotto — e il carroponte comincia il giro un periodo dop
 senza piu' arrivare in tempo da nessuna parte. Sintomo: un file appena calcolato
 e' pulito, lo stesso file riaperto e' pieno di attese lunghe un takt.
 
+### 6.2 `avvio.py` — il punto di avvio, 572 righe
+
+Un ciclogramma e' periodico e **non ha un inizio**: l'origine con cui viene
+scritto e' il prelievo della prima mossa del primo carroponte, che per chi deve
+accendere l'impianto non vuol dire niente. `avvio.py` ne ricava un istante che
+invece vuol dire qualcosa: quello in cui i carroponti si possono lasciare come
+stanno, perche' sono tutti
+
+- **fermi** — nessuna traslazione, nessuna corsa del gancio;
+- **in posizione bassa** — il gancio in fondo alla corsa della vasca su cui
+  stanno, che e' dove lo lascia un rilascio e dove lo trova una presa;
+- **ne' al carico ne' allo scarico** — le due stazioni presidiate, dove il pezzo
+  viene appeso e staccato.
+
+Le **finestre di riposo** di un carroponte (`finestre_di_riposo`) si leggono dai
+suoi soli `Segment`, e sono di due tipi che si saldano fra loro: le **attese**
+(`wait`), e l'**aggancio** e lo **sgancio** — le fasi ferme in fondo corsa in
+testa alla presa e in coda al rilascio. I secondi non sono un dettaglio: in un
+giro incatenato, dove il carroponte passa da una consegna alla presa successiva
+senza mai aspettare, sono **l'unico** riposo che esiste, e senza di loro
+nessun ciclogramma denso avrebbe un punto di avvio.
+
+Carico e scarico si escludono **per posizione e non per indice**: se la ricetta
+ci ripassa a meta' percorso resta comunque la vasca presidiata. E' anche la
+ragione per cui le zone di cambio quota (§4.5) qui non si incontrano mai —
+esistono solo a quelle due tappe.
+
+**Quando un istante comune non c'e'** non si rinuncia, si prende il meno
+sbagliato: quello in cui la somma, su tutti i carroponti, di quanto manca a
+ciascuno — la distanza *circolare* dalla sua finestra piu' vicina — e' minima; a
+pari errore, il primo.
+
+`trova_avvii` restituisce **tutti** i tratti del ciclo che arrivano a
+quell'errore, non il primo: sono quasi sempre piu' d'uno e stanno lontani fra
+loro (sulla linea d'esempio sono cinque, uno per ogni coppia di vasche in cui i
+due carroponti si fermano insieme). Sono equivalenti, e sceglierne uno non e'
+una decisione che il modulo abbia gli elementi per prendere — quale convenga lo
+sa chi conosce l'impianto. Nella finestra si scorrono col pulsante `Avvio`;
+`trova_avvio` da' il primo, ed e' quello che si scrive quando non c'e' nessuno
+a scegliere (il file dei risultati, il PNG da riga di comando).
+
+Di ogni tratto si restituisce un istante: il **punto di mezzo** se l'errore e'
+zero (`_estensione`) — il primo estremo e' l'istante in cui l'ultimo carroponte
+si e' appena fermato, e avviare li' non lascerebbe margine da nessuna delle due
+parti — e il **primo** altrimenti, perche' a pari errore si tiene il primo.
+
+> **I candidati non sono solo gli estremi delle finestre.** Per trovare il
+> minimo basterebbero quelli: fra due estremi consecutivi ogni distanza e'
+> lineare, e nel mezzo di un buco ci sta il massimo, non il minimo. Ma per
+> capire **quanti** tratti distinti arrivano al minimo servono anche i **colmi
+> dei buchi**, a meta' fra la fine di una finestra e l'inizio della successiva:
+> li' la distanza smette di crescere e comincia a calare, ed e' l'unico posto in
+> cui l'errore puo' risalire *fra* due candidati che stanno tutti e due al
+> minimo. Senza, due tratti buoni separati da un buco stretto si fondono in uno,
+> e il pulsante ne mostra uno dove ce ne sono due. Costato un test: `test_avvio`
+> conta i tratti campionando il ciclo e li confronta con quelli dichiarati.
+> Aggiungere i colmi non puo' spostare il minimo: li' la pendenza della somma
+> **cala di due**, quindi un minimo stretto non ci puo' stare.
+
+Le finestre si trattano **circolarmente** ovunque, e `_nel_periodo` le restituisce
+come `(a, b)` con `a` in `[0, T)` e `b` fino ad `a + T`: un `b` oltre `T` e' una
+finestra a cavallo dell'origine, e ce n'e' quasi sempre una, perche' il giro di
+un carroponte comincia con l'aggancio della sua prima presa e finisce con
+l'attesa che la precede. Spezzarla in due agli estremi del periodo la farebbe
+sembrare due finestre corte dove ce n'e' una lunga, e il punto di mezzo
+cadrebbe nel posto sbagliato.
+
+Il risultato si scrive in **quattro posti** e con le stesse parole, da
+`righe_di_riepilogo`: la linea nera verticale del grafico (`plot_cyclogram`), la
+sezione *Avvio della linea* del foglio Riepilogo, il pannello della finestra e
+il terminale di `ciclogramma.py`.
+
 ---
 
 ## 7. `verify.py` — il verificatore indipendente, 1043 righe
@@ -970,7 +1049,7 @@ lascia il pulsante vuoto.
 
 ---
 
-## 11. I test — 543 asserzioni, cinque suite
+## 11. I test — 612 asserzioni, sei suite
 
 Nessun pytest: ogni file si lancia da solo, stampa cosa ha provato e restituisce
 un codice d'uscita.
@@ -978,10 +1057,11 @@ un codice d'uscita.
 | file | asserzioni | richiede | domanda a cui risponde |
 | --- | ---: | --- | --- |
 | `test/test_verify.py` | 123 | — | il verificatore trova davvero quello che deve? |
-| `test/test_excel_io.py` | 114 | — | un file compilato male viene respinto con un messaggio utile? |
+| `test/test_excel_io.py` | 138 | — | un file compilato male viene respinto con un messaggio utile? |
 | `test/test_simulazione.py` | 84 | — | la simulazione mostra il ciclogramma che c'e'? |
+| `test/test_avvio.py` | 36 | — | il punto di avvio e' davvero un punto di avvio? |
 | `test/test_model.py` | 94 | OR-Tools | il modello produce soluzioni fisicamente valide? |
-| `test/test_interfaccia.py` | 128 | OR-Tools + grafica | l'interfaccia si comporta come deve? |
+| `test/test_interfaccia.py` | 137 | OR-Tools + grafica | l'interfaccia si comporta come deve? |
 
 > `test_model.py` risolve davvero, con limiti di tempo dell'ordine del minuto.
 > Su una macchina occupata un caso puo' scadere e restituire `UNKNOWN`: e'

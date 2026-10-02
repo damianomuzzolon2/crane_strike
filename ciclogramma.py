@@ -27,6 +27,7 @@ import dataclasses
 import os
 import sys
 
+from avvio import righe_di_riepilogo, trova_avvio
 from excel_io import leggi_problema, scrivi_modello, scrivi_risultati
 from model import solve, solve_auto_hoists
 from verify import verify_solution
@@ -134,6 +135,18 @@ def main(argv=None) -> int:
     print()
     print(f"Carroponti: {n_hoists}   zone: {[(z.lo, z.hi) for z in zones]}")
     print(f"Takt time: {solution.T:.2f} s")
+
+    # -- il punto di avvio -------------------------------------------------
+    # Lo stesso che finisce nel Riepilogo e sul grafico: qui si stampa perche'
+    # chi lancia il comando da terminale non apre necessariamente ne' l'uno ne'
+    # l'altro, e questo e' il dato con cui si va all'impianto.
+    print()
+    for etichetta, valore, nota in righe_di_riepilogo(
+        trova_avvio(data_finale, solution)
+    ):
+        if isinstance(valore, float):
+            valore = f"{valore:.2f}"  # due decimali come nel foglio Riepilogo
+        print(f"{etichetta}: {valore}   ({nota})")
 
     # -- verifica indipendente --------------------------------------------
     report = verify_solution(data_finale, solution)

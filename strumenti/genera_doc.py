@@ -56,6 +56,7 @@ MODULI = [
     "excel_io",
     "plotting",
     "manuale",
+    "avvio",
     "simulazione",
     "interfaccia",
     "ciclogramma",

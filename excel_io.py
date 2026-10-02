@@ -28,6 +28,7 @@ import sys
 from dataclasses import dataclass
 from typing import Optional
 
+from avvio import Avvio, righe_di_riepilogo, trova_avvio
 from kinematics import Kinematics
 from model import (
     HoistZone,
@@ -2066,7 +2067,8 @@ _COSA_CONTIENE = {
         "dove il carroponte cambia quota agli estremi della linea (facoltativo)"
     ),
     FOGLIO_CICLOGRAMMA: "il ciclogramma nei suoi tre gradi di liberta', per riprenderlo",
-    "Riepilogo": "takt time, produttivita', carroponti, esito della verifica",
+    "Riepilogo": "takt time, produttivita', carroponti, punto di avvio, "
+    "esito della verifica",
     "Movimenti": "ogni tratto di ogni carroponte: quando, da dove, a dove",
     "TempiVerticali": "dove va il tempo di presa e di rilascio, vasca per vasca",
     "FlussoPezzo": "il percorso di un pezzo, vasca per vasca",
@@ -2119,6 +2121,7 @@ def scrivi_risultati(
     sorgente: Optional[str] = None,
     cfg: Optional[Configurazione] = None,
     ciclogramma: Optional[dict] = None,
+    avvio: Optional["Avvio"] = None,
 ) -> str:
     """Scrive UN file Excel che e' due cose insieme.
 
@@ -2131,6 +2134,10 @@ def scrivi_risultati(
     stanno in quest'ordine perche' e' quello in cui le cose sono successe: si
     parte da una linea e se ne ricava un risultato. Il file si apre comunque
     sul Riepilogo, che e' quello che si va a leggere.
+
+    `avvio`: quale dei punti di avvio equivalenti scrivere. Assente = il primo.
+    La finestra passa quello che l'utente sta guardando, cosi' il file e il PNG
+    che escono insieme dicono lo stesso istante del grafico che ha davanti.
 
     Due file separati sarebbero due cose da tenere insieme e da non
     confondere; `leggi_problema` cerca i fogli per nome e ignora gli altri,
@@ -2220,6 +2227,18 @@ def scrivi_risultati(
     voce("Takt time", round(T, 2), "s fra un pezzo e il successivo")
     voce("Produttivita'", round(3600.0 / T, 1) if T else "-", "pezzi/ora", "0.0")
     voce("Numero di carroponti", len(data.zones))
+
+    # -- il punto di avvio -------------------------------------------------
+    # Dove portare a mano i carroponti prima di dare il via, e in che istante
+    # del ciclo si trovano cosi'. E' l'unica cosa del Riepilogo che non
+    # descrive il ciclogramma ma dice come usarlo, e per questo sta subito dopo
+    # la produzione: chi legge il foglio per mettere in marcia la linea trova
+    # prima il takt time e poi da dove partire.
+    sezione("Avvio della linea")
+    for etichetta, valore, nota in righe_di_riepilogo(
+        trova_avvio(data, solution) if avvio is None else avvio
+    ):
+        voce(etichetta, valore, nota)
 
     sezione("Sicurezza")
     voce(

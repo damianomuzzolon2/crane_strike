@@ -52,6 +52,7 @@ nascosti += [
 # I moduli del progetto sono importati per nome dall'interfaccia: elencarli
 # esplicitamente evita sorprese se un import diventasse condizionale.
 nascosti += [
+    "avvio",
     "excel_io",
     "kinematics",
     "manuale",

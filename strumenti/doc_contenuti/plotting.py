@@ -410,11 +410,47 @@ RIGA_PER_RIGA = [
      "una perdita: la linea del pezzo serve a dire dov'e' il pezzo quando "
      "nessun carro e' li' a mostrarlo."),
 
+    ("h3", "disegna_avvio -- la linea nera del punto di avvio"),
+    ("c", "plotting.disegna_avvio"),
+    ("p",
+     "E' l'unica cosa del disegno che non racconta il ciclogramma ma dice cosa "
+     "FARNE: l'istante da cui la linea si mette in marcia, con i carroponti "
+     "fermi in basso dove la linea li incrocia. Da dove venga quell'istante lo "
+     "sa avvio.py; qui si disegna e basta."),
+    ("p",
+     "Nera e continua, e sono due scelte: il nero perche' nessuna traiettoria "
+     "lo usa -- il colore, nel ciclogramma, dice di quale carroponte e' una "
+     "linea, e una linea che non e' di nessun carroponte non puo' prendersi uno "
+     "di quei colori; la continuita' per non confondersi con i separatori "
+     "punteggiati fra un ciclo e l'altro, che stanno sullo stesso asse."),
+    ("p",
+     "La linea si ripete in ogni ciclo disegnato, come tutto il resto -- "
+     "l'istante di avvio e' una fase del ciclo, non un momento solo -- ma "
+     "l'etichetta si scrive una volta sola, sul primo: ripeterla non "
+     "aggiungerebbe niente e coprirebbe il disegno."),
+    ("q",
+     "PERCHE' E' UNA FUNZIONE A SE'. La stessa linea va anche sul PETTINE, che "
+     "si disegna in interfaccia.py e non passa da plot_cyclogram. Due disegni "
+     "separati della stessa cosa prima o poi divergono, e qui divergerebbero "
+     "sull'unica cosa che conta: DOVE cade l'istante. Sta in plotting.py e non "
+     "in avvio.py perche' quel modulo legge e basta -- non importa matplotlib e "
+     "non sa niente di assi."),
+    ("p",
+     "L'etichetta porta il conto ('avvio 2/5') quando gli istanti equivalenti "
+     "sono piu' d'uno: dice da sola che ce ne sono altri, che altrimenti chi "
+     "guarda il solo grafico non saprebbe."),
+
     ("h3", "Assi, confini fra cicli, legenda"),
     ("c", "plotting.plot_cyclogram", "    # -- linee verticali", "    if save_path:"),
     ("p",
      "Le linee verticali punteggiate segnano i confini fra un periodo e il "
      "successivo. Sono n_cycles + 1 perche' servono anche i due estremi."),
+    ("p",
+     "Subito dopo c'e' la chiamata a disegna_avvio. Il parametro `avvio` "
+     "assente vuol dire 'il primo', che e' quello che si scrive anche nel file "
+     "dei risultati; la finestra passa invece quello che l'utente sta "
+     "guardando, perche' il PNG che esce da li' deve essere quello che ha "
+     "davanti."),
     ("p",
      "La legenda elenca i carroponti e, se ce n'e' almeno una, la linea "
      "grigia del pezzo in vasca. Il commento ricorda che c'erano anche due "

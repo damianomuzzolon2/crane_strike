@@ -15,6 +15,7 @@ from matplotlib.lines import Line2D
 from matplotlib.patches import Patch
 from matplotlib.transforms import offset_copy
 
+from avvio import Avvio, trova_avvio
 from kinematics import position_profile
 from model import ProblemData, Solution, Segment
 
@@ -258,6 +259,40 @@ def lettura_coordinate(t: float, x: float) -> str:
     return f"t = {t:.1f} s      posizione = {x:.0f} mm"
 
 
+def disegna_avvio(ax, avvio: Avvio | None, T: float, n_cycles: int = 1):
+    """La LINEA NERA del punto di avvio, su assi gia' disegnati.
+
+    E' l'unica cosa del disegno che non racconta il ciclogramma ma dice cosa
+    farne: l'istante da cui la linea si mette in marcia, con i carroponti fermi
+    in basso dove la linea li incrocia. Nera -- nessuna traiettoria usa quel
+    colore -- e continua, per non confondersi con i separatori puntinati fra un
+    ciclo e l'altro.
+
+    Si ripete in ogni ciclo disegnato, come tutto il resto: l'istante di avvio
+    e' una fase del ciclo, non un momento solo. L'etichetta invece si scrive una
+    volta, sul primo: ripeterla non aggiungerebbe niente e coprirebbe il disegno.
+
+    Sta qui e non in `avvio.py` perche' quel modulo legge e basta; ed e' una
+    funzione a se' perche' la stessa linea va anche sul PETTINE, che si disegna
+    altrove -- e due disegni della stessa cosa prima o poi divergono."""
+    if avvio is None:
+        return
+    for cycle in range(max(1, n_cycles)):
+        ax.axvline(avvio.t + cycle * T, color="#000000", linewidth=1.4, zorder=4)
+    etichetta = "avvio" if avvio.esatto else "avvio (approssimato)"
+    if avvio.totale > 1:
+        etichetta += f"  {avvio.indice + 1}/{avvio.totale}"
+    ax.annotate(
+        etichetta,
+        xy=(avvio.t, 1.0),
+        xycoords=("data", "axes fraction"),
+        xytext=(3, -11),
+        textcoords="offset points",
+        fontsize=8,
+        color="#000000",
+    )
+
+
 def plot_cyclogram(
     data: ProblemData,
     solution: Solution,
@@ -265,7 +300,12 @@ def plot_cyclogram(
     title: str = "Ciclogramma carroponti",
     ax=None,
     save_path: str | None = None,
+    avvio: Avvio | None = None,
 ):
+    """`avvio`: quale dei punti di avvio equivalenti segnare. Assente = il
+    primo, che e' quello che si scrive anche nel file dei risultati. La finestra
+    passa quello che l'utente sta guardando: il PNG che esce da li' deve essere
+    quello che ha davanti, non un altro."""
     # Si disegna tutto cio' che ha dei segmenti, qualunque sia lo stato: una
     # soluzione modificata a mano ("MANUALE") o una proposta di partenza
     # ("PROPOSTA") sono esattamente i casi in cui guardare il ciclogramma
@@ -432,6 +472,11 @@ def plot_cyclogram(
     # -- linee verticali di separazione fra cicli ---------------------------
     for cycle in range(n_cycles + 1):
         ax.axvline(cycle * T, color="#999999", linewidth=1, linestyle=":", zorder=0)
+
+    # -- il punto di avvio --------------------------------------------------
+    disegna_avvio(
+        ax, trova_avvio(data, solution) if avvio is None else avvio, T, n_cycles
+    )
 
     ax.set_xlabel("tempo [s]")
     ax.set_ylabel("posizione lungo la rotaia")
