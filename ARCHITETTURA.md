@@ -5,8 +5,8 @@ cosa fa il programma e come si usa; questo spiega com'e' fatto dentro, quali
 invarianti regge, e dove sono le trappole — comprese quelle in cui siamo gia'
 caduti, che sono la parte piu' utile.
 
-Stato al momento della scrittura: 20 file Python, 24.171 righe, sei suite di
-test per **612 asserzioni** complessive.
+Stato al momento della scrittura: 20 file Python, 24.468 righe, sei suite di
+test per **617 asserzioni** complessive.
 
 ---
 
@@ -808,6 +808,33 @@ tornare indietro un errore per volta e' crudele.
 `_NOMI_IN_METRI` e `_NOMI_SOSTITUITI` producono messaggi di migrazione espliciti
 per i file scritti per versioni precedenti.
 
+### 8.1 Il foglio `Ciclogramma`: colonne per nome, non per posizione
+
+Il foglio tiene i **gradi di liberta'** e due colonne che non lo sono:
+`tempo_teorico_s` (quello della ricetta, dal foglio `Percorso`) e `scarto_s`, la
+differenza. Stanno attaccate a `tempo_in_vasca_s` perche' li' serve il confronto
+— *di quanto mi sono allontanato dalla ricetta, e dove* — e di li' discendono
+tre scelte:
+
+- **non si rileggono.** Il teorico ha una fonte sola; poterlo scrivere anche qui
+  vorrebbe dire poterlo avere in due versioni nello stesso file. Si riscrivono a
+  ogni salvataggio, e l'intestazione le marca con un verde piu' chiaro;
+- `scarto_s` e' una **formula** (`=E6-F6`), non un numero: chi ritocca un tempo
+  in vasca dentro Excel vede l'effetto senza ripassare dal programma;
+- **le colonne si cercano per NOME** (`_colonne_ciclogramma`), ed e' la parte che
+  conta. Infilarne due in mezzo alla tabella ha spostato `sosta_in_vasca` e
+  `sosta_s` da G/H a I/J: un lettore che contasse le posizioni avrebbe letto i
+  file di ieri con lo schema di oggi, prendendo lo scarto per l'attesa dopo la
+  consegna — in silenzio, perche' sono tutti e due numeri plausibili. L'ordine
+  storico resta solo come ripiego per chi ha cancellato la riga dei titoli.
+
+> La stessa trappola ha morso i **test**: una prova scriveva -3.0 in `F5` per
+> controllare che un'attesa negativa venisse respinta, e dopo lo spostamento
+> continuava a scrivere in F5 — che adesso e' il tempo teorico, una colonna che
+> il programma non legge. Il test non falliva, controllava un'altra cosa. Ora
+> l'indirizzo lo da' `cella_ciclogramma(file, titolo, mossa)`, che cerca la
+> colonna per nome come il lettore vero.
+
 Due punti che si sono gia' rivelati fragili:
 
 - **Le cifre salvate.** Le permanenze finiscono in una catena che le risomma e
@@ -1049,7 +1076,7 @@ lascia il pulsante vuoto.
 
 ---
 
-## 11. I test — 612 asserzioni, sei suite
+## 11. I test — 617 asserzioni, sei suite
 
 Nessun pytest: ogni file si lancia da solo, stampa cosa ha provato e restituisce
 un codice d'uscita.
@@ -1057,7 +1084,7 @@ un codice d'uscita.
 | file | asserzioni | richiede | domanda a cui risponde |
 | --- | ---: | --- | --- |
 | `test/test_verify.py` | 123 | — | il verificatore trova davvero quello che deve? |
-| `test/test_excel_io.py` | 138 | — | un file compilato male viene respinto con un messaggio utile? |
+| `test/test_excel_io.py` | 143 | — | un file compilato male viene respinto con un messaggio utile? |
 | `test/test_simulazione.py` | 84 | — | la simulazione mostra il ciclogramma che c'e'? |
 | `test/test_avvio.py` | 36 | — | il punto di avvio e' davvero un punto di avvio? |
 | `test/test_model.py` | 94 | OR-Tools | il modello produce soluzioni fisicamente valide? |

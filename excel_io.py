@@ -47,6 +47,39 @@ FOGLIO_ZONE = "Zone"
 FOGLIO_CAMBIO_QUOTA = "CambioQuota"
 FOGLIO_CICLOGRAMMA = "Ciclogramma"
 
+# Le colonne della tabella del foglio Ciclogramma, nell'ordine in cui si
+# scrivono. UNA definizione sola, usata da chi scrive e da chi rilegge: le
+# colonne si cercano per NOME, non per posizione, ed e' quello che permette di
+# infilarne una in mezzo senza rompere i file scritti prima.
+#
+# `dato` distingue le colonne che il programma RILEGGE -- i gradi di liberta'
+# del ciclogramma, piu' le due chiavi di riga -- da quelle che sono li' solo da
+# guardare. Le seconde si riscrivono a ogni salvataggio da cio' che le detta
+# davvero (il foglio Percorso), quindi modificarle a mano non serve a niente, e
+# il foglio lo dice con un colore diverso nell'intestazione.
+_COLONNE_CICLOGRAMMA = [
+    ("mossa", 8, True),
+    ("da vasca", 22, True),
+    ("a vasca", 22, True),
+    ("carroponte", 12, True),
+    ("tempo_in_vasca_s", 18, True),
+    # Il tempo TEORICO di quella vasca e lo scarto rispetto a quello scelto.
+    # Stanno qui, attaccati al tempo vero, perche' la domanda che si fa chi
+    # guarda questo foglio e' una sola: di quanto mi sono allontanato dalla
+    # ricetta, e dove. Con il teorico su un altro foglio bisognava tenere due
+    # tabelle aperte e confrontarle riga per riga.
+    ("tempo_teorico_s", 18, False),
+    ("scarto_s", 12, False),
+    ("attesa_dopo_consegna_s", 24, True),
+    ("sosta_in_vasca", 22, True),
+    ("sosta_s", 12, True),
+]
+
+# La riga dei titoli e la prima riga di dati nella tabella del foglio
+# Ciclogramma. Sopra ci stanno il takt time e il numero di carroponti.
+_RIGA_TITOLI_CICLOGRAMMA = 4
+_PRIMA_RIGA_CICLOGRAMMA = 5
+
 # Le due zone di cambio quota, nell'ordine in cui compaiono sul foglio.
 # L'etichetta e' quella che l'utente scrive nella prima colonna.
 _VERSI_CAMBIO_QUOTA = ("carico", "scarico")
@@ -763,18 +796,49 @@ def _stazione_di(route, tank_id: str) -> Optional[int]:
     return None
 
 
+def _colonne_ciclogramma(ws) -> dict[str, int]:
+    """Dove sta ogni colonna della tabella: `{titolo: numero di colonna}`.
+
+    Si leggono i TITOLI invece di contare le posizioni, e non e' pignoleria: il
+    foglio e' cresciuto nel tempo -- il tempo teorico e lo scarto sono finiti in
+    mezzo, accanto al tempo vero, che e' l'unico posto in cui servono -- e un
+    lettore che contasse le colonne leggerebbe i file di ieri con lo schema di
+    oggi, prendendo lo scarto per l'attesa dopo la consegna. Il nome invece sta
+    scritto nel file, e dice da solo cosa c'e' sotto.
+
+    Chi ha cancellato la riga dei titoli ricade sull'ordine STORICO, le otto
+    colonne di prima: e' l'unico file in cui l'ordine e' noto senza leggerlo."""
+    storico = [
+        "mossa", "da vasca", "a vasca", "carroponte", "tempo_in_vasca_s",
+        "attesa_dopo_consegna_s", "sosta_in_vasca", "sosta_s",
+    ]
+    trovate = {}
+    for col in range(1, ws.max_column + 1):
+        titolo = _testo(ws.cell(_RIGA_TITOLI_CICLOGRAMMA, col).value)
+        if titolo and titolo not in trovate:
+            trovate[titolo] = col
+    if "tempo_in_vasca_s" not in trovate:
+        return {t: i for i, t in enumerate(storico, start=1)}
+    return trovate
+
+
 def _leggi_ciclogramma(ws, route, errori: _Errori) -> Optional[dict]:
     """Il ciclogramma salvato: takt time, tempi in vasca, assegnazione.
 
     Foglio facoltativo, e una linea senza ciclogramma e' normale: un foglio
     vuoto vale come assente, non come errore. Se invece c'e' ed e' rotto lo si
     dice, perche' il silenzio farebbe ripartire da zero senza spiegare dove sia
-    finito il lavoro di ieri."""
+    finito il lavoro di ieri.
+
+    Le colonne CALCOLATE -- il tempo teorico e lo scarto -- non si leggono: il
+    teorico lo detta il foglio Percorso, e rileggerlo da qui vorrebbe dire
+    poterlo avere in due versioni diverse nello stesso file."""
     T = ws["B1"].value
     if T is None or (isinstance(T, str) and not T.strip()):
         # nessun takt time: il foglio c'e' ma non e' compilato
         righe_piene = any(
-            _testo(ws.cell(r, 1).value) for r in range(5, ws.max_row + 1)
+            _testo(ws.cell(r, 1).value)
+            for r in range(_PRIMA_RIGA_CICLOGRAMMA, ws.max_row + 1)
         )
         if not righe_piene:
             return None
@@ -794,48 +858,65 @@ def _leggi_ciclogramma(ws, route, errori: _Errori) -> Optional[dict]:
         ws["B2"].value, FOGLIO_CICLOGRAMMA, "B2", "carroponti", errori, intero=True
     ) if ws["B2"].value is not None else None
 
+    from openpyxl.utils import get_column_letter
+
+    colonne = _colonne_ciclogramma(ws)
+
+    def dove(titolo: str, riga: int) -> str:
+        """L'indirizzo della cella da citare negli errori. Si ricava dalla
+        colonna trovata davvero: scriverlo a mano direbbe 'E12' anche quando il
+        tempo in vasca sta altrove."""
+        return f"{get_column_letter(colonne[titolo])}{riga}"
+
+    def valore(titolo: str, riga: int):
+        """Il contenuto della cella, o None se quella colonna non c'e'. Le
+        colonne facoltative mancano in tutti i file scritti prima che
+        esistessero, e mancare non e' un errore."""
+        col = colonne.get(titolo)
+        return None if col is None else ws.cell(riga, col).value
+
     permanenze: dict[int, float] = {}
     assegnazione: dict[int, int] = {}
     attese: dict[int, float] = {}
     soste: dict[int, SostaIntermedia] = {}
     n_moves = len(route) - 1
-    for riga in range(5, ws.max_row + 1):
-        cella_k = ws.cell(riga, 1).value
+    for riga in range(_PRIMA_RIGA_CICLOGRAMMA, ws.max_row + 1):
+        cella_k = valore("mossa", riga)
         if cella_k is None or (isinstance(cella_k, str) and not cella_k.strip()):
             continue
-        k = _numero(cella_k, FOGLIO_CICLOGRAMMA, f"A{riga}", "mossa", errori,
-                    intero=True)
+        k = _numero(cella_k, FOGLIO_CICLOGRAMMA, dove("mossa", riga), "mossa",
+                    errori, intero=True)
         if k is None:
             continue
         if not 0 <= k < n_moves:
             errori.aggiungi(
                 FOGLIO_CICLOGRAMMA,
-                f"A{riga}",
+                dove("mossa", riga),
                 f"mossa {k} fuori dall'intervallo 0..{n_moves - 1}",
             )
             continue
-        carro = ws.cell(riga, 4).value
+        carro = valore("carroponte", riga)
         if carro is not None and not (isinstance(carro, str) and not carro.strip()):
-            c = _numero(carro, FOGLIO_CICLOGRAMMA, f"D{riga}", "carroponte",
-                        errori, intero=True)
+            c = _numero(carro, FOGLIO_CICLOGRAMMA, dove("carroponte", riga),
+                        "carroponte", errori, intero=True)
             if c is not None:
                 if c < 1:
                     errori.aggiungi(
                         FOGLIO_CICLOGRAMMA,
-                        f"D{riga}",
+                        dove("carroponte", riga),
                         f"carroponte numerato da 1, trovato {c}",
                     )
                 else:
                     assegnazione[k] = c - 1
-        sosta = ws.cell(riga, 5).value
+        sosta = valore("tempo_in_vasca_s", riga)
         if sosta is not None and not (isinstance(sosta, str) and not sosta.strip()):
-            s = _numero(sosta, FOGLIO_CICLOGRAMMA, f"E{riga}", "tempo in vasca",
-                        errori)
+            s = _numero(sosta, FOGLIO_CICLOGRAMMA,
+                        dove("tempo_in_vasca_s", riga), "tempo in vasca", errori)
             if s is not None:
                 if s < 0:
                     errori.aggiungi(
                         FOGLIO_CICLOGRAMMA,
-                        f"E{riga}",
+                        dove("tempo_in_vasca_s", riga),
                         f"tempo in vasca negativo: {s}",
                     )
                 else:
@@ -844,15 +925,16 @@ def _leggi_ciclogramma(ws, route, errori: _Errori) -> Optional[dict]:
         # l'hanno, e un ciclogramma composto a mano puo' non averla. Assente
         # vuol dire "decidi tu dove far aspettare il carro", ed e' la regola
         # predefinita a rispondere.
-        attesa = ws.cell(riga, 6).value
+        attesa = valore("attesa_dopo_consegna_s", riga)
         if attesa is not None and not (isinstance(attesa, str) and not attesa.strip()):
-            a = _numero(attesa, FOGLIO_CICLOGRAMMA, f"F{riga}",
+            a = _numero(attesa, FOGLIO_CICLOGRAMMA,
+                        dove("attesa_dopo_consegna_s", riga),
                         "attesa dopo la consegna", errori)
             if a is not None:
                 if a < 0:
                     errori.aggiungi(
                         FOGLIO_CICLOGRAMMA,
-                        f"F{riga}",
+                        dove("attesa_dopo_consegna_s", riga),
                         f"attesa dopo la consegna negativa: {a}",
                     )
                 else:
@@ -860,19 +942,20 @@ def _leggi_ciclogramma(ws, route, errori: _Errori) -> Optional[dict]:
         # Le due colonne della sosta per strada: la vasca dove il carroponte si
         # ferma durante il rientro, e per quanto. Vanno insieme -- una da sola
         # non dice niente -- e sono facoltative come l'attesa.
-        vasca_sosta = _testo(ws.cell(riga, 7).value)
-        secondi_sosta = ws.cell(riga, 8).value
+        vasca_sosta = _testo(valore("sosta_in_vasca", riga))
+        secondi_sosta = valore("sosta_s", riga)
         vuota = secondi_sosta is None or (
             isinstance(secondi_sosta, str) and not secondi_sosta.strip()
         )
         if vasca_sosta and not vuota:
-            s = _numero(secondi_sosta, FOGLIO_CICLOGRAMMA, f"H{riga}",
+            s = _numero(secondi_sosta, FOGLIO_CICLOGRAMMA,
+                        dove("sosta_s", riga),
                         "durata della sosta in mezzo", errori)
             stazione = _stazione_di(route, vasca_sosta)
             if stazione is None:
                 errori.aggiungi(
                     FOGLIO_CICLOGRAMMA,
-                    f"G{riga}",
+                    dove("sosta_in_vasca", riga),
                     f"la vasca '{vasca_sosta}' dove sostare non e' nel "
                     f"percorso: il carroponte non ci passa",
                 )
@@ -881,7 +964,7 @@ def _leggi_ciclogramma(ws, route, errori: _Errori) -> Optional[dict]:
             elif s < 0:
                 errori.aggiungi(
                     FOGLIO_CICLOGRAMMA,
-                    f"H{riga}",
+                    dove("sosta_s", riga),
                     f"durata della sosta in mezzo negativa: {s}",
                 )
             else:
@@ -889,7 +972,7 @@ def _leggi_ciclogramma(ws, route, errori: _Errori) -> Optional[dict]:
         elif vasca_sosta or not vuota:
             errori.aggiungi(
                 FOGLIO_CICLOGRAMMA,
-                f"G{riga}",
+                dove("sosta_in_vasca", riga),
                 "la sosta in una vasca in mezzo vuole entrambe le colonne: "
                 "in quale vasca (G) e per quanti secondi (H). Lasciale "
                 "entrambe vuote se il carroponte rientra diritto",
@@ -1680,6 +1763,31 @@ def _aggiungi_fogli_linea(
             None,
         ),
         (
+            "  tempo_teorico_s / scarto_s   il tempo di quella vasca sulla "
+            "ricetta (foglio Percorso) e",
+            None,
+        ),
+        (
+            "                di quanto il ciclogramma se ne discosta: + vuol "
+            "dire che il pezzo ci resta",
+            None,
+        ),
+        (
+            "                piu' a lungo del teorico. Sono le uniche due "
+            "colonne che il programma NON",
+            None,
+        ),
+        (
+            "                rilegge -- le riscrive a ogni salvataggio -- e "
+            "hanno l'intestazione piu'",
+            None,
+        ),
+        (
+            "                chiara apposta: per cambiare il teorico si va sul "
+            "foglio Percorso.",
+            None,
+        ),
+        (
             "  attesa_dopo_consegna_s   quanto il carroponte resta fermo dove "
             "ha appena consegnato,",
             None,
@@ -1862,32 +1970,57 @@ def _scrivi_foglio_ciclogramma(wb, data, ciclogramma, intestazione, sfondo, nota
         ws.cell(riga, 3).value = spiega
         ws.cell(riga, 3).font = nota
 
+    from openpyxl.styles import Font, PatternFill
+    from openpyxl.utils import get_column_letter
+
+    # Le due colonne da sola lettura hanno un'intestazione di un altro colore e
+    # i valori in corsivo grigio: senza, sembrerebbero compilabili come le
+    # altre, e chi ci scrivesse dentro vedrebbe il suo numero sparire al
+    # salvataggio successivo.
+    sfondo_calcolato = PatternFill("solid", fgColor="8AA66B")
+    for col, (titolo, larghezza, dato) in enumerate(
+        _COLONNE_CICLOGRAMMA, start=1
+    ):
+        cella = ws.cell(_RIGA_TITOLI_CICLOGRAMMA, col)
+        cella.value = titolo
+        cella.font = intestazione
+        cella.fill = sfondo if dato else sfondo_calcolato
+        ws.column_dimensions[get_column_letter(col)].width = larghezza
+
+    colonne = {t: i for i, (t, _, _) in enumerate(_COLONNE_CICLOGRAMMA, start=1)}
+    col_vero = get_column_letter(colonne["tempo_in_vasca_s"])
+    col_teorico = get_column_letter(colonne["tempo_teorico_s"])
+    calcolata = Font(italic=True, color="666666")
+
     # Le cifre non si tagliano. Sembrano un dettaglio estetico -- chi legge un
     # tempo in vasca non guarda il microsecondo -- ma questi valori vengono
     # RILETTI e la catena dei tempi li somma uno sull'altro: da li' si decide,
     # con un arrotondamento all'insu', quanti periodi interi il pezzo resta in
     # vasca. Un millesimo di troppo su una tappa al limite fa scattare un
     # periodo, e il ciclogramma riaperto non e' piu' quello salvato.
-    titoli = ["mossa", "da vasca", "a vasca", "carroponte", "tempo_in_vasca_s",
-              "attesa_dopo_consegna_s", "sosta_in_vasca", "sosta_s"]
-    for col, (titolo, larghezza) in enumerate(
-        zip(titoli, [8, 22, 22, 12, 18, 24, 22, 12]), start=1
-    ):
-        cella = ws.cell(4, col)
-        cella.value = titolo
-        cella.font = intestazione
-        cella.fill = sfondo
-        ws.column_dimensions[chr(ord("A") + col - 1)].width = larghezza
-
     permanenze = ciclogramma.get("permanenze") or {}
     assegnazione = ciclogramma.get("assegnazione") or {}
     attese = ciclogramma.get("attese") or {}
     soste = ciclogramma.get("soste") or {}
     for k in range(data.n_moves):
         # append() parte dopo l'ultima riga scritta, cioe' dalla 5
+        riga = _PRIMA_RIGA_CICLOGRAMMA + k
         carro = assegnazione.get(k)
         tempo_vasca = permanenze.get(k)
         attesa = attese.get(k)
+        # Il teorico e' quello della vasca DA CUI parte il trasporto, la stessa
+        # a cui si riferisce `tempo_in_vasca_s`. Alla mossa 0 si parte dal
+        # carico, dove il pezzo non sta: niente permanenza, e quindi niente
+        # teorico da confrontare.
+        teorico = None if k == 0 else round(float(data.route[k].nominale), 9)
+        # Lo scarto e' una FORMULA e non un numero: cosi' chi ritocca il tempo
+        # in vasca dentro Excel vede subito di quanto si e' allontanato dalla
+        # ricetta, senza dover risalvare dal programma.
+        scarto = (
+            None
+            if teorico is None
+            else f"={col_vero}{riga}-{col_teorico}{riga}"
+        )
         # La sosta per strada si scrive con il NOME della vasca, non con
         # l'indice di tappa: e' quello che si legge senza contare le righe del
         # foglio Percorso. Se la stessa vasca compare due volte nella ricetta il
@@ -1902,11 +2035,16 @@ def _scrivi_foglio_ciclogramma(wb, data, ciclogramma, intestazione, sfondo, nota
                 data.route[k + 1].tank_id,
                 None if carro is None else carro + 1,
                 None if tempo_vasca is None else round(float(tempo_vasca), 9),
+                teorico,
+                scarto,
                 None if attesa is None else round(float(attesa), 9),
                 None if sosta is None else data.route[sosta.stazione].tank_id,
                 None if sosta is None else round(float(sosta.secondi), 9),
             ]
         )
+        for titolo in ("tempo_teorico_s", "scarto_s"):
+            ws.cell(riga, colonne[titolo]).font = calcolata
+        ws.cell(riga, colonne["scarto_s"]).number_format = "+0.00;-0.00;0.00"
 
 
 # --------------------------------------------------------------------------

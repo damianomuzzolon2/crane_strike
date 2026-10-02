@@ -342,12 +342,39 @@ LETTURA = [
      "elenca le due ammesse e spiega cosa sono. Il messaggio si chiude anche "
      "qui con la via d'uscita: 'Lascia il foglio vuoto se l'impianto non ne "
      "ha.'"),
+    ("c", "excel_io._colonne_ciclogramma"),
+    ("q",
+     "LE COLONNE SI CERCANO PER NOME, NON PER POSIZIONE. Il foglio e' "
+     "cresciuto: il tempo teorico e lo scarto sono finiti IN MEZZO alla "
+     "tabella, attaccati al tempo vero, che e' l'unico posto in cui il "
+     "confronto serve -- e cosi' facendo hanno spostato sosta_in_vasca e "
+     "sosta_s da G/H a I/J. Un lettore che contasse le colonne leggerebbe i "
+     "file di ieri con lo schema di oggi, prendendo lo scarto per l'attesa "
+     "dopo la consegna: in silenzio, perche' sono tutti e due numeri "
+     "plausibili. Il nome invece sta scritto nel file, e dice da solo cosa "
+     "c'e' sotto."),
+    ("p",
+     "L'ordine STORICO -- le otto colonne di prima -- resta solo come ripiego "
+     "per chi ha cancellato la riga dei titoli: e' l'unico file in cui "
+     "l'ordine e' noto senza bisogno di leggerlo. Si riconosce dall'assenza di "
+     "`tempo_in_vasca_s`, che c'e' sempre stato."),
     ("c", "excel_io._leggi_ciclogramma"),
     ("p",
      "Il foglio che rende il file RIAPRIBILE: contiene i gradi di liberta' del "
      "ciclogramma -- takt time, tempo in vasca di ogni tappa, chi fa cosa, e "
      "dove ogni carroponte passa il tempo morto -- e da quelli il ciclogramma "
      "si ricostruisce identico."),
+    ("p",
+     "Le due funzioncine in testa, `dove` e `valore`, sono quello che resta "
+     "della conversione: la prima ricava l'indirizzo di cella da citare negli "
+     "errori dalla colonna trovata DAVVERO -- scriverlo a mano direbbe 'E12' "
+     "anche quando il tempo in vasca sta altrove -- e la seconda restituisce "
+     "None per le colonne che nel file non ci sono, perche' una colonna "
+     "facoltativa che manca non e' un errore."),
+    ("p",
+     "Le colonne CALCOLATE non si leggono affatto. Il tempo teorico lo detta "
+     "il foglio Percorso, e rileggerlo da qui vorrebbe dire poterlo avere in "
+     "due versioni diverse nello stesso file."),
     ("q",
      "L'ULTIMA COLONNA E' ARRIVATA DOPO, E SI LEGGE COME UNA CICATRICE. "
      "Quanto il carroponte resta fermo dove ha consegnato non discende dalle "
@@ -520,6 +547,35 @@ MODELLO = [
      "ancora assegnata, una senza tempo in vasca prendera' il minimo di "
      "processo. E' cio' che permette di salvare un lavoro lasciato a meta' e "
      "riprenderlo esattamente da li'."),
+
+    ("h3", "Il tempo teorico accanto a quello vero"),
+    ("c", "excel_io", "_COLONNE_CICLOGRAMMA = [", "_RIGA_TITOLI_CICLOGRAMMA"),
+    ("p",
+     "Due colonne che NON sono gradi di liberta': il tempo che quella vasca ha "
+     "sulla ricetta (foglio Percorso) e di quanto il ciclogramma se ne "
+     "discosta. Stanno in mezzo alla tabella, attaccate a tempo_in_vasca_s, "
+     "perche' la domanda che si fa chi apre questo foglio e' una sola -- di "
+     "quanto mi sono allontanato dalla ricetta, e dove -- e con il teorico su "
+     "un altro foglio bisognava tenere due tabelle aperte e confrontarle riga "
+     "per riga."),
+    ("q",
+     "UNA COLONNA CHE NON SI RILEGGE VA DETTO CHE NON SI RILEGGE. Il teorico "
+     "ha una fonte sola; poterlo scrivere anche qui vorrebbe dire poterlo "
+     "avere in due versioni nello stesso file. Si riscrive a ogni "
+     "salvataggio, quindi un numero messo a mano sparirebbe senza spiegazioni: "
+     "per questo il campo `dato` della tabella delle colonne distingue le due "
+     "specie, l'intestazione delle calcolate ha un verde piu' chiaro e i loro "
+     "valori sono in corsivo grigio."),
+    ("p",
+     "Lo scarto e' una FORMULA e non un numero (`=E6-F6`): chi ritocca un "
+     "tempo in vasca dentro Excel vede subito di quanto si e' allontanato "
+     "dalla ricetta, senza dover risalvare dal programma. Il formato "
+     "'+0.00;-0.00;0.00' mette il segno anche ai valori positivi, che e' il "
+     "modo in cui si legge uno scostamento."),
+    ("p",
+     "Alla mossa 0 le due celle restano vuote: li' si parte dal carico, dove "
+     "il pezzo non STA -- ci viene messo -- e non c'e' nessuna permanenza da "
+     "confrontare. E' la stessa ragione per cui `permanenze` comincia da 1."),
 ]
 
 

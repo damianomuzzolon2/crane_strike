@@ -70,6 +70,31 @@ def valore(percorso: str, foglio: str, cella: str):
     return load_workbook(percorso)[foglio][cella].value
 
 
+def cella_ciclogramma(percorso: str, titolo: str, mossa: int) -> str:
+    """L'indirizzo della cella del foglio Ciclogramma che tiene `titolo` per la
+    mossa data, cercando la colonna per NOME nella riga dei titoli.
+
+    I test non devono sapere a che lettera sta una colonna. Quando il tempo
+    teorico e' finito in mezzo alla tabella -- accanto al tempo vero, che e'
+    l'unico posto in cui serve -- le prove scritte con 'F5' hanno smesso di
+    puntare a quello che intendevano, e una di loro ha continuato a passare
+    controllando una cella che il programma non legge nemmeno."""
+    from openpyxl import load_workbook
+    from openpyxl.utils import get_column_letter
+
+    from excel_io import (
+        FOGLIO_CICLOGRAMMA,
+        _PRIMA_RIGA_CICLOGRAMMA,
+        _RIGA_TITOLI_CICLOGRAMMA,
+    )
+
+    ws = load_workbook(percorso)[FOGLIO_CICLOGRAMMA]
+    for col in range(1, ws.max_column + 1):
+        if _testo_cella(ws.cell(_RIGA_TITOLI_CICLOGRAMMA, col).value) == titolo:
+            return f"{get_column_letter(col)}{_PRIMA_RIGA_CICLOGRAMMA + mossa}"
+    raise AssertionError(f"colonna '{titolo}' non trovata nel foglio Ciclogramma")
+
+
 def _testo_cella(valore) -> str:
     return "" if valore is None else str(valore).strip()
 
@@ -143,6 +168,49 @@ def test_andata_e_ritorno():
         os.unlink(p)
 
 
+def _senza_colonne(percorso: str, titoli) -> str:
+    """Una copia del file con quelle colonne del foglio Ciclogramma TOLTE, come
+    sarebbe stato scritto prima che esistessero. Restituisce il nuovo percorso.
+    """
+    from openpyxl import load_workbook
+
+    from excel_io import FOGLIO_CICLOGRAMMA, _RIGA_TITOLI_CICLOGRAMMA
+
+    wb = load_workbook(percorso)
+    ws = wb[FOGLIO_CICLOGRAMMA]
+    da_togliere = sorted(
+        (
+            col
+            for col in range(1, ws.max_column + 1)
+            if _testo_cella(ws.cell(_RIGA_TITOLI_CICLOGRAMMA, col).value) in titoli
+        ),
+        reverse=True,  # dall'ultima, se no le altre si spostano sotto i piedi
+    )
+    for col in da_togliere:
+        ws.delete_cols(col)
+    fd, fuori = tempfile.mkstemp(suffix=".xlsx")
+    os.close(fd)
+    wb.save(fuori)
+    return fuori
+
+
+def _senza_titoli(percorso: str) -> str:
+    """Una copia del file con la riga dei titoli del foglio Ciclogramma
+    svuotata: e' il caso di chi ha ripulito il foglio a mano."""
+    from openpyxl import load_workbook
+
+    from excel_io import FOGLIO_CICLOGRAMMA, _RIGA_TITOLI_CICLOGRAMMA
+
+    wb = load_workbook(percorso)
+    ws = wb[FOGLIO_CICLOGRAMMA]
+    for col in range(1, ws.max_column + 1):
+        ws.cell(_RIGA_TITOLI_CICLOGRAMMA, col).value = None
+    fd, fuori = tempfile.mkstemp(suffix=".xlsx")
+    os.close(fd)
+    wb.save(fuori)
+    return fuori
+
+
 def test_foglio_ciclogramma():
     print("\n[1-bis] il ciclogramma va e torna dal foglio Ciclogramma")
     from excel_io import FOGLIO_CICLOGRAMMA, scrivi_linea
@@ -206,10 +274,13 @@ def test_foglio_ciclogramma():
                 leggi_problema(con_ciclo).ciclogramma["attese"][0] == 0.0,
                 "una sosta di zero secondi resta zero, non diventa 'non detto'",
             )
-            modifica(con_ciclo, FOGLIO_CICLOGRAMMA, "F5", -3.0)
+            attesa_0 = cella_ciclogramma(
+                con_ciclo, "attesa_dopo_consegna_s", 0
+            )
+            modifica(con_ciclo, FOGLIO_CICLOGRAMMA, attesa_0, -3.0)
             msg = errore_leggendo(con_ciclo)
             check(
-                f"{FOGLIO_CICLOGRAMMA}!F5" in msg and "negativa" in msg,
+                f"{FOGLIO_CICLOGRAMMA}!{attesa_0}" in msg and "negativa" in msg,
                 f"una sosta negativa viene respinta: \"{msg.splitlines()[-1][:60]}\"",
             )
             scrivi_linea(con_ciclo, cfg, ciclo)
@@ -231,26 +302,28 @@ def test_foglio_ciclogramma():
                 f"({riletto['soste']})",
             )
             vasca = cfg.data.route[2].tank_id
+            dove_vasca = cella_ciclogramma(con_ciclo, "sosta_in_vasca", 1)
+            dove_secondi = cella_ciclogramma(con_ciclo, "sosta_s", 1)
             check(
-                valore(con_ciclo, FOGLIO_CICLOGRAMMA, "G6") == vasca,
+                valore(con_ciclo, FOGLIO_CICLOGRAMMA, dove_vasca) == vasca,
                 f"e sul foglio si legge il NOME della vasca ('{vasca}'), "
                 f"non il numero della tappa",
             )
             # Mezza sosta non e' una sosta: dire dove senza dire per quanto (o
             # viceversa) e' un dato incompleto, e passarlo in silenzio vorrebbe
             # dire disegnare un rientro che nessuno ha chiesto.
-            modifica(con_ciclo, FOGLIO_CICLOGRAMMA, "H6", None)
+            modifica(con_ciclo, FOGLIO_CICLOGRAMMA, dove_secondi, None)
             msg = errore_leggendo(con_ciclo)
             check(
-                f"{FOGLIO_CICLOGRAMMA}!G6" in msg and "entrambe" in msg,
+                f"{FOGLIO_CICLOGRAMMA}!{dove_vasca}" in msg and "entrambe" in msg,
                 f"una sosta a meta' viene respinta: \"{msg.splitlines()[-1][:60]}\"",
             )
             scrivi_linea(con_ciclo, cfg, in_mezzo)
             # Una vasca fuori dal percorso non e' un posto dove sostare.
-            modifica(con_ciclo, FOGLIO_CICLOGRAMMA, "G6", "NON_ESISTE")
+            modifica(con_ciclo, FOGLIO_CICLOGRAMMA, dove_vasca, "NON_ESISTE")
             msg = errore_leggendo(con_ciclo)
             check(
-                f"{FOGLIO_CICLOGRAMMA}!G6" in msg and "percorso" in msg,
+                f"{FOGLIO_CICLOGRAMMA}!{dove_vasca}" in msg and "percorso" in msg,
                 f"una vasca inesistente viene respinta: "
                 f"\"{msg.splitlines()[-1][:60]}\"",
             )
@@ -265,6 +338,92 @@ def test_foglio_ciclogramma():
                 f"{FOGLIO_CICLOGRAMMA}!B1" in msg and "takt time" in msg,
                 f"un foglio senza takt time viene segnalato: \"{msg.splitlines()[-1][:60]}\"",
             )
+
+            # -- il tempo TEORICO accanto a quello vero --------------------
+            # Serve a vedere a colpo d'occhio di quanto il ciclogramma si e'
+            # allontanato dalla ricetta. Non e' un grado di liberta': lo detta
+            # il foglio Percorso, e questo foglio lo ricopia soltanto.
+            scrivi_linea(con_ciclo, cfg, ciclo)
+            teorici, scarti = True, True
+            for k in range(cfg.data.n_moves):
+                letto = valore(
+                    con_ciclo,
+                    FOGLIO_CICLOGRAMMA,
+                    cella_ciclogramma(con_ciclo, "tempo_teorico_s", k),
+                )
+                atteso = None if k == 0 else cfg.data.route[k].nominale
+                if atteso is None:
+                    if letto is not None:
+                        teorici = False
+                elif letto is None or abs(letto - atteso) > 1e-9:
+                    teorici = False
+                formula = valore(
+                    con_ciclo,
+                    FOGLIO_CICLOGRAMMA,
+                    cella_ciclogramma(con_ciclo, "scarto_s", k),
+                )
+                if k == 0:
+                    if formula is not None:
+                        scarti = False
+                else:
+                    vero = cella_ciclogramma(con_ciclo, "tempo_in_vasca_s", k)
+                    teo = cella_ciclogramma(con_ciclo, "tempo_teorico_s", k)
+                    if formula != f"={vero}-{teo}":
+                        scarti = False
+            check(
+                teorici,
+                "il tempo teorico e' quello della vasca DA CUI parte il "
+                "trasporto, e alla mossa 0 -- il carico -- non c'e'",
+            )
+            check(
+                scarti,
+                "lo scarto e' una FORMULA fra le due celle, cosi' si aggiorna "
+                "ritoccando il tempo in vasca dentro Excel",
+            )
+
+            # Le due colonne non si rileggono: il teorico ha una sola fonte, e
+            # un valore scritto a mano qui dentro non deve poterla contraddire.
+            prima = leggi_problema(con_ciclo)
+            modifica(
+                con_ciclo,
+                FOGLIO_CICLOGRAMMA,
+                cella_ciclogramma(con_ciclo, "tempo_teorico_s", 1),
+                999.0,
+            )
+            dopo = leggi_problema(con_ciclo)
+            check(
+                dopo.ciclogramma == prima.ciclogramma
+                and dopo.data == prima.data,
+                "il tempo teorico scritto a mano nel foglio Ciclogramma viene "
+                "ignorato: lo dice il foglio Percorso",
+            )
+
+            # -- le colonne si cercano per NOME ----------------------------
+            # Un file scritto prima che il teorico esistesse ha otto colonne, e
+            # la sosta sta in G/H invece che in I/J. Leggerlo contando le
+            # posizioni vorrebbe dire prendere lo scarto per l'attesa.
+            scrivi_linea(con_ciclo, cfg, in_mezzo)
+            vecchio = _senza_colonne(
+                con_ciclo, ("tempo_teorico_s", "scarto_s")
+            )
+            try:
+                check(
+                    leggi_problema(vecchio).ciclogramma == in_mezzo,
+                    "un file col vecchio ordine di colonne si rilegge identico",
+                )
+                # Cancellata la riga dei titoli non resta nome da cercare, e
+                # l'unico ordine noto senza leggerlo e' quello storico.
+                senza_titoli = _senza_titoli(vecchio)
+                try:
+                    check(
+                        leggi_problema(senza_titoli).ciclogramma == in_mezzo,
+                        "e anche uno a cui e' stata cancellata la riga dei "
+                        "titoli, ricadendo sull'ordine storico",
+                    )
+                finally:
+                    os.unlink(senza_titoli)
+            finally:
+                os.unlink(vecchio)
         finally:
             if os.path.exists(con_ciclo):
                 os.unlink(con_ciclo)

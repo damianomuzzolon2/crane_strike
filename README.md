@@ -870,7 +870,7 @@ in mezzo** (`sosta_in_vasca` e `sosta_s`). Le traiettorie e gli istanti di preli
 sono, perche' sono conseguenze: riscriverli vorrebbe dire poterli rileggere in
 contrasto con i valori da cui derivano. Si ricostruiscono, e tornano identici.
 
-L'ultima colonna (`attesa_dopo_consegna_s`) e' l'eccezione che conferma la
+La colonna `attesa_dopo_consegna_s` e' l'eccezione che conferma la
 regola, ed e' arrivata dopo. Dove il carroponte passa il tempo morto **non** e'
 una conseguenza delle fasi: a parita' di tutto il resto puo' ripartire subito e
 aspettare a destinazione, oppure restare fermo e partire all'ultimo momento.
@@ -893,6 +893,41 @@ dica: le due tappe stanno nello stesso punto della rotaia, e per starci fermi
 sono la stessa cosa. Qui salvare non e' solo questione di tempi — cambia il
 **percorso**: senza quelle due colonne il rientro si ricostruirebbe diritto,
 piu' corto di quanto e', e non tornerebbe nemmeno la traiettoria.
+
+#### Il tempo teorico accanto a quello vero
+
+Accanto a `tempo_in_vasca_s` ci sono altre due colonne, `tempo_teorico_s` e
+`scarto_s`: il tempo che quella vasca ha sulla **ricetta** (foglio `Percorso`) e
+di quanto il ciclogramma se ne discosta. Un `+12.00` vuol dire che il pezzo ci
+resta dodici secondi piu' del teorico, un `-5.86` che ci resta meno.
+
+E' la domanda che si fa chi apre questo foglio — *di quanto mi sono allontanato
+dalla ricetta, e dove* — e prima richiedeva di tenere aperte due tabelle e
+confrontarle riga per riga. Il teorico c'e' anche nella scheda *Ciclogramma* a
+schermo e nel foglio `FlussoPezzo` del referto; qui sta accanto al numero che si
+modifica.
+
+```text
+mossa  da vasca      tempo_in_vasca_s  tempo_teorico_s  scarto_s
+1      SGRASSO             76.48             75          +1.48
+2      RISCIACQUO_1        35.66             30          +5.66
+3      ZINCATURA          194.14            200          -5.86
+4      RISCIACQUO_2        17.00             30         -13.00
+```
+
+Sono le **uniche due colonne che il programma non rilegge**: il teorico ha una
+fonte sola, il foglio `Percorso`, e poterlo scrivere anche qui vorrebbe dire
+poterlo avere in due versioni diverse nello stesso file. Si riscrivono a ogni
+salvataggio, e l'intestazione le distingue con un verde piu' chiaro. Lo scarto
+e' una **formula** (`=E6-F6`), quindi ritoccando un tempo in vasca dentro Excel
+si aggiorna da solo, senza dover ripassare dal programma.
+
+Alla mossa 0 le due colonne sono vuote: li' si parte dal carico, dove il pezzo
+non *sta* — ci viene messo — e non c'e' nessuna permanenza da confrontare.
+
+Le colonne si cercano per **nome** e non per posizione, ed e' quello che ha
+permesso di infilare queste due in mezzo alla tabella senza rompere i file
+salvati prima: un file con le vecchie otto colonne si riapre identico.
 
 Il file di partenza **non viene toccato**: quello descrive l'impianto, e a
 riscriverlo si rischierebbe di perdere quello che openpyxl non sa riprodurre —
@@ -2043,7 +2078,7 @@ python test/esempio.py           # risoluzione reale + verifica + grafico
 ```
 
 Ognuno stampa cosa ha provato e finisce con `RISULTATO: n ok, m falliti`.
-Nessuna dipendenza da pytest. Stato attuale: **123, 138, 84, 36, 94 e 137
+Nessuna dipendenza da pytest. Stato attuale: **123, 143, 84, 36, 94 e 137
 asserzioni, zero fallimenti**.
 
 **La risoluzione CP-SAT e' eseguita e verificata end-to-end.** Sull'esempio
@@ -2059,11 +2094,14 @@ I sei file rispondono a domande diverse e si completano:
   patologiche). Le soluzioni sono costruite a mano, quindi non serve OR-Tools.
 - `test_model.py` — 20 casi. *Il modello produce soluzioni fisicamente valide?*
   Risolve davvero e passa ogni risultato al verificatore.
-- `test_excel_io.py` — 27 casi. *Un file compilato male viene respinto con un
+- `test_excel_io.py` — 30 casi. *Un file compilato male viene respinto con un
   messaggio utile, e i risultati escono corretti?* In ingresso: valori mancanti
   o non numerici, vasche inesistenti o duplicate, righe riordinate, parametri
   sbagliati, zone incomplete, e un file della vecchia versione in metri. In uscita: struttura dei fogli, corrispondenza
-  fra tratti e vasche, somma delle durate pari al takt time.
+  fra tratti e vasche, somma delle durate pari al takt time. Piu' l'andata e
+  ritorno del foglio `Ciclogramma`, che comprende un file con le **vecchie
+  colonne**: le colonne si cercano per nome, e un file salvato prima che il
+  tempo teorico esistesse deve riaprirsi identico.
 - `test_simulazione.py` — 15 casi. *La simulazione mostra il ciclogramma che
   c'e', o una sua approssimazione?* Il controllo che conta e' incrociato: su un
   ciclogramma coerente, ogni pezzo appeso deve stare **esattamente** dove sta
