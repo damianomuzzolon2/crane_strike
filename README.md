@@ -1107,31 +1107,14 @@ python strumenti/costruisci_exe.py
 ```
 
 Ci vogliono un paio di minuti. Al termine si trova tutto in
-`dist/CraneStrike/`, circa 390 MB: si copia **la cartella intera** sul PC di
-destinazione e si lancia `CraneStrike.exe`. Non serve installare ne' Python
-ne' altro.
+`dist/CraneStrike/`, circa 390 MB.
 
 Con `--con-test` il comando esegue prima l'intera suite di test, e non
 impacchetta se qualcosa non passa. Non e' obbligatorio, ma e' l'unico modo per
 non scoprire un problema in stabilimento.
 
-### Verificare che funzioni davvero
-
-Sul PC di destinazione, una volta sola:
-
-```bash
-CraneStrike.exe --autotest
-```
-
-Crea un file di esempio, lo rilegge, calcola il ciclogramma, lo verifica, salva
-i risultati e scrive un `autotest.txt` con l'esito. Trenta secondi.
-
-Non e' una formalita': **che l'eseguibile si costruisca non vuol dire che
-funzioni.** Durante la messa a punto il pacchetto veniva creato senza il
-minimo errore, si apriva regolarmente, e poi moriva al primo calcolo con
-`No module named 'pandas'` — perche' OR-Tools importa pandas internamente e
-lo spec lo escludeva come alleggerimento. Un problema del genere, scoperto
-davanti al cliente, e' un'altra faccenda.
+Come si porta quella cartella su un'altra macchina — e come si verifica che li'
+funzioni davvero, prima di servirsene — e' il capitolo qui sotto.
 
 ### Perche' una cartella e non un singolo file
 
@@ -1155,6 +1138,113 @@ attesa tutte le volte. La cartella si copia tale e quale e parte subito.
 - **`console=False`**: niente finestra nera all'avvio. Come contropartita, un
   errore all'avvio sarebbe invisibile, quindi `interfaccia.py` lo intercetta e
   lo mostra in una finestra di dialogo.
+
+## Portare il programma su un altro PC
+
+Questo capitolo e' per chi deve far girare CraneStrike su una macchina dove non
+c'e' Python e non c'e' niente di installato: un PC di stabilimento, il portatile
+di un collega, il computer di un cliente.
+
+### Cosa serve sul PC di destinazione
+
+| | |
+| --- | --- |
+| **Sistema** | Windows 10 o 11 a **64 bit**. E' quello su cui l'eseguibile viene costruito e provato. |
+| **Spazio su disco** | circa **400 MB** per la cartella del programma. |
+| **Python** | **non serve**. Dentro la cartella c'e' tutto, interprete compreso. |
+| **Visual C++ Redistributable** | **non serve**: le librerie Microsoft che OR-Tools richiede (`MSVCP140.dll`, `VCRUNTIME140.dll`) sono gia' dentro il pacchetto. Lo diventa se un giorno si cambia il modo di impacchettare — vedi *Se non parte*. |
+| **Diritti di amministratore** | **non servono**, basta poter copiare una cartella. Servono solo se la si vuole mettere in `C:\Program Files`, e non c'e' ragione di farlo. |
+| **Rete** | **non serve**. Il programma non si collega a niente. |
+| **Schermo** | la finestra si apre a 1280x800 e non scende sotto 1000x640. Su un pannello vecchio a 1024x768 ci sta per un pelo; sotto, l'interfaccia non ci entra. |
+
+### Copiare e avviare
+
+1. **Copia tutta la cartella** `dist\CraneStrike`, non il solo `CraneStrike.exe`.
+   L'eseguibile da solo non parte: tutto il resto sta in `_internal` accanto a
+   lui, ed e' li' che ci sono Python, OR-Tools e le librerie.
+2. **Mettila su un disco locale**, non lanciarla da una cartella di rete: l'avvio
+   diventa lentissimo e certi antivirus aziendali bloccano gli eseguibili che
+   partono da un percorso UNC. `C:\CraneStrike` va benissimo.
+3. **Doppio clic su `CraneStrike.exe`.** Il primo avvio e' piu' lento degli
+   altri: Windows deve leggere qualche centinaio di MB.
+
+Il programma non scrive niente dentro la propria cartella: i risultati li salva
+accanto al file Excel che apri tu. Quindi la cartella puo' stare anche in sola
+lettura.
+
+### Al primo avvio Windows protesta: e' normale
+
+L'eseguibile **non e' firmato digitalmente**, quindi al primo avvio compaiono
+una o piu' di queste cose:
+
+- **«Windows ha protetto il PC»** (SmartScreen). Si clicca su *Ulteriori
+  informazioni* e poi su *Esegui comunque*. La voce *Ulteriori informazioni* e'
+  scritta piccola e si fa fatica a vederla: e' li' apposta.
+- **Il file risulta «bloccato»** se la cartella e' arrivata dentro uno zip
+  scaricato o ricevuto per posta. Tasto destro sullo zip -> *Proprieta* ->
+  *Annulla blocco*, **prima** di estrarlo. Fatto dopo, va ripetuto su ogni file.
+- **L'antivirus mette l'eseguibile in quarantena.** Capita con i programmi
+  impacchettati in questo modo, ed e' un falso positivo: va aggiunta
+  un'eccezione per la cartella. Se succede su un PC aziendale, questa e' una
+  cosa da far fare a chi gestisce i PC, non da aggirare.
+
+Si evitano tutte e tre firmando l'eseguibile con un certificato di code signing
+aziendale. Costa qualche centinaio di euro l'anno ed e' l'unica soluzione vera
+se il programma va consegnato spesso a terzi.
+
+### Verificare che funzioni davvero, PRIMA di servirsene
+
+Sul PC di destinazione, una volta sola, da un prompt dei comandi:
+
+```bat
+C:\CraneStrike\CraneStrike.exe --autotest C:\CraneStrike\prova
+```
+
+Crea un file di esempio, lo rilegge, calcola il ciclogramma, lo verifica, salva
+i risultati e scrive il resoconto in `C:\CraneStrike\prova\autotest.txt`.
+Quindici secondi circa.
+
+La cartella si puo' indicare come qui sopra, ed e' il modo consigliato: senza,
+il resoconto finisce in una cartella temporanea che poi bisogna cercare. E il
+resoconto va **letto nel file**: l'eseguibile e' costruito senza finestra di
+console, quindi a seconda di come lo si lancia il testo a schermo puo' non
+comparire affatto. L'ultima riga dice `ESITO: tutto funziona.` oppure cosa si e'
+rotto e a che punto.
+
+Non e' una formalita': **che l'eseguibile si costruisca non vuol dire che
+funzioni.** Durante la messa a punto il pacchetto veniva creato senza il minimo
+errore, si apriva regolarmente, e poi moriva al primo calcolo con `No module
+named 'pandas'` — perche' OR-Tools importa pandas internamente e lo spec lo
+escludeva come alleggerimento. Scoprirlo davanti al cliente e' un'altra
+faccenda.
+
+### Se non parte
+
+| sintomo | causa probabile | cosa fare |
+| --- | --- | --- |
+| Doppio clic e **non succede niente**, o errore su una DLL | l'eseguibile e' stato copiato da solo, senza `_internal` | ricopiare la **cartella intera** |
+| **«Windows ha protetto il PC»** | eseguibile non firmato | *Ulteriori informazioni* -> *Esegui comunque* |
+| L'exe **sparisce** dalla cartella | l'antivirus l'ha messo in quarantena | eccezione per la cartella |
+| Si apre e **muore al primo calcolo** | OR-Tools non riesce a caricare le sue librerie native | lanciare `--autotest` e leggere `autotest.txt`: dice a che punto si ferma |
+| Errore su una **DLL mancante** (`MSVCP140.dll` o simili) | pacchetto incompleto, o costruito in un altro modo | installare il *Microsoft Visual C++ Redistributable 2015-2022 (x64)*, gratuito da Microsoft |
+| Una **finestra di errore con tanto testo** all'avvio | un guasto vero del programma | copiare il testo: dice esattamente dove si e' rotto |
+
+Quella finestra non e' un caso: l'eseguibile non ha console, quindi un errore
+all'avvio sparirebbe senza lasciare traccia. `interfaccia.py` lo intercetta e lo
+mostra apposta.
+
+### Aggiornare a una versione nuova
+
+Si **sostituisce la cartella intera**. Non si copiano i singoli file sopra i
+vecchi: resterebbero in giro pezzi della versione precedente, e un pacchetto
+meta' e meta' si rompe in modi che non si capiscono.
+
+I file Excel non si toccano: stanno dove vuoi tu e nessuna versione li sposta.
+Un file dei risultati salvato con una versione precedente si riapre con quella
+nuova — ma se i tempi di presa e rilascio sono cambiati fra le due, il
+ciclogramma salvato va **ricalcolato e risalvato**, altrimenti i numeri scritti
+allora non vogliono piu' dire la stessa cosa. Il programma se ne accorge e lo
+scrive nel Riepilogo.
 
 ## Come modellare il tuo caso
 
