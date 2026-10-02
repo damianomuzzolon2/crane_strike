@@ -84,10 +84,11 @@ RIGA_PER_RIGA = [
      "La linea dichiara due numeri: una VELOCITA' DI AVVICINAMENTO e una "
      "DISTANZA DI AVVICINAMENTO. La regola che ne discende ha due facce, una "
      "per verso:"),
-    ("li", "SCENDENDO a posare: si viaggia normalmente finche' mancano "
-           "`distanza` millimetri al fondo; da li' si e' gia' arrivati alla "
-           "velocita' di avvicinamento, la si tiene costante, e si frena solo "
-           "all'ultimo, quando la frenata diventa necessaria per fermarsi;"),
+    ("li", "SCENDENDO a posare: si viaggia normalmente -- frenata compresa, "
+           "puntando a fermarsi in fondo alla corsa -- finche' mancano "
+           "`distanza` millimetri al fondo; li' scatta il finecorsa e la "
+           "velocita' CADE A GRADINO a quella di avvicinamento, la si tiene "
+           "costante, e si frena solo all'ultimo;"),
     ("li", "SALENDO a prelevare: si parte piano e si resta alla velocita' di "
            "avvicinamento per i primi `distanza` millimetri; solo dopo si "
            "accelera verso la velocita' massima e si prosegue col trapezio di "
@@ -95,15 +96,40 @@ RIGA_PER_RIGA = [
     ("p",
      "In tutti e due i casi la zona lenta sta al capo BASSO della corsa. Non "
      "e' il verso a sceglierla: e' il punto di accoppiamento fra gancio e "
-     "telaio, che sta in fondo e non si sposta. E' per questo che la stessa "
-     "cinematica, usata nei due versi, produce due profili che sono l'uno il "
-     "rovescio dell'altro."),
+     "telaio, che sta in fondo e non si sposta."),
+    ("q",
+     "LA ZONA NON E' PIANIFICATA, E' UN FINECORSA. E' la differenza che conta, "
+     "e per un po' il modulo l'aveva sbagliata. Un carroponte non sa di dover "
+     "entrare in una zona lenta e non anticipa niente: scende frenando come se "
+     "dovesse fermarsi a terra, e solo quando il finecorsa scatta il drive gli "
+     "impone la velocita' di avvicinamento. La prima stesura invece "
+     "PIANIFICAVA la frenata perche' arrivasse al confine gia' alla velocita' "
+     "di avvicinamento, e disegnava una rampa anticipata che nessun impianto "
+     "fa -- e che, per giunta, allungava la discesa di mezzo secondo buono "
+     "rispetto al vero."),
+    ("q",
+     "PERCHE' IL GRADINO E NON UNA RAMPA. Il salto e' un'idealizzazione: un "
+     "drive vero ci mette la sua rampa. E' pero' quella giusta, e lo si vede "
+     "provando l'alternativa. Frenare dal finecorsa con la decelerazione "
+     "NOMINALE non darebbe nessun tratto lento: la velocita' che la rampa "
+     "normale ha a `distanza` dal fondo e' per costruzione proprio quella che "
+     "serve per fermarsi in `distanza`, quindi si toccherebbe la velocita' di "
+     "avvicinamento esattamente a fondo corsa e la zona non costerebbe NIENTE. "
+     "Chi taglia la velocita' all'ingresso della zona e' per forza una rampa "
+     "molto piu' ripida di quella nominale, e il gradino e' il suo limite."),
+    ("p",
+     "Il gradino c'e' quindi solo dove il limite SCENDE, cioe' entrando nella "
+     "zona in discesa. Salendo la zona sta in partenza e all'uscita il limite "
+     "RISALE: li' si accelera normalmente, che e' l'unica cosa che un motore "
+     "sappia fare. E' per questo che i due versi, che prima costavano lo "
+     "stesso tempo, adesso non lo costano piu'."),
     ("q",
      "PERCHE' IL MODULO E' STATO RIFATTO. Con una zona di avvicinamento il "
      "profilo di velocita' non e' piu' UN trapezio: e' una successione di "
      "trapezi, uno per ogni tratto a limite di velocita' diverso, saldati in "
      "un punto che NON e' un arresto -- il confine si attraversa alla "
-     "velocita' di avvicinamento. Scrivere il caso nuovo accanto al vecchio "
+     "velocita' che si aveva, o al gradino se il limite scende. Scrivere il "
+     "caso nuovo accanto al vecchio "
      "avrebbe voluto dire due motori di calcolo da tenere d'accordo, e prima "
      "o poi uno dei due sarebbe stato corretto senza l'altro. Il modulo ne ha "
      "quindi UNO SOLO, generale, e il caso di sempre e' il caso generale con "
@@ -237,29 +263,44 @@ RIGA_PER_RIGA = [
     ("h3", "_velocita_di_confine -- il cuore"),
     ("c", "kinematics._velocita_di_confine"),
     ("p",
-     "Tre passate su una lista di n+1 confini, e l'ordine e' quello che le "
-     "rende esatte. La prima mette su ogni confine il piu' basso dei due "
-     "limiti che vi si affacciano, e zero ai due estremi, perche' si parte e "
-     "si arriva fermi. La seconda scende in avanti: non si puo' arrivare a un "
-     "confine piu' in fretta di quanto l'accelerazione consenta, partendo dal "
-     "confine precedente. La terza risale all'indietro: non si puo' "
-     "attraversare un confine piu' in fretta di quanto la frenata consenta di "
-     "rallentare in tempo per quello dopo."),
+     "Restituisce DUE velocita' per pezzo, quella di entrata e quella di "
+     "uscita, e non una sola per confine. E' il gradino a imporlo: dove il "
+     "limite scende il profilo e' discontinuo, si esce dal pezzo veloce alla "
+     "velocita' che si aveva e si entra in quello lento al suo limite. Con un "
+     "numero solo per confine il salto non sarebbe nemmeno rappresentabile."),
     ("p",
-     "La formula usata in tutte e due le passate e' sempre la stessa, "
-     "v_fine^2 = v_inizio^2 + 2*a*spazio, che e' la relazione fra velocita' e "
-     "spazio di un moto uniformemente accelerato scritta senza il tempo."),
+     "Una passata sola, in avanti, e tre vincoli sulla velocita' con cui si "
+     "esce da ogni pezzo: il limite del pezzo che si sta percorrendo; quanto "
+     "l'accelerazione consente di guadagnare entrandoci alla velocita' di "
+     "entrata; e quanto basta a potersi ancora fermare in fondo ALLA CORSA. "
+     "La velocita' di entrata nel pezzo successivo e' poi quella di uscita da "
+     "questo, abbassata di colpo al limite del nuovo pezzo se lo supera: "
+     "quella riga e' il gradino."),
+    ("p",
+     "La formula usata e' sempre la stessa, v_fine^2 = v_inizio^2 + 2*a*"
+     "spazio, che e' la relazione fra velocita' e spazio di un moto "
+     "uniformemente accelerato scritta senza il tempo."),
     ("q",
-     "E' LA TERZA PASSATA CHE EVITA I CASI PARTICOLARI. Immaginiamo una zona "
+     "IL TERZO VINCOLO GUARDA LA FINE DELLA CORSA, NON IL CONFINE DOPO. E' "
+     "tutta qui la differenza fra le due semantiche possibili, ed e' il punto "
+     "che la prima stesura aveva sbagliato. Guardando il confine successivo si "
+     "ottiene la frenata anticipata; guardando il fondo corsa si ottiene il "
+     "carroponte che frena per fermarsi a terra, perche' della zona non sa "
+     "niente finche' non ci arriva. Ignorare i limiti piu' bassi che "
+     "incontrera' per strada e' lecito proprio perche' scendere di colpo si "
+     "puo': se il limite di un pezzo piu' avanti sta sotto la velocita' con "
+     "cui gli si arriva, non serve rallentare prima -- basta il gradino."),
+    ("q",
+     "E' IL TERZO VINCOLO CHE EVITA I CASI PARTICOLARI. Immaginiamo una zona "
      "di avvicinamento di 2 mm a 80 mm/s con frenata a 800 mm/s^2: per "
      "fermarsi da 80 mm/s servono 4 mm, il doppio di quelli disponibili. La "
-     "regola dichiarata -- 'entra nella zona a velocita' di avvicinamento' -- "
-     "e' in quel caso fisicamente impossibile, e un codice scritto a rami "
-     "avrebbe avuto bisogno di accorgersene. Qui non serve: la passata "
-     "all'indietro trova che dal confine finale (velocita' zero) si puo' "
-     "risalire solo fino a 56,6 mm/s, e abbassa il limite del confine da sola. "
-     "Lo stesso vale per una corsa piu' corta della zona, o per una zona piu' "
-     "lunga di tutto lo spazio di accelerazione disponibile."),
+     "regola dichiarata -- 'nella zona si va alla velocita' di avvicinamento' "
+     "-- e' in quel caso fisicamente impossibile, e un codice scritto a rami "
+     "avrebbe avuto bisogno di accorgersene. Qui non serve: a 2 mm dal fondo "
+     "il terzo vincolo vale 56,6 mm/s, cioe' meno della velocita' di "
+     "avvicinamento, e il limite scende da solo. Lo stesso vale per una corsa "
+     "piu' corta della zona, o per una zona piu' lunga di tutto lo spazio di "
+     "accelerazione disponibile."),
 
     ("h3", "_distanza_rampe e _picco_triangolare"),
     ("p",
@@ -283,7 +324,7 @@ RIGA_PER_RIGA = [
     ("p",
      "Il max() finale sembra una precauzione e non lo e' del tutto: "
      "matematicamente v_p non puo' stare sotto v_in ne' sotto v_out, perche' "
-     "le due passate di _velocita_di_confine lo hanno gia' garantito. Serve a "
+     "i vincoli di _velocita_di_confine lo hanno gia' garantito. Serve a "
      "coprire l'ultimo bit di errore numerico, che altrimenti produrrebbe una "
      "durata di rampa negativa -- e un tempo di percorrenza piu' corto del "
      "vero, cioe' esattamente l'errore che nessuno vede."),
@@ -353,11 +394,18 @@ RIGA_PER_RIGA = [
      "avvicinamento di 150 mm a 80 mm/s:"),
     ("t", [
         ["corsa", "a gancio scarico", "col telaio"],
-        ["900 mm, senza avvicinamento", "2,43 s", "3,60 s"],
-        ["900 mm, con avvicinamento", "3,96 s", "4,92 s"],
-        ["1 500 mm, senza avvicinamento", "3,63 s", "5,60 s"],
-        ["1 500 mm, con avvicinamento", "5,16 s", "6,92 s"],
+        ["900 mm, senza avvicinamento", "2,42 s", "3,60 s"],
+        ["900 mm, salendo", "3,96 s", "4,92 s"],
+        ["900 mm, scendendo", "3,74 s", "4,75 s"],
+        ["1 500 mm, senza avvicinamento", "3,62 s", "5,60 s"],
+        ["1 500 mm, salendo", "5,16 s", "6,92 s"],
+        ["1 500 mm, scendendo", "4,94 s", "6,75 s"],
     ]),
+    ("p",
+     "La discesa costa meno della salita, e non e' una stranezza: scendendo "
+     "la zona si paga solo da quando il finecorsa scatta, mentre salendo si "
+     "parte da fermi e la si attraversa tutta a velocita' ridotta, rampa di "
+     "partenza inclusa."),
     ("p",
      "Il sovrapprezzo e' quasi costante -- circa un secondo e mezzo a gancio "
      "scarico -- e infatti non dipende dalla corsa: sono sempre gli stessi 150 "
@@ -453,11 +501,14 @@ RIGA_PER_RIGA = [
      "Qualche spigolo vero, sul sollevamento a gancio scarico dell'esempio "
      "(500 mm/s, 800 mm/s^2) per una corsa di 1500 mm. Senza avvicinamento "
      "sono (0; 0,625; 3,0; 3,625): rampa, crociera, frenata. Con la zona di "
-     "150 mm a 80 mm/s, scendendo, diventano (0; 0,625; 2,708; 3,233; 5,058; "
-     "5,158) -- cinque tratti: rampa, crociera, frenata fino a 80 mm/s, il "
-     "lungo tratto lento, la frenata finale di un decimo di secondo. Salendo "
-     "sono (0; 0,1; 1,925; 2,45; 4,533; 5,158), che e' la stessa sequenza "
-     "letta al contrario."),
+     "150 mm a 80 mm/s, scendendo, diventano (0; 0,625; 3,0; 3,013; 4,838; "
+     "4,938) -- cinque tratti: rampa, crociera, un pezzetto di frenata "
+     "normale, il gradino, il lungo tratto lento e la frenata finale di un "
+     "decimo di secondo. Si noti che i primi tre spigoli sono gli stessi del "
+     "caso senza zona: fino al finecorsa i due profili coincidono, ed e' "
+     "esattamente cio' che l'autotest verifica. Salendo sono invece (0; 0,1; "
+     "1,925; 2,45; 4,533; 5,158), dove la sequenza e' rovesciata e tutte le "
+     "transizioni sono rampe: salendo non c'e' nessun gradino."),
     ("q",
      "LO SPIGOLO DEL TRIANGOLO. E' il punto in cui questa funzione poteva "
      "sbagliare in silenzio. In una versione ancora precedente lo spigolo era "
@@ -505,9 +556,19 @@ RIGA_PER_RIGA = [
            "controlla la regola per quello che e': un limite di velocita' in "
            "funzione della POSIZIONE, non del tempo;"),
     ("li", "l'avvicinamento deve costare. Un limite in piu' non puo' far "
-           "guadagnare tempo, e se lo facesse vorrebbe dire che una delle tre "
-           "passate di _velocita_di_confine sta alzando un limite invece di "
-           "abbassarlo."),
+           "guadagnare tempo, e se lo facesse vorrebbe dire che "
+           "_velocita_di_confine sta alzando un limite invece di abbassarlo. "
+           "Il confronto e' fra una cinematica e LA SUA variante con zona: a "
+           "cinematiche diverse i tempi non sono paragonabili, e per una "
+           "svista di indici per un po' l'autotest confrontava proprio quelli;"),
+    ("li", "scendendo, prima del finecorsa il profilo deve essere IDENTICO a "
+           "quello che si avrebbe senza zona. E' l'asserzione che distingue il "
+           "gradino dalla frenata anticipata, e l'unica che ci riesca "
+           "guardando le sole funzioni pubbliche: nessun altro controllo "
+           "dell'elenco cambia risposta fra le due semantiche;"),
+    ("li", "salendo, invece, la velocita' non puo' partire a gradino. Si e' "
+           "fermi e si accelera, perche' il gradino vale solo dove il limite "
+           "scende."),
     ("q",
      "IL CAMPIONE A CAVALLO DEL CONFINE. Il controllo sulla velocita' dentro "
      "la zona guarda l'estremo del campione PIU' LONTANO dal capo lento, non "

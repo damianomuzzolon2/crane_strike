@@ -20,6 +20,21 @@ fisso di corsa. Il profilo smette allora di essere un solo trapezio e diventa
 una successione di trapezi, uno per ogni pezzo di corsa a limite di velocita'
 diverso.
 
+La zona NON e' pianificata: e' un finecorsa. Il carroponte non sa di doverci
+entrare e non anticipa niente -- frena come se dovesse fermarsi in fondo alla
+corsa, esattamente come se la zona non ci fosse -- e solo quando il finecorsa
+scatta il drive impone la velocita' di avvicinamento, A GRADINO. Il gradino
+c'e' percio' solo dove il limite SCENDE, cioe' entrando nella zona scendendo a
+posare: in salita la zona sta in partenza e all'uscita il limite RISALE, e da
+li' si accelera normalmente, che e' l'unica cosa che un motore sappia fare.
+
+Il gradino e' un'idealizzazione: un drive vero ci mette la sua rampa. E' pero'
+l'idealizzazione giusta, perche' frenare dal finecorsa con la decelerazione
+NOMINALE non darebbe affatto un tratto lento -- si arriverebbe a terra prima
+di averla raggiunta, e la zona non costerebbe niente. Chi taglia la velocita'
+all'ingresso della zona e' una rampa molto piu' ripida di quella nominale, e
+il gradino e' il suo limite.
+
 Per non avere due motori di calcolo -- uno per il caso semplice e uno per
 quello con avvicinamento, destinati a divergere -- il modulo ne ha uno solo:
 la corsa viene spezzata in pezzi a limite di velocita' costante e risolta
@@ -50,8 +65,10 @@ class Approach:
     del MOVIMENTO, non del carroponte:
 
       - si SCENDE a depositare -> la zona sta in fondo (True): si viaggia
-        normalmente finche' mancano `distance` millimetri, si entra nella zona
-        gia' a `speed`, si prosegue a `speed` e si frena solo all'ultimo;
+        normalmente -- frenata compresa, puntando a fermarsi in fondo alla
+        corsa, come se la zona non ci fosse -- finche' mancano `distance`
+        millimetri; li' la velocita' cade A GRADINO a `speed`, ci si resta, e
+        si frena solo all'ultimo;
       - si SALE a prelevare    -> la zona sta in testa (False): si parte piano,
         si resta a `speed` per `distance` millimetri e solo dopo si accelera
         verso la velocita' massima.
@@ -169,33 +186,60 @@ def _limiti(d: float, kin: Kinematics) -> tuple[tuple[float, float], ...]:
 
 def _velocita_di_confine(
     limiti: tuple[tuple[float, float], ...], kin: Kinematics
-) -> list[float]:
-    """La velocita' con cui si attraversa ogni confine fra un pezzo e l'altro,
-    estremi della corsa compresi -- dove vale zero: si parte e si arriva fermi.
+) -> tuple[tuple[float, float], ...]:
+    """Con che velocita' si ENTRA e si ESCE da ogni pezzo: `((v_in, v_out), ...)`,
+    uno per pezzo, nell'ordine in cui si percorrono. Si parte e si arriva
+    fermi, quindi il primo v_in e l'ultimo v_out valgono zero.
 
-    Tre passate, ed e' l'ordine a renderle esatte:
+    Due velocita' per confine e non una sola, perche' dove il limite SCENDE il
+    profilo e' discontinuo: si esce dal pezzo veloce alla velocita' che si
+    aveva, e si entra in quello lento al suo limite. Il salto e' il gradino del
+    finecorsa descritto in cima al modulo.
 
-      1. un confine non puo' essere attraversato piu' in fretta del piu' basso
-         dei due limiti che vi si affacciano;
-      2. in avanti: ne' piu' in fretta di quanto l'accelerazione consenta di
-         arrivarci partendo dal confine precedente;
-      3. all'indietro: ne' piu' in fretta di quanto la frenata consenta di
-         rallentare in tempo per il confine successivo.
+    Una sola passata in avanti, e tre vincoli sulla velocita' di uscita da ogni
+    pezzo:
 
-    La terza passata e' quella che risolve da sola tutti i casi degeneri --
+      1. il limite del pezzo che si sta percorrendo;
+      2. quanto l'accelerazione consente di guadagnare entrandoci a v_in;
+      3. quanto basta a potersi ancora fermare in fondo ALLA CORSA.
+
+    Il terzo e' quello che e' cambiato, ed e' tutta la differenza fra le due
+    semantiche possibili. Guarda la distanza che resta fino alla FINE, non fino
+    al confine successivo, e ignora i limiti piu' bassi che incontrera' per
+    strada: il carroponte frena per fermarsi a terra, non per entrare piano
+    nella zona, perche' della zona non sa niente finche' non ci arriva. La
+    versione precedente guardava il confine successivo, e il risultato era una
+    frenata anticipata che nessun impianto fa.
+
+    Ignorare i limiti piu' bassi a valle e' lecito proprio perche' scendere di
+    colpo si puo': se il limite di un pezzo piu' avanti e' sotto la velocita'
+    con cui gli si arriva, non serve rallentare prima, basta il gradino.
+
+    Il vincolo 3 continua pero' a risolvere da solo tutti i casi degeneri --
     zona di avvicinamento piu' corta del proprio spazio di frenata, corsa piu'
-    corta della zona -- senza un solo ramo dedicato: dove non c'e' spazio per
-    entrare nella zona a velocita' di avvicinamento, il limite scende da se'.
+    corta della zona -- senza un solo ramo dedicato: li' e' la fine della corsa
+    a essere vicina, e la velocita' scende da se' sotto quella di
+    avvicinamento.
     """
+    # quanta corsa resta dopo ogni confine: `coda[i]` e' la distanza dalla fine
+    # all'INIZIO del pezzo i, e coda[n] = 0 e' il fondo corsa
     n = len(limiti)
-    v = [0.0] * (n + 1)
-    for i in range(1, n):
-        v[i] = min(limiti[i - 1][1], limiti[i][1])
-    for i in range(n):
-        v[i + 1] = min(v[i + 1], math.sqrt(v[i] ** 2 + 2 * kin.a_max * limiti[i][0]))
+    coda = [0.0] * (n + 1)
     for i in range(n - 1, -1, -1):
-        v[i] = min(v[i], math.sqrt(v[i + 1] ** 2 + 2 * kin.decel * limiti[i][0]))
-    return v
+        coda[i] = coda[i + 1] + limiti[i][0]
+    out: list[tuple[float, float]] = []
+    v_in = 0.0  # si parte fermi
+    for i, (lung, v_cap) in enumerate(limiti):
+        v_out = min(
+            v_cap,
+            math.sqrt(v_in**2 + 2 * kin.a_max * lung),
+            math.sqrt(2 * kin.decel * coda[i + 1]),
+        )
+        out.append((v_in, v_out))
+        # IL GRADINO: nel pezzo successivo si entra alla velocita' con cui si e'
+        # usciti da questo, abbassata di colpo al suo limite se lo supera
+        v_in = min(v_out, limiti[i + 1][1]) if i + 1 < n else 0.0
+    return tuple(out)
 
 
 def _distanza_rampe(v_cap: float, v_in: float, v_out: float, kin: Kinematics) -> float:
@@ -216,7 +260,7 @@ def _picco_triangolare(
     si accelera fino a v_p e da li' si frena, senza tratto piatto.
 
     (v_p^2 - v_in^2)/(2a) + (v_p^2 - v_out^2)/(2d) = lunghezza, da cui la radice
-    qui sotto. Le passate di `_velocita_di_confine` garantiscono che il
+    qui sotto. I vincoli di `_velocita_di_confine` garantiscono che il
     risultato non stia mai sotto v_in ne' sotto v_out: il max e' li' solo per
     il pelo di errore numerico."""
     v_p = math.sqrt(
@@ -265,10 +309,10 @@ def _tratti(d: float, kin: Kinematics) -> tuple[_Tratto, ...]:
     if d <= 0:
         return ()
     limiti = _limiti(d, kin)
-    v = _velocita_di_confine(limiti, kin)
+    confini = _velocita_di_confine(limiti, kin)
     out: list[_Tratto] = []
-    for i, (lung, v_cap) in enumerate(limiti):
-        out.extend(_tratti_di_pezzo(lung, v_cap, v[i], v[i + 1], kin))
+    for (lung, v_cap), (v_in, v_out) in zip(limiti, confini):
+        out.extend(_tratti_di_pezzo(lung, v_cap, v_in, v_out, kin))
     return tuple(out)
 
 
@@ -287,7 +331,9 @@ def travel_time(distance: float, kin: Kinematics) -> float:
       subito, senza mai raggiungere v_max.
     - Con una zona di avvicinamento i profili diventano due, uno per pezzo di
       corsa, e il tempo e' la somma: il confine fra i due NON e' un punto di
-      arresto, lo si attraversa alla velocita' di avvicinamento.
+      arresto. Lo si attraversa alla velocita' che si aveva, e se il pezzo
+      successivo ha un limite piu' basso -- la zona in cui si scende a posare
+      -- la velocita' ci cade sopra a gradino.
 
     Le rampe hanno pendenze diverse, quindi durate diverse: non si puo'
     contarne una e moltiplicarla per due.
@@ -342,6 +388,11 @@ def profile_breakpoints(distance: float, kin: Kinematics) -> tuple[float, ...]:
     Fra due spigoli consecutivi la posizione e' un polinomio di grado <= 2 in
     t. Campionando anche tutti gli spigoli si puo' quindi limitare in modo
     RIGOROSO l'errore commesso cercando un minimo su una griglia finita.
+
+    Vale anche dove la velocita' fa un gradino: li' la posizione resta
+    continua, cambia solo pendenza, e l'istante del salto e' per costruzione la
+    fine dei tratti di un pezzo e l'inizio di quelli del successivo -- cioe' e'
+    gia' uno spigolo, e la garanzia regge senza doverlo aggiungere a mano.
     """
     d = abs(distance)
     if d == 0:
@@ -407,7 +458,40 @@ if __name__ == "__main__":
                     assert (
                         v <= min(app.speed, k.v_max) + 1e-6
                     ), "velocita' oltre quella di avvicinamento dentro la zona"
-    # la zona di avvicinamento costa tempo, e non puo' farne guadagnare
-    for b, k in zip(base, tutte[len(base):]):
-        assert travel_time(20.0, k) > travel_time(20.0, b), "l'avvicinamento deve costare"
+    # la zona di avvicinamento costa tempo, e non puo' farne guadagnare.
+    # Il confronto va fatto fra una cinematica e LA SUA variante con zona: a
+    # cinematiche diverse i tempi non sono paragonabili.
+    for b in base:
+        for giu in (True, False):
+            k = b.avvicinandosi(0.2, 3.0, scendendo=giu)
+            assert travel_time(20.0, k) > travel_time(
+                20.0, b
+            ), "l'avvicinamento deve costare"
+
+    # SCENDENDO non si anticipa niente: finche' non scatta il finecorsa il
+    # profilo e' identico a quello che si avrebbe senza zona, frenata compresa.
+    # E' la differenza fra il gradino e la vecchia frenata anticipata, ed e'
+    # l'unico modo di coglierla guardando solo le funzioni pubbliche.
+    for b in base:
+        k = b.avvicinandosi(0.2, 3.0, scendendo=True)
+        dist, x_finecorsa = 20.0, 20.0 - 3.0
+        T = travel_time(dist, k)
+        for i in range(2001):
+            t = T * i / 2000
+            s = position_profile(t, dist, k)
+            if s >= x_finecorsa:
+                break
+            assert (
+                abs(s - position_profile(t, dist, b)) < 1e-9
+            ), "prima del finecorsa il profilo deve essere quello senza zona"
+
+    # SALENDO il gradino non c'e': la zona sta in partenza, si e' fermi, e
+    # l'unica cosa che un motore sappia fare e' accelerare.
+    for b in base:
+        k = b.avvicinandosi(0.2, 3.0, scendendo=False)
+        dt = 1e-4
+        assert (
+            position_profile(dt, 20.0, k) / dt < 0.2
+        ), "in salita la velocita' non puo' partire a gradino"
+
     print("\nOK: kinematics.py funziona correttamente")
