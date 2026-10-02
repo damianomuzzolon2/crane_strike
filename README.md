@@ -1131,6 +1131,15 @@ attesa tutte le volte. La cartella si copia tale e quale e parte subito.
   mette l'icona sul file `.exe` stesso, quella che si vede in Esplora risorse.
   Sono due cose diverse, e servono tutte e due.
 
+- **`version`**: azienda, prodotto, descrizione, versione e copyright, cioe'
+  quello che si legge con *tasto destro -> Proprieta' -> Dettagli* sul file
+  `.exe` (ed e' anche la colonna *Descrizione* del Gestione attivita'). I valori
+  stanno in cima allo spec, in chiaro, e **il numero di versione sta li' e in
+  nessun altro posto** — e' l'unico modo per non ritrovarsi due numeri diversi
+  nello stesso file. L'anno del copyright non si scrive a mano: e' quello in cui
+  si costruisce, perche' scritto a mano resterebbe indietro, e un avviso di
+  copyright con l'anno sbagliato e' peggio di nessun avviso.
+
 - **`excludes`**: qui si tolgono i pacchetti inutili per alleggerire. Attenzione
   a `pandas`: il progetto non lo usa, ma OR-Tools si', quindi non va escluso.
   Vale la regola generale che un pacchetto va tolto solo se si e' sicuri che
@@ -1232,6 +1241,26 @@ faccenda.
 Quella finestra non e' un caso: l'eseguibile non ha console, quindi un errore
 all'avvio sparirebbe senza lasciare traccia. `interfaccia.py` lo intercetta e lo
 mostra apposta.
+
+### Di chi e' questo programma, e che versione e'
+
+Tasto destro su `CraneStrike.exe` -> *Proprieta'* -> scheda *Dettagli*:
+
+```text
+Descrizione file   Ciclogrammi carroponti per linee galvaniche
+Versione prodotto  1.0.0
+Societa'           Imel S.p.A.
+Copyright          Copyright (c) 2026 Imel S.p.A. - Tutti i diritti riservati.
+```
+
+Serve a due cose concrete: sapere **quale versione** sta girando su un PC senza
+doverlo chiedere a chi ce l'ha messa, e avere l'avviso di copyright attaccato al
+file invece che a un foglio in un cassetto.
+
+> Non e' una protezione. Chi copia la cartella se la porta via con tutto il
+> copyright dentro: quelle righe dicono di chi e' il programma, non impediscono
+> a nessuno di usarlo. Proteggere il codice e impedire la copia sono problemi
+> diversi, e piu' grossi.
 
 ### Aggiornare a una versione nuova
 
