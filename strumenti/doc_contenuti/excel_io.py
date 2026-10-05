@@ -656,13 +656,12 @@ RISULTATI = [
     ("c", "excel_io._utilizzo_carroponti"),
     ("p",
      "Una riga che risponde a una domanda che l'utente si pone sempre: quanto "
-     "lavora davvero ciascun carroponte. Si contano solo i tratti in cui "
-     "trasla -- _FASI_IN_MOVIMENTO -- e si divide per il periodo."),
+     "lavora davvero ciascun carroponte. Si contano tutti i tratti in cui non "
+     "e' fermo -- _FASI_DI_LAVORO -- e si divide per il periodo."),
     ("p",
-     "Le corse verticali NON contano come movimento, ed e' una convenzione "
-     "discutibile ma dichiarata nel docstring: il carroponte sta lavorando, ma "
-     "non sta occupando rotaia, e l'utilizzo serve a capire se c'e' spazio per "
-     "dargli piu' trasporti."),
+     "Le corse verticali (presa, rilascio, corsa a vuoto del gancio) contano "
+     "come lavoro anche se il carroponte non trasla: l'utilizzo e' il tempo in "
+     "cui non e' fermo, e il complemento a 1 e' il tempo passato in attesa."),
 
     # ==================================================================
     ("h2", "2. I cartelli"),

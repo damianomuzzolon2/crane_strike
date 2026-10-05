@@ -2147,7 +2147,7 @@ _FASI = {
     "lift_empty": "corsa verticale a vuoto",
     "quota": "traslazione di cambio quota",
 }
-_FASI_IN_MOVIMENTO = {"loaded", "empty", "quota"}
+_FASI_DI_LAVORO = {"pick", "loaded", "release", "empty", "lift_empty", "quota"}
 
 _SEVERITA = {"error": "ERRORE", "warning": "avviso", "info": "nota"}
 
@@ -2257,12 +2257,13 @@ def _righe_movimenti(data: ProblemData, solution) -> list[list]:
 
 
 def _utilizzo_carroponti(solution, T: float) -> list[float]:
-    """Frazione del ciclo in cui ciascun carroponte e' effettivamente in
-    movimento (il resto e' attesa o movimentazione verticale)."""
+    """Frazione del ciclo in cui ciascun carroponte non e' fermo: traslazioni
+    e corse verticali (presa, rilascio, corsa a vuoto del gancio) contano
+    tutte; il resto e' attesa."""
     out = []
     for segs in solution.segments_per_hoist:
         moto = sum(
-            s.t_end - s.t_start for s in segs if s.kind in _FASI_IN_MOVIMENTO
+            s.t_end - s.t_start for s in segs if s.kind in _FASI_DI_LAVORO
         )
         out.append(moto / T if T else 0.0)
     return out
