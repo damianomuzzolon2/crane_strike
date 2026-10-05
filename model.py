@@ -1599,6 +1599,158 @@ def _durata_rientro(
     )
 
 
+def gambe_via_passaggi(
+    data: "ProblemData",
+    stazione_a: int,
+    stazione_b: int,
+    posizioni: list[float],
+) -> list[list[tuple[float, float, float, Optional[tuple[int, bool]]]]]:
+    """Il rientro a vuoto da `a` a `b` passando per le `posizioni` date, come
+    GAMBE: una per arrivare al primo punto, una fra ogni coppia di punti, una
+    dall'ultimo alla stazione `b` -- quindi `len(posizioni) + 1` gambe.
+
+    Ogni gamba e' una sequenza di tratte `(da, a, durata, verticale)`, dove
+    `verticale` e' None per una traslazione e `(stazione, sale)` per una corsa
+    del gancio scarico sullo svincolo, come in `tratte_rientro`.
+
+    Le gambe e non un percorso unico, perche' ognuna va fatta in tempo per
+    il proprio punto: chi le usa deve sapere quanto dura ciascuna.
+
+    I punti sono posizioni qualunque della rotaia, non vasche: su una linea in
+    cui il gancio basso passa dappertutto si resta bassi, altrimenti appena
+    un ostacolo cade lungo il percorso -- o se ne parte o vi si arriva -- si
+    sale sullo svincolo della partenza, si fa tutto il giro in alto e si
+    scende su quello dell'arrivo. E' prudente, ma un punto libero puo' stare
+    sopra una vasca qualunque, e da li' scendere non e' detto si possa.
+
+    Senza punti non serve: il rientro diretto e' `tratte_rientro`."""
+    if not posizioni:
+        raise ValueError("gambe_via_passaggi vuole almeno un punto")
+    pos_a = data.approach_position(stazione_a)
+    pos_b = data.approach_position(stazione_b)
+    percorso = [pos_a, *posizioni, pos_b]
+
+    def ostacolo(stazione: int) -> bool:
+        return not data.tanks[data.route[stazione].tank_id].gancio_basso
+
+    alto = ostacolo(stazione_a) or ostacolo(stazione_b) or any(
+        not t.gancio_basso and min(p, q) < t.position < max(p, q)
+        for p, q in zip(percorso, percorso[1:])
+        for t in data.tanks.values()
+    )
+
+    def trasla(p: float, q: float):
+        return (p, q, data.horizontal_empty_seconds(p, q), None)
+
+    gambe = [[trasla(p, q)] for p, q in zip(percorso, percorso[1:])]
+    if alto:
+        sv_a = data.svincolo_verso(stazione_a, percorso[1])
+        sv_b = data.svincolo_verso(stazione_b, percorso[-2])
+        gambe[0] = [
+            trasla(pos_a, sv_a),
+            (sv_a, sv_a, data.empty_lift_seconds(stazione_a, scendendo=False),
+             (stazione_a, True)),
+            trasla(sv_a, percorso[1]),
+        ]
+        gambe[-1] = [
+            trasla(percorso[-2], sv_b),
+            (sv_b, sv_b, data.empty_lift_seconds(stazione_b, scendendo=True),
+             (stazione_b, False)),
+            trasla(sv_b, pos_b),
+        ]
+    return gambe
+
+
+def _segmenti_gamba(data: "ProblemData", gamba, t0: float) -> list[Segment]:
+    """Le tratte di una gamba (vedi `gambe_via_passaggi`) come Segment, a
+    partire dall'istante `t0`. Le tratte di durata nulla non si emettono: un
+    movimento lungo zero si ordina male fra i vicini."""
+    segs, t = [], t0
+    for xa, xb, durata, verticale in gamba:
+        if durata <= 0:
+            continue
+        if verticale is None:
+            segs.append(Segment("empty", t, t + durata, xa, xb, data.kin_empty))
+        else:
+            stazione, sale = verticale
+            segs.append(
+                Segment(
+                    "lift_empty", t, t + durata, xa, xb, None, sale=sale,
+                    kin_z=data.kin_lift_empty_at(stazione, scendendo=not sale),
+                )
+            )
+        t += durata
+    return segs
+
+
+def orario_passaggi(
+    data: "ProblemData",
+    stazione_a: int,
+    stazione_b: int,
+    t_libero: float,
+    passaggi: list[tuple[float, float]],
+) -> tuple[float, float, list[tuple[float, float, int]]]:
+    """Quando il carroponte si muove per toccare i punti di `passaggi` nel
+    rientro da `a` (libero da `t_libero`) a `b`.
+
+    La regola e' quella del punto di passaggio: la linea fa un vertice
+    ESATTAMENTE sul punto. Il tempo che avanza si passa fermi prima di ogni
+    gamba -- si parte all'ultimo momento utile per arrivare puntuali -- e
+    dall'ultimo punto si riparte subito, aspettando poi sulla vasca dove si
+    deve prendere. Una sosta in un posto e' quindi semplicemente due punti
+    alla stessa posizione.
+
+    Restituisce (partenza dalla stazione `a`, arrivo pronto sulla `b`,
+    ritardi) dove ritardi elenca `(istante voluto, istante possibile, indice
+    del punto)` dei punti che non si fanno in tempo a raggiungere: li' si
+    arriva appena si puo', e da li' si prosegue."""
+    gambe = gambe_via_passaggi(data, stazione_a, stazione_b, [x for _, x in passaggi])
+    durate = [sum(d for _, _, d, _ in g) for g in gambe]
+    t, ritardi, partenza = t_libero, [], None
+    for i, ((ti, _), durata) in enumerate(zip(passaggi, durate)):
+        via = max(t, ti - durata)
+        if via + durata > ti + data.eps_seconds:
+            ritardi.append((ti, via + durata, i))
+        if partenza is None:
+            partenza = via
+        t = via + durata
+    if partenza is None:
+        partenza = t
+    return partenza, t + durate[-1], ritardi
+
+
+def assegna_passaggi(
+    passaggi: list[tuple[float, float]],
+    archi: list[tuple[int, float, float]],
+    T: float,
+    eps: float,
+) -> tuple[dict[int, list[tuple[float, float]]], list[tuple[float, float]]]:
+    """A quale rientro a vuoto appartiene ogni punto di passaggio.
+
+    `archi`: `(mossa consegnata, inizio, fine)` dei rientri di un carroponte,
+    sulla scala dei tempi del suo giro. Il punto si da' con un istante
+    qualunque -- il ciclogramma si ripete, quindi conta solo dove cade nel
+    periodo -- e lo si porta sulla stessa scala del rientro che lo contiene.
+
+    Restituisce (punti per mossa, in ordine di tempo; punti che non cadono in
+    nessun rientro -- il carroponte in quel momento trasporta un pezzo)."""
+    per_mossa: dict[int, list[tuple[float, float]]] = {}
+    fuori = []
+    for t, x in passaggi:
+        for k, inizio, fine in archi:
+            tt = inizio + (t - inizio) % T
+            if T - (tt - inizio) <= eps:
+                tt = inizio  # un capello prima del multiplo: e' l'inizio
+            if tt <= fine + eps:
+                per_mossa.setdefault(k, []).append((min(tt, fine), float(x)))
+                break
+        else:
+            fuori.append((t, x))
+    for pts in per_mossa.values():
+        pts.sort()
+    return per_mossa, fuori
+
+
 @dataclass(frozen=True)
 class SostaIntermedia:
     """Una fermata del carroponte in un'altra vasca della propria zona, fra la
@@ -1684,6 +1836,13 @@ class HoistPlan:
     # quanto. Assente = rientro diretto, che e' il caso normale. Quinto grado
     # di liberta': vedi SostaIntermedia.
     soste_intermedie: dict[int, "SostaIntermedia"] = field(default_factory=dict)
+    # I punti di PASSAGGIO del rientro a vuoto che segue la mossa k: dove il
+    # carroponte deve trovarsi e quando, `(istante [s], posizione [mm])` in
+    # ordine di tempo, sulla stessa scala dei tempi di `finish`. Li mette
+    # l'utente disegnando a mano (vedi `build_solution`, `passaggi`); quando ci
+    # sono decidono loro il percorso, e attesa e sosta di quel rientro non
+    # contano piu'.
+    passaggi: dict[int, list[tuple[float, float]]] = field(default_factory=dict)
 
 
 @dataclass
@@ -2790,6 +2949,7 @@ def build_solution(
     mosse_attive: Optional[set] = None,
     attese: Optional[dict[int, float]] = None,
     soste: Optional[dict[int, SostaIntermedia]] = None,
+    passaggi: Optional[dict[int, list[tuple[float, float]]]] = None,
 ) -> Solution:
     """Costruisce una Solution completa dai soli gradi di liberta' di un
     ciclogramma: il takt time e l'istante di prelievo (fase, in [0,T)) di
@@ -2817,6 +2977,12 @@ def build_solution(
       Assente = rientro diritto. La regola predefinita non ne propone: una
       sosta per strada ha senso solo guardando dov'e' il vicino, e quello lo sa
       il solutore.
+    - `passaggi[z]`: i punti `(istante [s], posizione [mm])` per cui il
+      carroponte della zona di indice z deve passare durante i rientri a
+      vuoto. Li sceglie l'utente disegnando a mano; l'istante e' qualunque,
+      perche' conta solo dove cade nel periodo (vedi `assegna_passaggi`). In
+      un rientro che ne ha, attesa e sosta in mezzo non contano: il percorso
+      lo decidono i punti (vedi `orario_passaggi`).
 
     Solleva ValueError se la disposizione non e' realizzabile (per esempio se
     un carroponte dovrebbe essere in due posti insieme).
@@ -2849,7 +3015,8 @@ def build_solution(
         )
         local_pick = {k: _fase_nel_periodo(actual_time[k], T, data) for k in chiavi}
         return _assembla(
-            data, T, local_pick, actual_time, status, incoerenze, attese, soste
+            data, T, local_pick, actual_time, status, incoerenze, attese, soste,
+            passaggi,
         )
 
     if local_pick is None:
@@ -2881,7 +3048,8 @@ def build_solution(
         actual_time[k] += (n_giri + extra_periods.get(k, 0)) * T
 
     return _assembla(
-        data, T, local_pick, actual_time, status, incoerenze, attese, soste
+        data, T, local_pick, actual_time, status, incoerenze, attese, soste,
+        passaggi,
     )
 
 
@@ -2913,11 +3081,12 @@ def _assembla(
     incoerenze: Optional[list[str]],
     attese: Optional[dict[int, float]] = None,
     soste: Optional[dict[int, SostaIntermedia]] = None,
+    passaggi: Optional[dict[int, list[tuple[float, float]]]] = None,
 ) -> Solution:
     """Da fasi e tempi assoluti alle traiettorie di ciascun carroponte."""
     segments_per_hoist = []
     plans = []
-    for z in data.zones:
+    for indice_zona, z in enumerate(data.zones):
         moves = [k for k in range(z.lo, z.hi + 1) if k in local_pick]
         if not moves:
             segments_per_hoist.append([])
@@ -2947,7 +3116,14 @@ def _assembla(
 
             Una sosta in una vasca in mezzo allunga il rientro -- due traslate
             invece di una, piu' il tempo fermi -- e il conto va fatto su quel
-            totale: e' cosi' che il disegno decide quando partire."""
+            totale: e' cosi' che il disegno decide quando partire.
+
+            Con dei punti di passaggio invece decidono quelli, e nient'altro."""
+            if k1 in pas:
+                partenza, arrivo, _ = orario_passaggi(
+                    data, k1 + 1, k2, finish[k1], pas[k1]
+                )
+                return partenza, arrivo
             vuoto = _durata_rientro(data, k1 + 1, k2, sst.get(k1))
             if attese is not None:
                 # c'e' una scelta gia' fatta -- dal solutore, o salvata nel
@@ -2983,6 +3159,26 @@ def _assembla(
                 raise ValueError(f"Valori incoerenti: {guaio}")
             else:
                 incoerenze.append(guaio)
+        # I punti di passaggio, ognuno nel rientro in cui cade. Dove ce ne
+        # sono, la sosta in mezzo non ha piu' senso: il percorso e' il loro.
+        archi = [
+            (k, finish[k], lp[dopo[k]] + (T if dopo[k] == riferimento else 0.0))
+            for k in order
+        ]
+        pas, fuori = assegna_passaggi(
+            (passaggi or {}).get(indice_zona, []), archi, T, data.eps_seconds
+        )
+        for t, x in fuori:
+            messaggio = (
+                f"il passaggio a {t:.1f} s in {x:.0f} mm cade mentre il "
+                f"carroponte trasporta un pezzo: non e' in nessun rientro a "
+                f"vuoto, e non se ne tiene conto"
+            )
+            if incoerenze is None:
+                raise ValueError(f"Valori incoerenti: {messaggio}")
+            incoerenze.append(messaggio)
+        for k in pas:
+            sst.pop(k, None)
         basso = z.lo if z.lo in lp else riferimento
         alto = z.hi if z.hi in lp else max(moves)
         arr_lo = quando(prima[basso], basso)[1]
@@ -2999,10 +3195,11 @@ def _assembla(
                 attesa_alla_partenza=attese is None,
                 attese=None if attese is None else att,
                 soste=sst,
+                passaggi=pas,
             )
         )
         plans.append(
-            HoistPlan(z, order, lp, finish, dep_hi, arr_lo, att, sst)
+            HoistPlan(z, order, lp, finish, dep_hi, arr_lo, att, sst, pas)
         )
 
     raw = {"origine": "costruita da build_solution"}
@@ -3247,6 +3444,49 @@ def _aspetta_dove_ha_consegnato(zone: HoistZone, k: int, nxt_k: int) -> bool:
     return nxt_k in confini and (k + 1) not in confini
 
 
+def _rientro_via_passaggi(
+    data: ProblemData,
+    k: int,
+    nxt_k: int,
+    t_libero: float,
+    punti: list[tuple[float, float]],
+    segs: list[Segment],
+    incoerenze: Optional[list[str]],
+) -> float:
+    """Disegna in `segs` il rientro dalla consegna della mossa k al prelievo
+    della `nxt_k` passando per i `punti`, con la regola di `orario_passaggi`.
+    Restituisce l'istante in cui il carroponte e' pronto sulla stazione di
+    arrivo.
+
+    Un punto che non si fa in tempo a raggiungere non blocca niente: lo si
+    dice fra le incoerenze e lo si raggiunge appena si puo', come per ogni
+    altra cosa composta a mano."""
+    EPS = data.eps_seconds
+    gambe = gambe_via_passaggi(data, k + 1, nxt_k, [x for _, x in punti])
+    t = t_libero
+    x = data.approach_position(k + 1)
+    for (ti, xi), gamba in zip(punti, gambe):
+        durata = sum(d for _, _, d, _ in gamba)
+        via = ti - durata
+        if via < t - EPS:
+            messaggio = (
+                f"dopo la mossa {k} il carroponte non fa in tempo a passare "
+                f"da {xi:.0f} mm a {ti:.1f} s: ci arriva a {t + durata:.1f} s, "
+                f"{t + durata - ti:.1f} s troppo tardi"
+            )
+            if incoerenze is None:
+                raise ValueError(f"Valori incoerenti: {messaggio}")
+            incoerenze.append(messaggio)
+        via = max(via, t)
+        if via > t + EPS:
+            segs.append(Segment("wait", t, via, x, x, None))
+        segs.extend(_segmenti_gamba(data, gamba, via))
+        t, x = via + durata, xi
+    ultima = gambe[-1]
+    segs.extend(_segmenti_gamba(data, ultima, t))
+    return t + sum(d for _, _, d, _ in ultima)
+
+
 def _build_zone_trajectory(
     data: ProblemData,
     zone: HoistZone,
@@ -3259,6 +3499,7 @@ def _build_zone_trajectory(
     attesa_alla_partenza: bool = False,
     attese: Optional[dict[int, float]] = None,
     soste: Optional[dict[int, SostaIntermedia]] = None,
+    passaggi: Optional[dict[int, list[tuple[float, float]]]] = None,
 ) -> list[Segment]:
     """incoerenze: se e' una lista, i valori impossibili non sollevano piu'
     un'eccezione ma vengono descritti li' dentro e la traiettoria viene
@@ -3289,6 +3530,10 @@ def _build_zone_trajectory(
         sarebbe quella verificata. La regola predefinita non ne propone mai:
         sostare per strada serve a stare lontani dal vicino, e questo lo sa
         valutare solo chi guarda tutti i carroponti insieme.
+
+    passaggi[k]: i punti `(istante, posizione)` per cui passa il rientro che
+        segue la mossa k, gia' sulla scala dei tempi del giro (vedi
+        `assegna_passaggi`). Dove ci sono, vincono su `attese` e `soste`.
 
     attesa_alla_partenza: usato solo quando `attese` non c'e'. Dove il
         carroponte passa il tempo che gli avanza sul rientro a vuoto. False
@@ -3343,133 +3588,141 @@ def _build_zone_trajectory(
         is_last = i == n - 1
         nxt_k = order[0] if is_last else order[i + 1]
         x1_next = data.approach_position(nxt_k)
-        # Il rientro a vuoto, diritto o con una sosta in una vasca in mezzo.
-        # `travel_e` e' quanto passa fra la partenza e l'arrivo: con una sosta
-        # comprende i secondi fermi la' dentro, perche' e' con quel totale che
-        # si decide quando partire.
-        sosta = None if soste is None else soste.get(k)
-        messaggio = (
-            None
-            if sosta is None
-            else _perche_la_sosta_non_va(data, zone, k, nxt_k, sosta)
-        )
-        if messaggio is not None:
-            if incoerenze is None:
-                raise ValueError(f"Valori incoerenti: {messaggio}")
-            incoerenze.append(messaggio)
-            sosta = None
-        if sosta is None:
-            travel_e = data.empty_leg_seconds(k + 1, nxt_k)
-        else:
-            t_verso_sosta = data.empty_leg_seconds(k + 1, sosta.stazione)
-            t_dalla_sosta = data.empty_leg_seconds(sosta.stazione, nxt_k)
-            travel_e = t_verso_sosta + max(0.0, sosta.secondi) + t_dalla_sosta
-
-        # `dep_hi` e `arr_lo` sono i due istanti di CONFINE della zona -- la
-        # partenza dall'estremo alto e l'arrivo a quello basso -- e sono legati
-        # alle stazioni, non al giro: e' su quelle che il modello costruisce il
-        # vincolo di non collisione. Il +T invece riguarda il PERIODO, e sta
-        # sull'arco che si richiude su order[0]. Due cose diverse che per un
-        # po' hanno condiviso la stessa condizione, perche' il modello
-        # obbligava order[0] a coincidere con zone.lo.
-        depart_known = k == zone.hi
-        arrive_known = nxt_k == zone.lo
         # dove il carroponte passa il tempo che avanza sul rientro a vuoto:
         # fermo dove ha appena consegnato, oppure fermo dove deve andare
         target_pick = local_pick[nxt_k] + (T if nxt_k == order[0] else 0)
+        punti = (passaggi or {}).get(k)
+        if punti:
+            # I punti di passaggio scelti dall'utente: il percorso e i tempi
+            # sono loro, e attesa e sosta di questo rientro non contano.
+            arrive_t = _rientro_via_passaggi(
+                data, k, nxt_k, t1, punti, segs, incoerenze
+            )
+        else:
+            # Il rientro a vuoto, diritto o con una sosta in una vasca in mezzo.
+            # `travel_e` e' quanto passa fra la partenza e l'arrivo: con una sosta
+            # comprende i secondi fermi la' dentro, perche' e' con quel totale che
+            # si decide quando partire.
+            sosta = None if soste is None else soste.get(k)
+            messaggio = (
+                None
+                if sosta is None
+                else _perche_la_sosta_non_va(data, zone, k, nxt_k, sosta)
+            )
+            if messaggio is not None:
+                if incoerenze is None:
+                    raise ValueError(f"Valori incoerenti: {messaggio}")
+                incoerenze.append(messaggio)
+                sosta = None
+            if sosta is None:
+                travel_e = data.empty_leg_seconds(k + 1, nxt_k)
+            else:
+                t_verso_sosta = data.empty_leg_seconds(k + 1, sosta.stazione)
+                t_dalla_sosta = data.empty_leg_seconds(sosta.stazione, nxt_k)
+                travel_e = t_verso_sosta + max(0.0, sosta.secondi) + t_dalla_sosta
 
-        if attese is not None:
-            # la scelta del solutore, letta e basta. Vale anche sugli archi di
-            # confine: dep_hi e arr_lo dicono la stessa cosa, ma non finiscono
-            # nel file salvato, e la traiettoria deve venire uguale anche
-            # quando si ricostruisce da quello che il file porta davvero.
-            depart_t = t1 + attese.get(k, 0.0)
-            arrive_t = depart_t + travel_e
-        elif attesa_alla_partenza:
-            # Il disegno manuale non deve combaciare con nessun vincolo del
-            # modello, quindi qui si sceglie ARCO PER ARCO dove far passare il
-            # tempo morto, con la regola di `_aspetta_dove_ha_consegnato`. Gli
-            # istanti di confine dep_hi/arr_lo non si guardano: li decide la
-            # stessa regola, e chi li ha calcolati (`_assembla`) l'ha usata.
-            #
-            # La traslazione resta a VELOCITA' PIENA in tutti i casi: cambia
-            # quando avviene, non quanto dura.
-            if _aspetta_dove_ha_consegnato(zone, k, nxt_k):
-                arrive_t = max(target_pick, t1 + travel_e)
+            # `dep_hi` e `arr_lo` sono i due istanti di CONFINE della zona -- la
+            # partenza dall'estremo alto e l'arrivo a quello basso -- e sono legati
+            # alle stazioni, non al giro: e' su quelle che il modello costruisce il
+            # vincolo di non collisione. Il +T invece riguarda il PERIODO, e sta
+            # sull'arco che si richiude su order[0]. Due cose diverse che per un
+            # po' hanno condiviso la stessa condizione, perche' il modello
+            # obbligava order[0] a coincidere con zone.lo.
+            depart_known = k == zone.hi
+            arrive_known = nxt_k == zone.lo
+
+            if attese is not None:
+                # la scelta del solutore, letta e basta. Vale anche sugli archi di
+                # confine: dep_hi e arr_lo dicono la stessa cosa, ma non finiscono
+                # nel file salvato, e la traiettoria deve venire uguale anche
+                # quando si ricostruisce da quello che il file porta davvero.
+                depart_t = t1 + attese.get(k, 0.0)
+                arrive_t = depart_t + travel_e
+            elif attesa_alla_partenza:
+                # Il disegno manuale non deve combaciare con nessun vincolo del
+                # modello, quindi qui si sceglie ARCO PER ARCO dove far passare il
+                # tempo morto, con la regola di `_aspetta_dove_ha_consegnato`. Gli
+                # istanti di confine dep_hi/arr_lo non si guardano: li decide la
+                # stessa regola, e chi li ha calcolati (`_assembla`) l'ha usata.
+                #
+                # La traslazione resta a VELOCITA' PIENA in tutti i casi: cambia
+                # quando avviene, non quanto dura.
+                if _aspetta_dove_ha_consegnato(zone, k, nxt_k):
+                    arrive_t = max(target_pick, t1 + travel_e)
+                    depart_t = arrive_t - travel_e
+                else:
+                    depart_t = t1
+                    arrive_t = depart_t + travel_e
+            elif depart_known and arrive_known:
+                depart_t, arrive_t = dep_hi, arr_lo
+            elif depart_known:
+                depart_t = dep_hi
+                arrive_t = depart_t + travel_e
+            elif arrive_known:
+                arrive_t = arr_lo
                 depart_t = arrive_t - travel_e
             else:
+                # transizione interna alla zona: nessuna variabile libera
+                # dedicata nel modello. Convenzione per la visualizzazione:
+                # parte non appena possibile (nessuna attesa "gratuita" prima
+                # della partenza; l'eventuale margine e' mostrato come attesa
+                # DOPO l'arrivo, prima del prelievo successivo).
                 depart_t = t1
                 arrive_t = depart_t + travel_e
-        elif depart_known and arrive_known:
-            depart_t, arrive_t = dep_hi, arr_lo
-        elif depart_known:
-            depart_t = dep_hi
-            arrive_t = depart_t + travel_e
-        elif arrive_known:
-            arrive_t = arr_lo
-            depart_t = arrive_t - travel_e
-        else:
-            # transizione interna alla zona: nessuna variabile libera
-            # dedicata nel modello. Convenzione per la visualizzazione:
-            # parte non appena possibile (nessuna attesa "gratuita" prima
-            # della partenza; l'eventuale margine e' mostrato come attesa
-            # DOPO l'arrivo, prima del prelievo successivo).
-            depart_t = t1
-            arrive_t = depart_t + travel_e
 
-        if depart_t < t1 - EPS:
-            messaggio = (
-                f"il carroponte lascia la stazione "
-                f"{data.route[k + 1].tank_id} a {depart_t:.1f} s, prima di aver "
-                f"finito la consegna della mossa {k} ({t1:.1f} s): "
-                f"mancano {t1 - depart_t:.1f} s"
-            )
-            if incoerenze is None:
-                raise ValueError(
-                    f"Valori incoerenti: partenza ({depart_t}) precede la consegna "
-                    f"({t1}) per la mossa {k}. Controlla i vincoli del modello."
+            if depart_t < t1 - EPS:
+                messaggio = (
+                    f"il carroponte lascia la stazione "
+                    f"{data.route[k + 1].tank_id} a {depart_t:.1f} s, prima di aver "
+                    f"finito la consegna della mossa {k} ({t1:.1f} s): "
+                    f"mancano {t1 - depart_t:.1f} s"
                 )
-            incoerenze.append(messaggio)
-            depart_t = t1  # si disegna comunque, a partire da quando e' libero
-        elif depart_t < t1:
-            depart_t = t1  # scarto minuscolo di arrotondamento, non un errore reale
-        if depart_t > t1 + EPS:
-            segs.append(Segment("wait", t1, depart_t, x1, x1, None))
-        if sosta is not None:
-            # rientro in due pezzi, con la sosta nella vasca in mezzo. La sosta
-            # e' un tratto FERMO come le altre attese: quel che la distingue e'
-            # solo dove avviene.
-            x_sosta = data.approach_position(sosta.stazione)
-            t_arrivo_sosta = depart_t + t_verso_sosta
-            t_ripartenza = t_arrivo_sosta + max(0.0, sosta.secondi)
-            segs.extend(
-                _segmenti_rientro(
-                    data, k + 1, sosta.stazione, depart_t, t_arrivo_sosta
-                )
-            )
-            if t_ripartenza > t_arrivo_sosta + EPS:
-                segs.append(
-                    Segment(
-                        "wait", t_arrivo_sosta, t_ripartenza,
-                        x_sosta, x_sosta, None,
+                if incoerenze is None:
+                    raise ValueError(
+                        f"Valori incoerenti: partenza ({depart_t}) precede la consegna "
+                        f"({t1}) per la mossa {k}. Controlla i vincoli del modello."
+                    )
+                incoerenze.append(messaggio)
+                depart_t = t1  # si disegna comunque, a partire da quando e' libero
+            elif depart_t < t1:
+                depart_t = t1  # scarto minuscolo di arrotondamento, non un errore reale
+            if depart_t > t1 + EPS:
+                segs.append(Segment("wait", t1, depart_t, x1, x1, None))
+            if sosta is not None:
+                # rientro in due pezzi, con la sosta nella vasca in mezzo. La sosta
+                # e' un tratto FERMO come le altre attese: quel che la distingue e'
+                # solo dove avviene.
+                x_sosta = data.approach_position(sosta.stazione)
+                t_arrivo_sosta = depart_t + t_verso_sosta
+                t_ripartenza = t_arrivo_sosta + max(0.0, sosta.secondi)
+                segs.extend(
+                    _segmenti_rientro(
+                        data, k + 1, sosta.stazione, depart_t, t_arrivo_sosta
                     )
                 )
-            segs.extend(
-                _segmenti_rientro(
-                    data, sosta.stazione, nxt_k, t_ripartenza, arrive_t
+                if t_ripartenza > t_arrivo_sosta + EPS:
+                    segs.append(
+                        Segment(
+                            "wait", t_arrivo_sosta, t_ripartenza,
+                            x_sosta, x_sosta, None,
+                        )
+                    )
+                segs.extend(
+                    _segmenti_rientro(
+                        data, sosta.stazione, nxt_k, t_ripartenza, arrive_t
+                    )
                 )
-            )
-        elif abs(x1_next - x1) > 1e-9:
-            segs.extend(
-                _segmenti_rientro(data, k + 1, nxt_k, depart_t, arrive_t)
-            )
-        elif arrive_t > depart_t + EPS:
-            # stessa stazione: non c'e' nessuno spostamento a vuoto, il
-            # carroponte resta fermo. Emettere un 'empty' di lunghezza nulla
-            # creerebbe un segmento degenere che, con lo scarto di
-            # arrotondamento sui tick, si ordina male rispetto ai vicini e
-            # spezza la traiettoria.
-            segs.append(Segment("wait", depart_t, arrive_t, x1, x1, None))
+            elif abs(x1_next - x1) > 1e-9:
+                segs.extend(
+                    _segmenti_rientro(data, k + 1, nxt_k, depart_t, arrive_t)
+                )
+            elif arrive_t > depart_t + EPS:
+                # stessa stazione: non c'e' nessuno spostamento a vuoto, il
+                # carroponte resta fermo. Emettere un 'empty' di lunghezza nulla
+                # creerebbe un segmento degenere che, con lo scarto di
+                # arrotondamento sui tick, si ordina male rispetto ai vicini e
+                # spezza la traiettoria.
+                segs.append(Segment("wait", depart_t, arrive_t, x1, x1, None))
 
         # `target_pick` e' calcolato sopra, prima di scegliere quando partire:
         # con l'attesa alla partenza serve gia' li'. Il +T sta sull'arco che

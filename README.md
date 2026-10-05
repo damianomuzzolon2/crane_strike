@@ -846,6 +846,49 @@ scavalcare i vicini.
 
 A parte il punto di partenza, i comandi sono quelli di sopra: sono gli stessi.
 
+### Punti di passaggio
+
+Il rientro a vuoto si puo' anche **disegnare**: nella scheda *Ciclogramma*,
+sotto *Punti di passaggio*, si scrivono tempo [s] e posizione [mm] e si preme
+`Aggiungi`. Il punto compare sul pettine come un **rombo vuoto**, ripetuto a
+ogni takt time, ancora di nessuno.
+
+Lo si da' a un carroponte come un trasporto: **un clic** lo assegna al
+carroponte attivo (il rombo si riempie del suo colore), un altro clic glielo
+toglie. Trascinandolo lo si sposta; il doppio clic sulla tabella fa lo stesso
+del clic sul grafico, e `Togli` (o il tasto Canc) lo cancella. Si tolgono solo
+i punti aggiunti: quelli tondi del pettine vengono dalla ricetta e restano.
+
+Un punto vuol dire **"a quell'istante il carroponte e' li'"**: la sua linea fa
+un vertice esattamente sul punto. Il tempo che avanza si passa fermi dove si
+e' consegnato (si parte all'ultimo momento utile per arrivare puntuali) e,
+dopo l'ultimo punto, sulla vasca dove si deve prendere. Per una **sosta** basta
+mettere due punti alla stessa posizione con tempi diversi.
+
+Per **spostare una pausa** basta un punto solo. Se il carroponte consegna in
+vasca 2, aspetta e poi va in vasca 1, un punto sulla posizione della vasca 2
+all'istante in cui vuoi che riparta divide la pausa: fermo in vasca 2 fino a
+quell'istante, poi il viaggio, poi il resto dell'attesa in vasca 1. A meta'
+della pausa vuol dire meta' da una parte e meta' dall'altra. Le pause degli
+altri rientri non cambiano: aggiungere, spostare o togliere un punto non
+butta via le attese scelte dal solutore, come fanno invece le modifiche ai
+tempi o all'assegnazione. L'istante puo'
+essere letto su qualunque ripetizione del pettine: conta solo dove cade nel
+takt time.
+
+Perche' i trasporti si selezionano interi e i punti uno per uno: i quattro
+punti di un trasporto (aggancio, partenza, arrivo, immersione) sono legati
+dalla fisica, e sceglierli singolarmente vorrebbe dire quattro clic per mossa e
+la possibilita' di comporre trasporti a meta'. Un punto di passaggio invece e'
+libero per definizione, ed e' l'unica cosa che ha senso scegliere da sola.
+
+Un punto che cade mentre il carroponte trasporta un pezzo non e' in nessun
+rientro, e lo si dice fra le incoerenze; uno che non si fa in tempo a
+raggiungere lo segnala anche il verificatore. Su un impianto in cui il gancio
+basso non passa fra le vasche, un rientro con dei punti si fa tutto in alto.
+I punti si salvano nel foglio facoltativo `Passaggi` del file dei risultati e
+si rileggono riaprendolo.
+
 ### Riprendere il lavoro un altro giorno
 
 Un ciclogramma composto a mano vive nella memoria del programma: chiuso il

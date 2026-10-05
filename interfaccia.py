@@ -207,6 +207,12 @@ class Applicazione(tk.Tk):
         self.n_carroponti = 2
         self.carroponte_attivo = 0
         self.incoerenze: list[str] = []
+        # I punti di passaggio aggiunti a mano: `{"t", "x", "carro"}`, dove il
+        # carroponte `carro` deve trovarsi durante un rientro a vuoto (None =
+        # punto appoggiato sul grafico, ancora di nessuno). Non sono i punti
+        # del pettine -- quelli vengono dalla ricetta e non si tolgono -- ma
+        # un grado di liberta' in piu' del giro dei carroponti.
+        self.passaggi: list[dict] = []
         # da dove viene il ciclogramma che si sta guardando, per il riepilogo
         self.origine = ""
         self.modificato = False
@@ -542,6 +548,61 @@ class Applicazione(tk.Tk):
             foreground="#777777",
         ).pack(anchor=tk.W, pady=(2, 0))
 
+        # -- punti di passaggio ---------------------------------------------
+        # Si aggiungono scrivendo tempo e posizione, perche' e' cosi' che li
+        # si legge su un ciclogramma di carta: "a 40 s deve essere a 4000 mm".
+        # Nascono di nessuno, come i trasporti del pettine, e si danno a un
+        # carroponte con lo stesso gesto: un clic, e un altro per toglierlo.
+        ttk.Label(cornice, text="Punti di passaggio", font=("", 9, "bold")).pack(
+            anchor=tk.W, pady=(8, 2)
+        )
+        riga_punto = ttk.Frame(cornice)
+        riga_punto.pack(fill=tk.X)
+        ttk.Label(riga_punto, text="tempo [s]:").pack(side=tk.LEFT)
+        self.var_punto_t = tk.StringVar()
+        campo_t = ttk.Entry(riga_punto, textvariable=self.var_punto_t, width=8)
+        campo_t.pack(side=tk.LEFT, padx=(4, 8))
+        ttk.Label(riga_punto, text="posizione [mm]:").pack(side=tk.LEFT)
+        self.var_punto_x = tk.StringVar()
+        campo_x = ttk.Entry(riga_punto, textvariable=self.var_punto_x, width=8)
+        campo_x.pack(side=tk.LEFT, padx=(4, 8))
+        for campo in (campo_t, campo_x):
+            campo.bind("<Return>", lambda e: self._aggiungi_passaggio())
+        ttk.Button(
+            riga_punto, text="Aggiungi", width=9, command=self._aggiungi_passaggio
+        ).pack(side=tk.LEFT)
+        cornice_punti = ttk.Frame(cornice)
+        cornice_punti.pack(fill=tk.BOTH, expand=True, pady=(4, 0))
+        self.tabella_passaggi = ttk.Treeview(
+            cornice_punti,
+            columns=("tempo", "posizione", "carro"),
+            show="headings",
+            height=4,
+        )
+        for chiave, titolo, larghezza in [
+            ("tempo", "tempo [s]", 90),
+            ("posizione", "posizione [mm]", 110),
+            ("carro", "carrop.", 60),
+        ]:
+            self.tabella_passaggi.heading(chiave, text=titolo)
+            self.tabella_passaggi.column(
+                chiave, width=larghezza, anchor=tk.W, stretch=(chiave == "posizione")
+            )
+        self.tabella_passaggi.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        self.tabella_passaggi.bind("<Double-1>", self._passaggio_da_tabella)
+        self.tabella_passaggi.bind("<Delete>", lambda e: self._togli_passaggi())
+        ttk.Button(
+            cornice_punti, text="Togli", width=7, command=self._togli_passaggi
+        ).pack(side=tk.LEFT, anchor=tk.N, padx=(6, 0))
+        ttk.Label(
+            cornice,
+            text="Il carroponte passa dal punto all'istante dato, durante un\n"
+            "rientro a vuoto; due punti alla stessa posizione sono una sosta.\n"
+            "Clic sul punto (o doppio clic qui) per darlo al carroponte attivo,\n"
+            "trascinalo per spostarlo. Si tolgono solo i punti aggiunti.",
+            foreground="#777777",
+        ).pack(anchor=tk.W, pady=(2, 0))
+
         pulsanti = ttk.Frame(cornice)
         pulsanti.pack(fill=tk.X, pady=(8, 0))
         self.btn_annulla = ttk.Button(
@@ -619,6 +680,7 @@ class Applicazione(tk.Tk):
         # il caso normale: qui non c'e' nessuna regola predefinita da invocare,
         # una sosta per strada la sa proporre solo il solutore.
         self.soste = {}
+        self.passaggi = []
         self.incoerenze = []
         self.origine = ""
         self.durata_calcolo = None
@@ -675,6 +737,7 @@ class Applicazione(tk.Tk):
         self.assegnazione = dict(c["assegnazione"])
         self.attese = dict(c["attese"]) if c.get("attese") else None
         self.soste = dict(c.get("soste") or {})
+        self.passaggi = [dict(p) for p in c.get("passaggi") or []]
         self.carroponte_attivo = 0
         self.origine = "riletto dal file, gia' composto"
         self.modificato = False
@@ -816,6 +879,7 @@ class Applicazione(tk.Tk):
                     "assegnazione": self.assegnazione,
                     "attese": self.attese,
                     "soste": self.soste,
+                    "passaggi": self.passaggi,
                 },
                 # quello che si sta guardando, non il primo: se l'utente ha
                 # scorso i punti di avvio, il file deve dire quello che ha
@@ -1292,6 +1356,12 @@ class Applicazione(tk.Tk):
         self.soste = {
             k: v for p in sol.plans for k, v in p.soste_intermedie.items()
         }
+        self.passaggi = [
+            {"t": t, "x": x, "carro": d.zones.index(p.zone)}
+            for p in sol.plans
+            for punti in p.passaggi.values()
+            for t, x in punti
+        ]
         self.n_carroponti = len(d.zones)
         self.carroponte_attivo = 0
         self._annulla.clear()
@@ -1362,6 +1432,7 @@ class Applicazione(tk.Tk):
         # e per la sosta in mezzo anche fargli fare una strada diversa.
         self.attese = None
         self.soste = {}
+        self.passaggi = []
         self.carroponte_attivo = 0
         self.origine = "composto da zero"
         # non viene da un calcolo: il tempo di quello precedente non c'entra
@@ -1382,12 +1453,19 @@ class Applicazione(tk.Tk):
         )
         self.schede.select(1)
 
-    def _ricomponi(self, descrizione: str = "", prima=None):
+    def _ricomponi(
+        self, descrizione: str = "", prima=None, tieni_rientri: bool = False
+    ):
         """Ricostruisce il ciclogramma dallo stato e rimette tutto a schermo.
 
         Non rifiuta mai niente: `manuale.componi` disegna anche l'impossibile.
         Rifiutare una modifica vorrebbe dire rimettere i controlli proprio
-        dove si e' scelto di toglierli -- e il verificatore li fa meglio."""
+        dove si e' scelto di toglierli -- e il verificatore li fa meglio.
+
+        `tieni_rientri`: la modifica tocca solo i punti di passaggio, quindi
+        attese e soste degli altri rientri restano buone e non si buttano. Chi
+        sposta una pausa su un rientro non deve vedersi cambiare tutte le
+        altre."""
         if self.config_linea is None or self.T_corrente is None:
             return
         if self._lavoro_in_corso:
@@ -1399,6 +1477,7 @@ class Applicazione(tk.Tk):
         if prima is not None:
             self._annulla.append(prima)
             self.modificato = True
+        if prima is not None and not tieni_rientri:
             # Le soste erano state scelte per il ciclogramma di PRIMA: con le
             # fasi o l'assegnazione cambiate non descrivono piu' niente di
             # sensato (si aspetterebbe piu' a lungo del tempo disponibile).
@@ -1416,6 +1495,7 @@ class Applicazione(tk.Tk):
             self.n_carroponti,
             attese=self.attese,
             soste=self.soste,
+            passaggi=self.passaggi,
         )
         if self.verifica_viva:
             self.report = verify_solution(self.dati, self.soluzione)
@@ -1444,6 +1524,7 @@ class Applicazione(tk.Tk):
             dict(self.permanenze),
             dict(self.assegnazione),
             self.n_carroponti,
+            [dict(p) for p in self.passaggi],
         )
 
     def _annulla_modifica(self):
@@ -1455,6 +1536,7 @@ class Applicazione(tk.Tk):
             self.permanenze,
             self.assegnazione,
             self.n_carroponti,
+            self.passaggi,
         ) = self._annulla.pop()
         self._ricomponi("Modifica annullata")
 
@@ -1502,6 +1584,10 @@ class Applicazione(tk.Tk):
         self.n_carroponti = n
         rimaste = {k: min(c, n - 1) for k, c in self.assegnazione.items()}
         self.assegnazione = rimaste
+        # i punti seguono le mosse: quelli dei carroponti tolti all'ultimo
+        for pt in self.passaggi:
+            if pt["carro"] is not None:
+                pt["carro"] = min(pt["carro"], n - 1)
         if self.carroponte_attivo >= n:
             self.carroponte_attivo = n - 1
         self._ricomponi(f"Carroponti: {n}", prima)
@@ -1640,6 +1726,99 @@ class Applicazione(tk.Tk):
             "Nessun altro carroponte puo' fare questa mossa senza scavalcare "
             "i vicini"
         )
+
+    # -- punti di passaggio ---------------------------------------------
+
+    def _aggiungi_passaggio(self):
+        """Appoggia sul grafico un punto nuovo, di nessuno: lo si da' a un
+        carroponte con un clic, come un trasporto del pettine."""
+        if self.config_linea is None or self.T_corrente is None:
+            return
+        try:
+            t = float(self.var_punto_t.get().replace(",", "."))
+            x = float(self.var_punto_x.get().replace(",", "."))
+        except ValueError:
+            self._stato("Tempo e posizione del punto devono essere numeri")
+            return
+        prima = self._istantanea()
+        self.passaggi = sorted(
+            self.passaggi + [{"t": t, "x": x, "carro": None}],
+            key=lambda p: (p["t"], p["x"]),
+        )
+        self.var_punto_t.set("")
+        self.var_punto_x.set("")
+        self._ricomponi(
+            f"Punto aggiunto a {t:.1f} s in {x:.0f} mm: fai clic sul grafico "
+            f"per darlo al carroponte attivo",
+            prima,
+            tieni_rientri=True,
+        )
+
+    def _togli_passaggi(self):
+        """Toglie i punti selezionati nella tabella. Solo quelli aggiunti a
+        mano: i punti del pettine non stanno in questa tabella, e non ci
+        sono altri modi di toglierli."""
+        righe = self.tabella_passaggi.selection()
+        if not righe:
+            self._stato("Seleziona nella tabella i punti da togliere")
+            return
+        via = {self.tabella_passaggi.index(r) for r in righe}
+        prima = self._istantanea()
+        self.passaggi = [p for i, p in enumerate(self.passaggi) if i not in via]
+        self._ricomponi(
+            f"{len(via)} punt{'o tolto' if len(via) == 1 else 'i tolti'}",
+            prima,
+            tieni_rientri=True,
+        )
+
+    def _passaggio_da_tabella(self, evento):
+        riga = self.tabella_passaggi.identify_row(evento.y)
+        if riga:
+            self._assegna_passaggio(
+                self.tabella_passaggi.index(riga), self._istantanea()
+            )
+
+    def _assegna_passaggio(self, i: int, prima):
+        """Da' il punto i al carroponte attivo, o glielo toglie se era gia'
+        suo: lo stesso gesto dei trasporti (vedi `_assegna`)."""
+        p = self.passaggi[i]
+        if p["carro"] == self.carroponte_attivo:
+            p["carro"] = None
+            cosa = f"tolto al carroponte {self.carroponte_attivo + 1}"
+        else:
+            p["carro"] = self.carroponte_attivo
+            cosa = f"al carroponte {self.carroponte_attivo + 1}"
+        self._ricomponi(
+            f"Punto {p['t']:.1f} s / {p['x']:.0f} mm {cosa}",
+            prima,
+            tieni_rientri=True,
+        )
+
+    def _ripetizioni_passaggi(self):
+        """(indice, istante, posizione) di ogni punto di passaggio come lo si
+        vede sul pettine: ripetuto a ogni takt time, perche' il carroponte ci
+        ripassa a ogni giro -- e lo stesso vale per un punto ancora di
+        nessuno, che e' periodico quanto quello che diventera'."""
+        T = self.T_corrente
+        if not T or self.vista != "pettine":
+            return []
+        n_cicli = manuale.RIPETIZIONI_PREDEFINITE + 4
+        return [
+            (i, p["t"] % T + c * T, p["x"])
+            for i, p in enumerate(self.passaggi)
+            for c in range(n_cicli)
+        ]
+
+    def _passaggio_sotto(self, evento):
+        """Il punto di passaggio sotto al puntatore, o None. In PIXEL, come
+        per i trasporti."""
+        migliore, distanza_min = None, 1e9
+        for i, t, x in self._ripetizioni_passaggi():
+            px, py = self.assi.transData.transform((t, x))
+            d = ((px - evento.x) ** 2 + (py - evento.y) ** 2) ** 0.5
+            if d < distanza_min:
+                migliore, distanza_min = i, d
+        return migliore if distanza_min <= 9 else None
 
     # -- presentazione --------------------------------------------------
 
@@ -1882,6 +2061,26 @@ class Applicazione(tk.Tk):
                 markeredgewidth=0.8, zorder=5,
             )
 
+        # -- i punti di passaggio aggiunti a mano ---------------------------
+        # Rombi, per non confonderli con i punti tondi del pettine: quelli
+        # vengono dalla ricetta, questi dall'utente, e solo questi si tolgono.
+        # Vuoti finche' non sono di nessuno, pieni del colore del carroponte
+        # che ci passa.
+        ripetizioni = self._ripetizioni_passaggi()
+        for i, p in enumerate(self.passaggi):
+            ts = [t for j, t, _ in ripetizioni if j == i]
+            c = p["carro"]
+            colore = (
+                _GRIGIO if c is None else _HOIST_COLORS[c % len(_HOIST_COLORS)]
+            )
+            self.assi.plot(
+                ts, [p["x"]] * len(ts), linestyle="none", marker="D",
+                markersize=6.5, markeredgewidth=1.2,
+                markerfacecolor="white" if c is None else colore,
+                markeredgecolor="#333333" if c is None else "black",
+                zorder=6,
+            )
+
         fine = manuale.RIPETIZIONI_PREDEFINITE * T + (
             scalinate[0][-1].t_end if scalinate else T
         )
@@ -1911,6 +2110,14 @@ class Applicazione(tk.Tk):
                 label="giro dei carroponti",
             ),
         ]
+        if self.passaggi:
+            legenda.append(
+                Line2D(
+                    [0], [0], linestyle="none", marker="D", markersize=6,
+                    markerfacecolor="white", markeredgecolor="#333333",
+                    label="punto di passaggio",
+                )
+            )
         self.assi.legend(
             handles=legenda, loc="upper left", fontsize=7, framealpha=0.9, ncol=3
         )
@@ -1975,6 +2182,18 @@ class Applicazione(tk.Tk):
                     d.route[k].tank_id,
                     d.route[k + 1].tank_id,
                     self.assegnazione[k] + 1 if k in self.assegnazione else "-",
+                ),
+            )
+        for r in self.tabella_passaggi.get_children():
+            self.tabella_passaggi.delete(r)
+        for p in self.passaggi:
+            self.tabella_passaggi.insert(
+                "",
+                tk.END,
+                values=(
+                    f"{p['t']:.1f}",
+                    f"{p['x']:.0f}",
+                    "-" if p["carro"] is None else p["carro"] + 1,
                 ),
             )
 
@@ -2240,6 +2459,19 @@ class Applicazione(tk.Tk):
             return  # sta navigando: il clic e' della barra, non nostro
         if evento.xdata is None:
             return
+        # Un punto di passaggio prima di tutto: e' piccolo e sta spesso sopra
+        # un tratto del pettine, e chi lo centra vuole proprio lui.
+        punto = self._passaggio_sotto(evento)
+        if punto is not None:
+            self._trascinamento = {
+                "passaggio": punto,
+                "x_iniziale": evento.xdata,
+                "y_iniziale": evento.ydata,
+                "px_iniziale": evento.x,
+                "py_iniziale": evento.y,
+                "istantanea": self._istantanea(),
+            }
+            return
         # Due cose diverse, e vanno cercate separatamente.
         #
         # Il PUNTO DI PRELIEVO e' la maniglia per trascinare: il tempo in vasca
@@ -2273,6 +2505,14 @@ class Applicazione(tk.Tk):
     def _su_movimento(self, evento):
         if self._trascinamento is None or evento.xdata is None:
             return
+        if "passaggio" in self._trascinamento:
+            p = self.passaggi[self._trascinamento["passaggio"]]
+            dt = evento.xdata - self._trascinamento["x_iniziale"]
+            dx = evento.ydata - self._trascinamento["y_iniziale"]
+            self._stato(
+                f"Sposto il punto a {p['t'] + dt:.1f} s, {p['x'] + dx:.0f} mm"
+            )
+            return
         if self._trascinamento["mossa"] in (None, 0):
             # None: si e' premuto a meta' di un tratto, non su una maniglia.
             # 0: il primo prelievo e' l'origine dei tempi, non si sposta.
@@ -2296,6 +2536,9 @@ class Applicazione(tk.Tk):
             self._guida.remove()
             self._guida = None
             self.tela.draw_idle()
+        if "passaggio" in trascinamento:
+            self._rilascia_passaggio(trascinamento, evento)
+            return
         k = trascinamento["mossa"]
         # Clic secco o trascinamento? Si misura in PIXEL: in secondi la soglia
         # dipenderebbe da quanto si e' ingrandito il grafico.
@@ -2317,6 +2560,29 @@ class Applicazione(tk.Tk):
         self._ricomponi(
             f"{nome}: tempo in vasca {nuovo:.1f} s ({delta:+.1f})",
             trascinamento["istantanea"],
+        )
+
+    def _rilascia_passaggio(self, trascinamento, evento):
+        """Fine di un clic su un punto di passaggio: secco lo da' (o lo
+        toglie) al carroponte attivo, trascinato lo sposta."""
+        i = trascinamento["passaggio"]
+        fermo = evento.x is None or (
+            abs(evento.x - trascinamento["px_iniziale"]) < 4
+            and abs(evento.y - trascinamento["py_iniziale"]) < 4
+        )
+        if fermo:
+            self._assegna_passaggio(i, trascinamento["istantanea"])
+            return
+        if evento.xdata is None or evento.ydata is None:
+            return
+        p = self.passaggi[i]
+        p["t"] += evento.xdata - trascinamento["x_iniziale"]
+        p["x"] += evento.ydata - trascinamento["y_iniziale"]
+        self.passaggi.sort(key=lambda q: (q["t"], q["x"]))
+        self._ricomponi(
+            f"Punto spostato a {p['t']:.1f} s, {p['x']:.0f} mm",
+            trascinamento["istantanea"],
+            tieni_rientri=True,
         )
 
     def _mostra_dettaglio(self, _evento=None):

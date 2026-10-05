@@ -49,7 +49,14 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 from kinematics import position_profile, profile_breakpoints
-from model import HoistPlan, ProblemData, Segment, Solution, zone_layout_conflicts
+from model import (
+    HoistPlan,
+    ProblemData,
+    Segment,
+    Solution,
+    orario_passaggi,
+    zone_layout_conflicts,
+)
 
 # Tipi di segmento in cui il carroponte e' fermo orizzontalmente: l'attesa, le
 # fasi verticali di presa e rilascio, e la corsa del gancio scarico su uno
@@ -1015,8 +1022,31 @@ def _check_transfers(data, plans, T, time_tol, add):
             # diretto sarebbe piu' permissivo del vero -- proprio il tipo di
             # svista che questo file esiste per intercettare.
             sosta = plan.soste_intermedie.get(k1)
+            punti = plan.passaggi.get(k1)
             dove = ""
-            if sosta is None:
+            if punti:
+                # Punti di passaggio messi a mano: ognuno va raggiunto in
+                # tempo, non solo l'ultima vasca. E' una scadenza in piu' per
+                # punto, e mancarne una e' un errore come mancare il prelievo.
+                _, arrivo, ritardi = orario_passaggi(
+                    data, k1 + 1, k2, plan.finish[k1], punti
+                )
+                for voluto, possibile, indice in ritardi:
+                    add(
+                        "transfer",
+                        "error",
+                        f"il carroponte {h + 1}, dopo la mossa {k1}, non fa "
+                        f"in tempo a passare da {punti[indice][1]:.0f} mm a "
+                        f"{voluto:.2f}s: ci arriva a {possibile:.2f}s",
+                        hoists=(h,),
+                        move=k1,
+                        value=possibile,
+                        bound=voluto,
+                        slack=voluto - possibile,
+                    )
+                t_emp = arrivo - plan.finish[k1]
+                dove = f", passando per {len(punti)} punti scelti a mano"
+            elif sosta is None:
                 t_emp = data.empty_leg_seconds(k1 + 1, k2)
             else:
                 zona = plan.zone

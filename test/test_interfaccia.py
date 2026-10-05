@@ -1315,6 +1315,110 @@ def test_ciclogramma_si_riprende(percorso_linea):
             os.unlink(riapribile)
 
 
+def test_punti_di_passaggio(percorso_linea):
+    print("\n[10b] punti di passaggio: si aggiungono, si assegnano, si salvano")
+    from interfaccia import Applicazione
+    from excel_io import scrivi_risultati
+    import manuale
+
+    app = Applicazione(percorso_linea)
+    riapribile = None
+    try:
+        for _ in range(50):
+            app.update()
+            if app.config_linea is not None:
+                break
+            time.sleep(0.02)
+        app._componi_da_zero()
+        d = app.config_linea.data
+        app.assegnazione = manuale.assegnazione_iniziale(d, app.n_carroponti)
+        app._ricomponi("assegnazione di prova")
+        # Un rientro del carroponte 1 con del margine: il punto ci va dentro,
+        # fermo dove ha consegnato, cosi' e' raggiungibile su qualunque linea.
+        piano = app.soluzione.plans[0]
+        k = piano.order[0]
+        t_punto = piano.finish[k] + 0.5
+        x_punto = d.approach_position(k + 1)
+        app.var_punto_t.set(f"{t_punto + 3 * app.T_corrente}")
+        app.var_punto_x.set(f"{x_punto}")
+        app._aggiungi_passaggio()
+        check(
+            app.passaggi and app.passaggi[0]["carro"] is None
+            and len(app.tabella_passaggi.get_children()) == 1,
+            "il punto aggiunto nasce di nessuno, ed e' in tabella",
+        )
+        check(
+            not app.soluzione.plans[0].passaggi,
+            "finche' e' di nessuno non cambia nessun giro",
+        )
+        # il clic sul grafico, su una ripetizione qualunque del punto
+        app.update()
+        px, py = app.assi.transData.transform((t_punto + app.T_corrente, x_punto))
+        clic = Clic(app.assi, px, py, t_punto + app.T_corrente)
+        clic.ydata = x_punto
+        app._su_pressione(clic)
+        app._su_rilascio(clic)
+        check(
+            app.passaggi[0]["carro"] == 0
+            and app.soluzione.plans[0].passaggi.get(k),
+            "un clic lo da' al carroponte attivo, e il giro ci passa",
+        )
+        app._verifica_adesso()
+        check(
+            not [e for e in app.report.errors if "passare da" in e.message],
+            "un punto raggiungibile non e' un errore per il verificatore",
+        )
+        segmenti = [
+            (s.kind, round(s.t_start, 3), round(s.x_end, 3))
+            for s in app.soluzione.segments_per_hoist[0]
+        ]
+        fd, riapribile = tempfile.mkstemp(suffix=".xlsx")
+        os.close(fd)
+        scrivi_risultati(
+            riapribile, app.dati, app.soluzione, app.report,
+            sorgente=percorso_linea, cfg=app.config_linea,
+            ciclogramma={
+                "T": app.T_corrente,
+                "n_carroponti": app.n_carroponti,
+                "permanenze": app.permanenze,
+                "assegnazione": app.assegnazione,
+                "passaggi": app.passaggi,
+            },
+        )
+        # di nuovo lo stesso gesto: lo toglie
+        app._su_pressione(clic)
+        app._su_rilascio(clic)
+        check(app.passaggi[0]["carro"] is None, "un altro clic lo toglie")
+        app.tabella_passaggi.selection_set(app.tabella_passaggi.get_children()[0])
+        app._togli_passaggi()
+        check(not app.passaggi, "'Togli' cancella il punto")
+        app._annulla_modifica()
+        check(len(app.passaggi) == 1, "'Annulla modifica' lo rimette")
+    finally:
+        chiudi(app)
+
+    app = Applicazione()
+    try:
+        app.update()
+        app._carica(riapribile)
+        app.update()
+        check(
+            len(app.passaggi) == 1 and app.passaggi[0]["carro"] == 0,
+            "riaprendo il file il punto torna, col suo carroponte",
+        )
+        check(
+            [
+                (s.kind, round(s.t_start, 3), round(s.x_end, 3))
+                for s in app.soluzione.segments_per_hoist[0]
+            ] == segmenti,
+            "e la traiettoria torna identica",
+        )
+    finally:
+        chiudi(app)
+        if riapribile and os.path.exists(riapribile):
+            os.unlink(riapribile)
+
+
 def test_simulazione_dal_pulsante(percorso_linea):
     print("\n[11] la simulazione si apre solo quando c'e' un ciclogramma")
     from interfaccia import Applicazione
@@ -1515,6 +1619,7 @@ def main():
         test_scheda_chiusa_durante_il_calcolo(linea)
         test_ferma_il_calcolo(linea)
         test_ciclogramma_si_riprende(linea)
+        test_punti_di_passaggio(linea)
         test_simulazione_dal_pulsante(linea)
         test_punti_di_avvio(linea)
         test_file_illeggibile()

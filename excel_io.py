@@ -11,6 +11,8 @@ Il file ha quattro fogli:
   Parametri  takt time, cinematiche, ingombri, tempi verticali, opzioni
   Zone       (facoltativo) suddivisione manuale delle mosse fra i carroponti
   Ciclogramma (facoltativo) il ciclogramma gia' composto, per riprenderlo
+  Passaggi   (facoltativo) i punti di passaggio dei rientri a vuoto aggiunti
+             a mano sul grafico
 
 Per creare il modello da compilare:
 
@@ -46,6 +48,7 @@ FOGLIO_PARAMETRI = "Parametri"
 FOGLIO_ZONE = "Zone"
 FOGLIO_CAMBIO_QUOTA = "CambioQuota"
 FOGLIO_CICLOGRAMMA = "Ciclogramma"
+FOGLIO_PASSAGGI = "Passaggi"
 
 # Le colonne della tabella del foglio Ciclogramma, nell'ordine in cui si
 # scrivono. UNA definizione sola, usata da chi scrive e da chi rilegge: le
@@ -451,6 +454,8 @@ def leggi_problema(percorso_file: str) -> Configurazione:
         if FOGLIO_CICLOGRAMMA in wb.sheetnames
         else None
     )
+    if ciclogramma is not None and FOGLIO_PASSAGGI in wb.sheetnames:
+        ciclogramma["passaggi"] = _leggi_passaggi(wb[FOGLIO_PASSAGGI], errori)
     errori.solleva_se_presenti()
 
     def _kin_sollevamento(prefisso: str) -> Optional[Kinematics]:
@@ -998,6 +1003,40 @@ def _leggi_ciclogramma(ws, route, errori: _Errori) -> Optional[dict]:
         # rientri sono diritti -- e non c'e' nessuna regola a cui delegare.
         "soste": soste,
     }
+
+
+def _leggi_passaggi(ws, errori: _Errori) -> list[dict]:
+    """I punti di passaggio aggiunti a mano: istante, posizione e carroponte
+    che ci deve passare (vuoto = punto appoggiato sul grafico, di nessuno).
+
+    Un foglio a parte e non una colonna del Ciclogramma, perche' non sono
+    della MOSSA: sono punti del grafico che l'utente ha messo dove voleva, e
+    a quale rientro appartengano lo si ricalcola ogni volta (vedi
+    `model.assegna_passaggi`). Rileggerli cosi' come erano stati scritti e'
+    l'unico modo perche' tornino uguali anche dopo aver cambiato un tempo."""
+    fuori = []
+    for riga in range(2, ws.max_row + 1):
+        a, b, c = (ws.cell(riga, col).value for col in (1, 2, 3))
+        if not _testo(a) and not _testo(b) and not _testo(c):
+            continue
+        t = _numero(a, FOGLIO_PASSAGGI, f"A{riga}", "tempo", errori)
+        x = _numero(b, FOGLIO_PASSAGGI, f"B{riga}", "posizione", errori)
+        carro = None
+        if _testo(c):
+            carro = _numero(c, FOGLIO_PASSAGGI, f"C{riga}", "carroponte",
+                            errori, intero=True)
+            if carro is not None and carro < 1:
+                errori.aggiungi(
+                    FOGLIO_PASSAGGI, f"C{riga}",
+                    f"carroponte numerato da 1, trovato {carro}",
+                )
+                continue
+        if t is None or x is None:
+            continue
+        fuori.append(
+            {"t": t, "x": x, "carro": None if carro is None else carro - 1}
+        )
+    return fuori
 
 
 def _leggi_parametri(ws, errori: _Errori) -> dict:
@@ -1838,6 +1877,20 @@ def _aggiungi_fogli_linea(
             None,
         ),
         ("", None),
+        (f"Foglio {FOGLIO_PASSAGGI} (facoltativo)", titolo_par),
+        (
+            "I punti aggiunti a mano sul grafico, per cui un carroponte deve "
+            "passare durante un rientro a vuoto.",
+            None,
+        ),
+        ("  tempo_s       l'istante; conta solo dove cade nel takt time", None),
+        ("  posizione_mm  dove deve trovarsi il carroponte, lungo la rotaia", None),
+        (
+            "  carroponte    quale carroponte ci passa (vuoto = nessuno, il "
+            "punto resta solo sul grafico)",
+            None,
+        ),
+        ("", None),
         ("Attenzione", titolo_par),
         (
             "Non scrivere note o commenti nelle colonne dei dati: verrebbero letti "
@@ -1940,6 +1993,21 @@ def _aggiungi_fogli_linea(
         _scrivi_foglio_ciclogramma(
             wb, data, ciclogramma, intestazione, sfondo, nota
         )
+        # -- Passaggi (facoltativo) ----------------------------------------
+        # Solo se ce ne sono: un foglio vuoto in piu' in ogni file non
+        # direbbe niente a nessuno.
+        passaggi = ciclogramma.get("passaggi") or []
+        if passaggi:
+            ws = wb.create_sheet(FOGLIO_PASSAGGI)
+            prepara(ws, ["tempo_s", "posizione_mm", "carroponte"], [14, 16, 14])
+            for p in sorted(passaggi, key=lambda p: (p["t"], p["x"])):
+                ws.append(
+                    [
+                        round(float(p["t"]), 9),
+                        round(float(p["x"]), 9),
+                        None if p.get("carro") is None else p["carro"] + 1,
+                    ]
+                )
 
 
 def _scrivi_foglio_ciclogramma(wb, data, ciclogramma, intestazione, sfondo, nota):

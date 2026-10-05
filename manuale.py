@@ -167,6 +167,7 @@ def componi(
     n_carroponti: int,
     attese: Optional[dict[int, float]] = None,
     soste: Optional[dict] = None,
+    passaggi: Optional[list[dict]] = None,
 ) -> tuple[Solution, ProblemData, list[str]]:
     """Costruisce il ciclogramma dal disegno manuale.
 
@@ -182,9 +183,15 @@ def componi(
     `soste`: le fermate in una vasca IN MEZZO al rientro (model.SostaIntermedia),
     per le mosse che ne hanno una. Anche queste arrivano gia' fatte: il disegno
     manuale non ne inventa, perche' sostare per strada ha senso solo guardando
-    dov'e' il carroponte vicino."""
+    dov'e' il carroponte vicino.
+
+    `passaggi`: i punti aggiunti a mano, `{"t", "x", "carro"}`, per cui il
+    carroponte `carro` deve passare durante un rientro a vuoto (vedi
+    `passaggi_per_zona`). Quelli con `carro` None sono solo appoggiati sul
+    grafico, in attesa di essere dati a qualcuno."""
     tempi = catena_pezzo(data, permanenze)
     dati = dataclasses.replace(data, zones=zone_coprenti(data, assegnazione))
+    per_zona, orfani = passaggi_per_zona(dati.zones, assegnazione, passaggi or [])
     sol = build_solution(
         dati,
         T,
@@ -194,8 +201,14 @@ def componi(
         mosse_attive=set(assegnazione),
         attese=attese,
         soste=soste,
+        passaggi=per_zona,
     )
     incoerenze = list(sol.raw.get("incoerenze", []))
+    for c in sorted(orfani):
+        incoerenze.append(
+            f"il carroponte {c + 1} ha dei punti di passaggio ma nessun "
+            f"trasporto: non fa nessun rientro a vuoto in cui passarci"
+        )
     scoperte = [k for k in range(data.n_moves) if k not in assegnazione]
     if scoperte:
         incoerenze.insert(
@@ -203,6 +216,34 @@ def componi(
             f"le mosse {scoperte} non sono ancora assegnate a nessun carroponte",
         )
     return sol, dati, incoerenze
+
+
+def passaggi_per_zona(
+    zone: list[HoistZone], assegnazione: dict[int, int], passaggi: list[dict]
+) -> tuple[dict[int, list[tuple[float, float]]], set[int]]:
+    """I punti di passaggio raggruppati per ZONA, che e' come li vuole
+    `build_solution`: l'utente li da' a un carroponte, ma le strutture dati
+    ragionano per zone, e con un'assegnazione parziale il numero della zona
+    non e' per forza quello del carroponte (vedi `zone_coprenti`).
+
+    Restituisce (punti per indice di zona, carroponti che hanno punti ma
+    nessuna mossa -- e quindi nessun rientro in cui passarci)."""
+    zona_di = {}
+    for i, z in enumerate(zone):
+        for k in range(z.lo, z.hi + 1):
+            if k in assegnazione:
+                zona_di.setdefault(assegnazione[k], i)
+    per_zona: dict[int, list[tuple[float, float]]] = {}
+    orfani = set()
+    for p in passaggi:
+        c = p.get("carro")
+        if c is None:
+            continue
+        if c not in zona_di:
+            orfani.add(c)
+            continue
+        per_zona.setdefault(zona_di[c], []).append((float(p["t"]), float(p["x"])))
+    return per_zona, orfani
 
 
 def zone_coprenti(
