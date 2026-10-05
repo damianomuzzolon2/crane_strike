@@ -268,8 +268,12 @@ def test_calcolo_automatico(percorso_linea):
         # sollevamento, che il modello d'esempio dichiara: le corse verticali
         # perdono circa un secondo e mezzo l'una, e il minimo dichiarato non
         # basta piu' a contenerle -- non e' quindi piu' lui a decidere il takt.
+        # Infine a 120.95, portando sgancio e aggancio FUORI dal bagno: i 3 s
+        # dell'esempio non contano piu' come permanenza, quindi l'intervallo
+        # fra i movimenti del gancio deve allungarsi di altrettanto per
+        # rispettare lo stesso minimo di processo.
         check(
-            len(app.dati.zones) == 2 and abs(app.soluzione.T - 115.29) < 1.0,
+            len(app.dati.zones) == 2 and abs(app.soluzione.T - 120.95) < 1.0,
             f"{len(app.dati.zones)} carroponti, T={app.soluzione.T:.2f}s "
             f"(come da riga di comando)",
         )

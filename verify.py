@@ -941,30 +941,21 @@ def _check_phase_and_dwell(data, solution, plans, T, time_tol, add):
 
     # 6) permanenze min/max, dai tempi assoluti
     #
-    # Si controlla il BAGNO, non l'intervallo fra i movimenti del gancio: il
-    # pezzo e' immerso anche mentre il gancio che lo ha deposto risale e mentre
-    # quello che verra' a riprenderlo ricala. Il verificatore ha condiviso per
-    # un po' la definizione del modello, ed e' cosi' che una linea con sei
-    # vasche su dieci fuori tolleranza e' passata con "VERIFICA SUPERATA": un
-    # controllore che misura la stessa cosa del controllato non controlla
-    # niente.
+    # Il BAGNO e' l'intervallo fra la fine del rilascio -- sgancio compreso --
+    # e l'inizio della presa, prima dell'aggancio. Le corse a vuoto del gancio
+    # che va e torna ci cadono dentro, e sono percio' gia' contate; sgancio e
+    # aggancio restano fuori, perche' sono tempo di gancio e non di processo.
     for k in range(1, data.n_moves):
         station = k
         arrivo = at[k - 1] + data.loaded_leg_seconds(k - 1)
-        extra = data.bath_extra_seconds(station)
-        bagno = at[k] - arrivo + extra
+        bagno = at[k] - arrivo
         spec = data.route[station]
-        dettaglio = (
-            f" (di cui {extra:.1f}s con il gancio in movimento a vuoto)"
-            if extra > 0
-            else ""
-        )
         if bagno < spec.dwell_min - time_tol:
             add(
                 "dwell_min",
                 "error",
                 f"permanenza {bagno:.2f}s in '{spec.tank_id}' sotto il minimo "
-                f"di {spec.dwell_min:.1f}s{dettaglio}",
+                f"di {spec.dwell_min:.1f}s",
                 station=station,
                 move=k,
                 value=bagno,
@@ -976,7 +967,7 @@ def _check_phase_and_dwell(data, solution, plans, T, time_tol, add):
                 "dwell_max",
                 "error",
                 f"permanenza {bagno:.2f}s in '{spec.tank_id}' sopra il massimo "
-                f"di {spec.dwell_max:.1f}s{dettaglio}",
+                f"di {spec.dwell_max:.1f}s",
                 station=station,
                 move=k,
                 value=bagno,
@@ -996,11 +987,7 @@ def _compute_dwell_slack(data, solution, T) -> dict[int, tuple[float, float]]:
         spec = data.route[k]
         if spec.dwell_max <= spec.dwell_min:
             continue  # permanenza rigida: nessun margine da riportare
-        bagno = (
-            at[k]
-            - (at[k - 1] + data.loaded_leg_seconds(k - 1))
-            + data.bath_extra_seconds(k)
-        )
+        bagno = at[k] - (at[k - 1] + data.loaded_leg_seconds(k - 1))
         out[k] = (bagno - spec.dwell_min, spec.dwell_max - bagno)
     return out
 
@@ -1093,11 +1080,7 @@ def _check_tank_capacity(data, solution, T, add) -> dict[str, int]:
         intervalli = []
         dettagli = []
         for s in steps:
-            bagno = (
-                at[s]
-                - (at[s - 1] + data.loaded_leg_seconds(s - 1))
-                + data.bath_extra_seconds(s)
-            )
+            bagno = at[s] - (at[s - 1] + data.loaded_leg_seconds(s - 1))
             occ = data.slot_occupancy_seconds(s, bagno)
             fine = (at[s] + data.pick_time_at(s)) % T
             intervalli.append((fine - occ, fine))

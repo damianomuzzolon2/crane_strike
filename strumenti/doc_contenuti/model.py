@@ -307,17 +307,10 @@ STRUTTURE = [
     ("h3", "L'impossibile dichiarato subito"),
     ("c", "model.ProblemData.__post_init__", "        if self.clearance_step_mm <= 0:", None),
     ("p",
-     "Gli ultimi due controlli sono i piu' interessanti del metodo, perche' "
-     "non riguardano la coerenza dei dati ma la FATTIBILITA' fisica."),
+     "L'ultimo controllo e' il piu' interessante del metodo, perche' non "
+     "riguarda la coerenza dei dati ma la FATTIBILITA' fisica."),
     ("p",
-     "Il primo: il pezzo resta in bagno almeno per le due corse a vuoto del "
-     "gancio piu' i tempi morti, anche prelevandolo appena possibile. Se la "
-     "permanenza massima ammessa -- il tempo teorico piu' il delta positivo "
-     "-- e' inferiore a quel minimo, la linea e' irrealizzabile, e il "
-     "messaggio elenca le tre leve vere: alzare il teorico o il delta "
-     "positivo, velocizzare il sollevamento a vuoto, ridurre la corsa."),
-    ("p",
-     "Il secondo: un pezzo occupa un posto per un certo tempo, e ogni T ne "
+     "Un pezzo occupa un posto per un certo tempo, e ogni T ne "
      "entra uno nuovo; se l'occupazione minima supera capacity * takt_max, non "
      "c'e' ciclogramma possibile. Il commento dichiara che e' una condizione "
      "NECESSARIA valutata una tappa alla volta: se la stessa vasca compare "
@@ -326,7 +319,7 @@ STRUTTURE = [
     ("q",
      "PERCHE' QUI E NON NEL MODELLO. Il commento risponde: 'Meglio dirlo "
      "subito e chiaramente che restituire un INFEASIBLE muto'. Il modello "
-     "rileverebbe entrambe le situazioni, ma la sua risposta sarebbe "
+     "rileverebbe la situazione, ma la sua risposta sarebbe "
      "'impossibile' senza indicare quale vasca -- e su una linea di dieci "
      "vasche la ricerca comincerebbe da zero."),
 
@@ -632,36 +625,29 @@ FASI = [
      "disegno."),
 
     # ==================================================================
-    ("h2", "3. bath_extra_seconds -- l'errore che costava quindici secondi"),
-    ("c", "model.ProblemData.bath_extra_seconds"),
+    ("h2", "3. Dove finisce il bagno e dove comincia il gancio"),
+    ("c", "model.ProblemData.pick_phases"),
+    ("c", "model.ProblemData.release_phases"),
     ("p",
-     "Restituisce la somma di due tempi morti, e il docstring e' lungo dieci "
-     "volte il corpo. E' proporzionato: dietro c'e' un difetto vero e la sua "
-     "diagnosi."),
-    ("p",
-     "Il gancio che ha appena sganciato deve risalire; quello che verra' a "
-     "riprendere il pezzo deve ricalare. Sono due corse a vuoto che avvengono "
-     "mentre il pezzo e' gia' -- o ancora -- immerso. Piu' i tempi morti di "
-     "sgancio e aggancio, che il telaio passa anch'essi in fondo alla vasca."),
+     "Il modello maneggia due istanti: la fine del rilascio e l'inizio della "
+     "presa successiva. Il BAGNO e' esattamente l'intervallo fra i due, e i "
+     "limiti di processo -- dwell_min e dwell_max -- si applicano a quello "
+     "senza nessuna correzione."),
     ("q",
-     "SU UNA LINEA CON CORSA 1500 mm SONO OLTRE QUINDICI SECONDI. Il "
-     "docstring lo quantifica, ed e' il punto: non contarli non e' "
-     "un'imprecisione, e' abbastanza da sforare il massimo di processo senza "
-     "che nessuno lo dicesse. La formula giusta e' scritta nel docstring -- "
-     "bagno = (prelievo - fine rilascio) + bath_extra -- e sono i limiti del "
-     "PROCESSO ad applicarsi al bagno, non all'intervallo fra i movimenti del "
-     "gancio."),
+     "SGANCIO E AGGANCIO SONO TEMPO DI GANCIO, NON DI PROCESSO. Lo sgancio e' "
+     "l'ultima fase del rilascio, l'aggancio la prima della presa: un offset "
+     "in coda all'immersione e uno in testa al sollevamento. Il telaio e' "
+     "davvero in fondo alla vasca mentre li si fa -- e infatti il POSTO resta "
+     "occupato -- ma il bagno non li conta."),
     ("p",
-     "L'ultimo capoverso del docstring chiude la questione: sono i SOLI tempi "
-     "morti. Tutto il resto di quello che il gancio fa fra un rilascio e la "
-     "presa successiva -- traslare, salire, riscendere -- cade nell'intervallo "
-     "fra i due movimenti, e li' e' gia' contato. E' la ragione per cui il "
-     "corpo e' una somma di due soli termini, e non va allungato."),
-    ("p",
-     "Vale la pena ricordare che questa e' la funzione su cui verify.py e "
-     "model.py hanno smesso di essere d'accordo -- ed e' stato quel disaccordo "
-     "a rendere il verificatore capace di trovare qualcosa. Finche' "
-     "condividevano la definizione sbagliata, la verifica confermava."),
+     "Le corse a vuoto del gancio stanno fuori per un'altra ragione, e non "
+     "vanno confuse con quelle: il gancio che ha appena sganciato risale e "
+     "quello che verra' a riprendere il pezzo ricala, col pezzo gia' -- o "
+     "ancora -- immerso, ma quelle corse cadono DENTRO l'intervallo fra i due "
+     "istanti, e sono gia' contate li'. Chiunque scriva un secondo posto che "
+     "calcola il bagno non deve sommarle una seconda volta: il foglio "
+     "FlussoPezzo l'ha fatto per un periodo, e gonfiava ogni permanenza di "
+     "una decina di secondi."),
 
     ("c", "model.ProblemData.slot_occupancy_seconds"),
     ("p",
@@ -671,9 +657,10 @@ FASI = [
      "capacity * T -- e confrontare il bagno sarebbe ottimistico, cioe' "
      "sbagliato dal lato pericoloso."),
     ("p",
-     "La sottrazione di bath_extra_seconds nel mezzo evita il doppio "
-     "conteggio: quei secondi stanno gia' dentro release_time_at e "
-     "pick_time_at."),
+     "La somma e' secca -- rilascio + bagno + presa -- perche' i tre addendi "
+     "sono tratti CONSECUTIVI e disgiunti, dall'inizio dell'immersione alla "
+     "fine dello sgocciolamento. Sgancio e aggancio ci entrano una volta "
+     "sola, portati da release_time_at e pick_time_at."),
 
     # ==================================================================
     ("h2", "4. Le durate composte"),
@@ -1017,19 +1004,12 @@ SOLVE = [
      "tempi. Ogni successivo e' vincolato fra l'arrivo piu' la permanenza "
      "minima e l'arrivo piu' la massima."),
     ("q",
-     "IL VINCOLO SI SPOSTA, NON CAMBIA FORMA. E' il commento piu' importante "
-     "del blocco. I limiti di processo valgono sul BAGNO, che comprende anche "
-     "le corse a vuoto del gancio che vanno e vengono col pezzo gia' immerso. "
-     "Fra i due istanti che il modello maneggia -- fine del rilascio e inizio "
-     "della presa -- resta quindi una finestra piu' STRETTA, di una costante "
-     "nota in anticipo: bath_extra_seconds. Il modello sottrae quella costante "
-     "dai due limiti e continua a scrivere lo stesso vincolo lineare. E' la "
-     "correzione dell'errore che aveva fatto passare una linea con sei vasche "
-     "su dieci fuori tolleranza."),
-    ("p",
-     "Il max(0, ...) sul minimo copre il caso di un bagno minimo piccolo: il "
-     "gancio che deposita si toglie di mezzo prima che arrivi quello che "
-     "preleva, quindi la finestra non puo' diventare negativa."),
+     "I LIMITI DI PROCESSO VALGONO SUL BAGNO, e il bagno e' esattamente "
+     "l'intervallo fra i due istanti che il modello maneggia: la fine del "
+     "rilascio -- dopo lo sgancio -- e l'inizio della presa, prima "
+     "dell'aggancio. Nessuna costante da sottrarre: sgancio e aggancio sono "
+     "tempo di gancio e stanno fuori, le corse a vuoto cadono dentro "
+     "l'intervallo e sono gia' contate li'."),
     ("p",
      "La capienza a tappa singola e' tre righe e il commento la dimostra: i "
      "pezzi entrano ogni T e ciascuno occupa un posto per `slot_occupancy` "

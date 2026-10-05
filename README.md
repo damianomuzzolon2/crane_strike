@@ -1412,8 +1412,9 @@ Del **carroponte** (uguali su tutta la linea, in `ProblemData`):
   decelerazione massime di sollevamento, a gancio scarico e col telaio;
 - `v_approach_lift`, `d_approach_lift` — la zona di avvicinamento, una sola
   per tutte e due;
-- `engage_time` — aggancio del telaio, prima del sollevamento (tempo morto);
-- `disengage_time` — sgancio, dopo l'immersione (tempo morto).
+- `engage_time` — aggancio del telaio, prima del sollevamento: tempo morto di
+  **gancio**, fuori dalla permanenza di ricetta;
+- `disengage_time` — sgancio, dopo l'immersione: idem, fuori dalla permanenza.
 
 Della **vasca** (una per vasca, in `Tank`):
 
@@ -1478,8 +1479,9 @@ dimenticanza.
 Si vede subito sull'esempio: carico e scarico non sono bagni, quindi hanno
 corsa 0 e scolo 0. Col vecchio valore generale prendevano 800 mm di corsa e 2 s
 di scolo che nessuno voleva, e il takt time ne pagava il conto — 131,88 s
-contro i 127,39 s che si ottennero togliendoli (e i 110,00 s di adesso, dopo le
-correzioni sulla permanenza descritte piu' sotto).
+contro i 127,39 s che si ottennero togliendoli (e meno ancora oggi, dopo le
+correzioni sulla permanenza descritte piu' sotto; il valore di riferimento
+corrente sta in `test/test_interfaccia.py`, che lo verifica a ogni giro).
 
 Con `lift_height = 0` su **tutte** le vasche le cinematiche di sollevamento non
 servono e restano solo i tempi morti: e' la via da usare se si hanno tempi gia'
@@ -1570,8 +1572,9 @@ esiste invece di essere un margine messo a occhio.
 
 I tempi di permanenza (`permanenza_teorica_s` con i suoi `delta_negativo_s` e
 `delta_positivo_s`) sono il tempo **effettivo in bagno**: da quando il telaio
-e' immerso a quando ricomincia a salire. Non vanno gonfiati a mano — ma
-bisogna sapere cosa ci sta dentro.
+e' sganciato in fondo alla vasca a quando il gancio successivo comincia ad
+agganciarlo. Non vanno gonfiati a mano — ma bisogna sapere cosa ci sta
+dentro.
 
 Si scrive il tempo teorico di processo, quello della ricetta, e quanto lo si
 puo' accorciare o allungare. I due delta sono **ampiezze**: si scrivono
@@ -1581,12 +1584,16 @@ una permanenza rigida. I file compilati nel vecchio formato a due colonne
 (`permanenza_min_s` / `permanenza_max_s`) continuano a leggersi: il foglio si
 riconosce dall'intestazione.
 
-Ci stanno dentro i tempi morti di **sgancio e aggancio**: il telaio e' gia' (o
-ancora) in fondo alla vasca mentre si fanno, e sono i due soli tempi che
-allargano il bagno oltre l'intervallo fra i due movimenti del gancio. Tutto il
-resto di quello che il gancio fa nel frattempo — risalire, traslare, ricalare
-— sta gia' **dentro** quell'intervallo, ed e' quindi gia' compreso: non va
-sommato una seconda volta.
+Ci sta dentro tutto quello che il gancio fa nel frattempo — risalire,
+traslare, ricalare: quelle corse cadono **dentro** l'intervallo fra i due
+istanti, e sono quindi gia' comprese, da non sommare una seconda volta.
+
+**Non** ci stanno dentro `tempo_sgancio_s` e `tempo_aggancio_s`: il telaio e'
+davvero in fondo alla vasca mentre li si fa, ma sono tempo di **gancio**, non
+di processo. Lo sgancio e' l'ultima fase del rilascio, l'aggancio la prima
+della presa. Il **posto** nella vasca resta occupato anche durante quei
+secondi — il controllo di capienza li conta — ma la permanenza di ricetta
+no.
 
 `traslazione_con_gancio_basso` e' una colonna del foglio **Vasche**, una per
 vasca, e vale `1` (o vuoto) sulle vasche che il gancio calato puo' scavalcare —
@@ -1733,30 +1740,19 @@ dire che uno dei due valori viene ignorato senza dirlo.
 ```text
         immersione   sgancio    il gancio se ne va e torna    aggancio  emersione
    ──────────────┬──────────┬───────── ... ─────────────────┬─────────┬───────────
-                 └──────────── il pezzo e' in bagno ────────────────┘
-                                  (permanenza)
+                 ·          └────── il pezzo e' a bagno ────┘         ·
+                 ·               (permanenza di ricetta)              ·
+                 └──────────── il POSTO e' occupato ───────────────────┘
 ```
 
-Per un po' il conto e' stato fatto sull'intervallo **fra i movimenti del
-gancio** invece che sul bagno, ed era un errore vero: su una linea reale sei
+Le corse a vuoto del gancio stanno **dentro** la permanenza, sgancio e
+aggancio **fuori**: due regole diverse per due ragioni diverse, ed e' il punto
+che si sbaglia piu' spesso. Per un po' il conto e' stato fatto sulle corse a
+vuoto in piu' invece che dentro, ed era un errore vero: su una linea reale sei
 vasche su dieci sforavano il massimo di processo — fino a +15,3 s — e il file
 usciva con `VERIFICA SUPERATA` e zero rilievi. Il verificatore indipendente non
 lo prendeva perche' misurava la stessa cosa del modello, che e' il modo in cui
 un controllore smette di controllare.
-
-Corretto, il conto va nelle due direzioni:
-
-- dove il **massimo** e' vincolante, il ciclogramma si stringe — e qualche
-  linea che prima "passava" adesso viene respinta, perche' sforava davvero;
-- dove il **minimo** e' vincolante, si smette di sovra-processare e il ciclo si
-  accorcia: sull'esempio il takt time e' sceso **da 127,39 a 110,00 s** -- cioe'
-  fino al minimo dichiarato, tanto che il vincolo non e' piu' il processo --
-  con circa un 16% di produttivita' in piu' a parita' di impianto.
-
-Se la finestra di processo e' piu' stretta del bagno inevitabile — cioe' se
-`teorico + delta_positivo` e' minore delle sole corse a vuoto piu' i tempi morti — la
-linea non e' realizzabile e il programma **lo dice subito**, con il numero:
-meglio di un `INFEASIBLE` muto che manda a cercare la causa dove non c'e'.
 
 Le due fasi compaiono nel ciclogramma come segmenti orizzontali dedicati
 (`Segment.kind` vale `"pick"` o `"release"`): il carroponte e' fermo sopra la

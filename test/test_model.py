@@ -257,11 +257,11 @@ def test_fasi_verticali_e_capienza():
         check(occ_ok, f"capienza rispettata: {r.tank_occupancy}")
 
 
-def test_bagno_comprende_i_tempi_morti():
-    """Il pezzo e' immerso anche durante lo sgancio e l'aggancio, che il
-    modello non conta fra i due istanti che maneggia. Contarli o no fa la
-    differenza fra rispettare il massimo di processo e sforarlo in silenzio."""
-    print("\n[5-bis] la permanenza in vasca comprende sgancio e aggancio")
+def test_sgancio_e_aggancio_fuori_dal_bagno():
+    """Sgancio e aggancio sono tempo di GANCIO, non di processo: stanno in
+    coda al rilascio e in testa alla presa, e la permanenza in vasca non li
+    vede. Occupano pero' il posto, perche' il telaio e' li' in fondo."""
+    print("\n[5-bis] sgancio e aggancio stanno fuori dalla permanenza")
     comune = dict(
         lift_height=1500,
         kin_lift_empty=Kinematics(v_max=250, a_max=150),
@@ -272,19 +272,35 @@ def test_bagno_comprende_i_tempi_morti():
         takt_max=200.0,
     )
     data = linea(4, 1500, [HoistZone(0, 1), HoistZone(2, 3)], dwell=(20, 45), **comune)
-    inevitabile = data.bath_extra_seconds(1)
+
+    # le due fasi esistono e durano quanto dichiarato, ciascuna dalla sua parte
+    durate = {f.name: f.duration for f in data.release_phases(1)}
     check(
-        abs(inevitabile - 15.0) < 1e-9,
-        f"il bagno eccede l'intervallo fra i movimenti di sgancio+aggancio "
-        f"({inevitabile:.1f} s)",
+        abs(durate.get("sgancio", 0.0) - 7.0) < 1e-9,
+        f"lo sgancio e' l'ultima fase del rilascio ({durate.get('sgancio')} s)",
     )
+    durate = {f.name: f.duration for f in data.pick_phases(1)}
+    check(
+        abs(durate.get("aggancio", 0.0) - 8.0) < 1e-9,
+        f"l'aggancio e' la prima fase della presa ({durate.get('aggancio')} s)",
+    )
+
+    # ma il posto resta occupato lo stesso: i 15 s ci sono dentro, insieme
+    # alle corse verticali col telaio e allo sgocciolamento
+    occ = data.slot_occupancy_seconds(1, 20.0)
+    fasi = occ - 20.0
+    check(
+        fasi >= 15.0 - 1e-9,
+        f"il posto e' occupato anche durante sgancio e aggancio "
+        f"({fasi:.1f} s oltre il bagno, di cui 15.0 di tempi morti)",
+    )
+
     sol, r = risolvi_e_verifica(data, "bagno stretto", time_limit=60.0)
     check(r is not None and r.ok, _esito(sol, r, "soluzione valida"))
     if r is not None and sol.actual_time:
         at = sol.actual_time
         bagni = [
             at[k] - (at[k - 1] + data.loaded_leg_seconds(k - 1))
-            + data.bath_extra_seconds(k)
             for k in range(1, data.n_moves)
         ]
         check(
@@ -292,18 +308,25 @@ def test_bagno_comprende_i_tempi_morti():
             f"ogni bagno vero sta dentro 20..45 s ({[round(b, 1) for b in bagni]})",
         )
 
-    # e se la finestra e' piu' stretta dei soli tempi morti, la linea non e'
-    # realizzabile e lo si dice subito col numero
-    try:
-        linea(4, 1500, [HoistZone(0, 1), HoistZone(2, 3)], dwell=(5, 12), **comune)
-        check(False, "una permanenza massima irraggiungibile viene respinta")
-    except ValueError as e:
+    # una finestra piu' stretta dei soli tempi morti ora e' realizzabile: quei
+    # 15 s sono di gancio, non di bagno, e il processo non li vede
+    stretta = linea(
+        4, 1500, [HoistZone(0, 1), HoistZone(2, 3)], dwell=(5, 12), **comune
+    )
+    sol2, r2 = risolvi_e_verifica(
+        stretta, "bagno piu' corto dei tempi morti", time_limit=60.0
+    )
+    check(r2 is not None and r2.ok, _esito(sol2, r2, "soluzione valida"))
+    if r2 is not None and sol2.actual_time:
+        at = sol2.actual_time
+        bagni = [
+            at[k] - (at[k - 1] + stretta.loaded_leg_seconds(k - 1))
+            for k in range(1, stretta.n_moves)
+        ]
         check(
-            "in bagno almeno" in str(e),
-            f"e il motivo e' scritto: \"{str(e)[:80]}...\"",
+            all(5.0 - 0.1 <= b <= 12.0 + 0.1 for b in bagni),
+            f"ogni bagno sta dentro 5..12 s ({[round(b, 1) for b in bagni]})",
         )
-
-
 def test_svincoli_end_to_end():
     """Sull'impianto in cui il gancio calato non passa fra le vasche, il
     carroponte va a svincolare prima di tirare su il gancio scarico."""
@@ -1496,7 +1519,7 @@ def main():
     test_un_carroponte()
     test_tre_carroponti()
     test_fasi_verticali_e_capienza()
-    test_bagno_comprende_i_tempi_morti()
+    test_sgancio_e_aggancio_fuori_dal_bagno()
     test_svincoli_end_to_end()
     test_confine_con_corse_a_vuoto()
     test_cambio_quota_end_to_end()

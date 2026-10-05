@@ -194,13 +194,15 @@ _PARAMETRI = {
         "s",
         False,
         0.0,
-        "aggancio del telaio, prima del sollevamento (si somma alla presa)",
+        "aggancio del telaio, prima del sollevamento: si somma alla presa e "
+        "NON e' tempo in vasca (il bagno e' gia' finito quando comincia)",
     ),
     "tempo_sgancio_s": (
         "s",
         False,
         0.0,
-        "sgancio, dopo l'immersione (si somma al rilascio)",
+        "sgancio, dopo l'immersione: si somma al rilascio e NON e' tempo in "
+        "vasca (il bagno comincia quando lo sgancio e' finito)",
     ),
     "risoluzione_tick_per_s": (
         "tick/s",
@@ -1527,8 +1529,18 @@ def _aggiungi_fogli_linea(
         ),
         ("delle righe a definire la sequenza, non la colonna n.", None),
         (
-            "  permanenza    tempo EFFETTIVO in bagno, da quando il telaio e' immerso "
-            "a quando ricomincia a salire.",
+            "  permanenza    tempo EFFETTIVO in bagno, da quando il telaio e' sganciato "
+            "in fondo alla vasca",
+            None,
+        ),
+        (
+            "                a quando il gancio successivo comincia ad agganciarlo. "
+            "Sgancio e aggancio",
+            None,
+        ),
+        (
+            "                (foglio Parametri) stanno FUORI: sono tempo di gancio, "
+            "non di processo.",
             None,
         ),
         (
@@ -1547,13 +1559,13 @@ def _aggiungi_fogli_linea(
             None,
         ),
         (
-            "                Comprende le corse a vuoto del gancio: dopo lo sgancio "
-            "il gancio risale e il pezzo",
+            "                Comprende invece le corse a vuoto del gancio: dopo lo "
+            "sgancio il gancio risale e il",
             None,
         ),
         (
-            "                resta giu', e per riprenderlo deve ricalare mentre il "
-            "pezzo e' ancora immerso.",
+            "                pezzo resta giu', e per riprenderlo deve ricalare mentre "
+            "il pezzo e' ancora immerso.",
             None,
         ),
         (
@@ -2620,17 +2632,16 @@ def scrivi_risultati(
             arrivo, partenza, permanenza = 0.0, at[0] if at else 0.0, 0.0
         elif s < data.n_moves:
             # `arrivo` e `partenza` sono gli istanti in cui il PEZZO entra e
-            # esce dal bagno, non quelli in cui il gancio finisce e ricomincia
-            # a muoversi: il telaio e' immerso da quando tocca il fondo -- e
-            # il gancio deve ancora sganciare -- a quando ricomincia a salire,
-            # cioe' dopo che quello nuovo ha agganciato. I limiti di processo
-            # valgono su questa permanenza.
+            # esce dal BAGNO, ed e' su questa permanenza che valgono i limiti
+            # di processo. Il bagno e' l'intervallo fra la fine del rilascio e
+            # l'inizio della presa, ESATTAMENTE come lo vede il modello:
+            # nessuna correzione da applicare qui.
             #
-            # E' ESATTAMENTE il bagno del modello: l'intervallo fra la fine
-            # del rilascio e l'inizio della presa, allargato dei due soli
-            # tempi morti che il telaio passa in fondo alla vasca. Vedi
-            # `ProblemData.bath_extra_seconds`, che vale `disengage + engage`
-            # e da' la stessa differenza che si ottiene qui.
+            # SGANCIO E AGGANCIO NON CI SONO DENTRO. Il telaio e' davvero in
+            # fondo alla vasca mentre lo si sgancia e mentre lo si riaggancia
+            # -- e infatti il POSTO resta occupato, vedi
+            # `slot_occupancy_seconds` -- ma sono tempo di gancio, non di
+            # processo: stanno in coda al rilascio e in testa alla presa.
             #
             # LE CORSE A VUOTO DEL GANCIO NON SI AGGIUNGONO. Il telaio e'
             # davvero ancora giu' mentre il gancio che l'ha deposto risale e
@@ -2642,9 +2653,8 @@ def scrivi_risultati(
             # dichiara valido, e da nascondere le vasche che il solutore ha
             # portato esattamente sul minimo. Su una linea a gancio basso,
             # dove quelle corse non le fa nessuno, era tempo inventato.
-            fine_rilascio = at[s - 1] + data.loaded_leg_seconds(s - 1)
-            arrivo = fine_rilascio - data.disengage_time
-            partenza = at[s] + data.engage_time
+            arrivo = at[s - 1] + data.loaded_leg_seconds(s - 1)
+            partenza = at[s]
             permanenza = partenza - arrivo
         else:
             arrivo = at[s - 1] + data.loaded_leg_seconds(s - 1) if at else 0.0

@@ -541,31 +541,28 @@ CONTROLLI = [
      "come uno scarto di T meno un millesimo."),
 
     # ==================================================================
-    ("h2", "6. Le permanenze, e l'errore che le ha rese inutili"),
+    ("h2", "6. Le permanenze"),
     ("c", "verify._check_phase_and_dwell", "    # 6) permanenze", None),
     ("p",
      "Il pezzo deve stare in vasca fra il minimo e il massimo di processo. "
-     "Sembra il controllo piu' semplice del modulo, ed e' quello che ha avuto "
-     "il difetto piu' grave."),
+     "E' il controllo piu' semplice del modulo, ed e' quello che ha avuto il "
+     "difetto piu' grave."),
     ("q",
-     "IL BAGNO NON E' L'INTERVALLO FRA I MOVIMENTI DEL GANCIO. E' scritto nel "
-     "commento del codice, ed e' la lezione piu' cara di questo modulo. Il "
-     "pezzo e' IMMERSO anche mentre il gancio che lo ha deposto risale, e "
-     "anche mentre quello che verra' a riprenderlo ricala: sono secondi di "
-     "bagno a tutti gli effetti. Il verificatore ha condiviso per un periodo "
-     "la definizione del modello, ed e' cosi' che una linea con SEI VASCHE SU "
-     "DIECI fuori tolleranza e' passata con 'VERIFICA SUPERATA'."),
+     "IL BAGNO E' L'INTERVALLO FRA LA FINE DEL RILASCIO E L'INIZIO DELLA "
+     "PRESA. Le corse a vuoto del gancio -- quello che risale dopo lo sgancio "
+     "e quello che ricala prima dell'aggancio -- avvengono col pezzo immerso, "
+     "ma cadono DENTRO quell'intervallo e sono gia' contate. Sgancio e "
+     "aggancio restano invece fuori: il telaio e' in fondo alla vasca mentre "
+     "li si fa, ma sono tempo di gancio, non di processo."),
     ("p",
-     "La correzione e' il termine `extra`, che data.bath_extra_seconds "
-     "calcola: il tempo di immersione che non appartiene a nessun trasporto. "
-     "Il messaggio d'errore lo espone -- 'di cui Ns con il gancio in movimento "
-     "a vuoto' -- perche' senza quel dettaglio la permanenza segnalata non "
-     "corrisponderebbe a nessun numero che l'utente riesce a ritrovare sul "
-     "ciclogramma."),
-    ("p",
-     "Vale la pena notare che il caso e' passato inosservato proprio perche' "
-     "il verificatore era d'accordo con il modello. Nessuno dei due sbagliava "
-     "rispetto all'altro: sbagliavano insieme, e la verifica confermava."),
+     "Per un periodo il verificatore ha misurato un'altra cosa, e il campo "
+     "della discordia e' stato proprio questo: finche' condivideva la "
+     "definizione del modello, una linea con SEI VASCHE SU DIECI fuori "
+     "tolleranza e' passata con 'VERIFICA SUPERATA'. Nessuno dei due "
+     "sbagliava rispetto all'altro: sbagliavano insieme. Oggi la definizione "
+     "e' tornata a essere una sola, ma e' una sola perche' e' giusta, non "
+     "per comodita' -- e chi la cambia deve cambiarla in tutti e due i posti, "
+     "piu' il foglio FlussoPezzo in excel_io."),
 
     ("h3", "_compute_dwell_slack"),
     ("c", "verify._compute_dwell_slack"),

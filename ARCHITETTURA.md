@@ -287,7 +287,6 @@ kin_avvicinamento(kin, station, scendendo=...)  # la zona di avvicinamento, orie
 kin_lift_empty_at(station, scendendo=...)    # la stessa, per il gancio scarico
 serve_alto(a, b)            # se quel rientro deve passare alto
 horizontal_empty_seconds(x, y)  # la singola tratta orizzontale
-bath_extra_seconds(station)
 slot_occupancy_seconds(station, bath)
 approach_position(station)  # dove sta il carroponte PRIMA della presa
 corsa_verticale(station)    # di quanto scende il gancio sotto la quota di trasporto
@@ -321,49 +320,49 @@ tappe servite da una zona di cambio quota (§4.5). Per le distanze fra tratte de
 giro — durata delle mosse, rientri a vuoto, finestre di non collisione — si usa
 **sempre** il punto di approccio.
 
-### 4.3 Il tempo in bagno — la definizione che e' stata sbagliata
+### 4.3 Il tempo in bagno, e dove comincia il tempo di gancio
 
 Il modello maneggia due istanti: la fine del rilascio e l'inizio della presa
-successiva. Il pezzo pero' e' immerso anche **prima** e **dopo**, durante i
-tempi morti:
+successiva. **Il bagno e' esattamente l'intervallo fra i due**, e i limiti di
+processo `dwell_min`/`dwell_max` si applicano a quello senza correzioni:
 
 ```text
    immersione   sgancio    il gancio se ne va e torna    aggancio  emersione
 ──────────────┬──────────┬───────── ... ─────────────────┬─────────┬──────────
-              └──────────── il pezzo e' in bagno ──────────────────┘
+              ·          └──────── il pezzo e' a bagno ──┘         ·
+              └────────────── il POSTO e' occupato ────────────────┘
 ```
-
-`bath_extra_seconds(station)` = `disengage_time + engage_time`, e
 
 ```text
-bagno = (istante del prelievo − istante in cui il rilascio finisce) + bath_extra
+bagno = istante del prelievo − istante in cui il rilascio finisce
 ```
-
-**I limiti di processo `dwell_min`/`dwell_max` valgono sul BAGNO**, non
-sull'intervallo fra i movimenti. Per un periodo non e' stato cosi', e su una
-linea reale sei vasche su dieci sforavano il massimo mentre il file diceva
-`VERIFICA SUPERATA` — perche' il verificatore condivideva la definizione del
-modello. Un controllore che misura la stessa cosa del controllato non controlla
-niente.
-
-Nel CP-SAT il vincolo si sposta di una costante nota in anticipo, non cambia
-forma:
 
 ```python
-extra = T_(data.bath_extra_seconds(station))
-dwell_min = max(0, T_(spec.dwell_min) - extra)
-dwell_max = T_(spec.dwell_max) - extra
+dwell_min = T_(spec.dwell_min)
+dwell_max = T_(spec.dwell_max)
 ```
 
-> **`bath_extra` sono SOLO i due tempi morti.** Le corse a vuoto del gancio —
-> quello che risale dopo lo sgancio e quello che ricala prima dell'aggancio —
+> **Sgancio e aggancio sono tempo di GANCIO, non di processo.** Lo sgancio e'
+> l'ultima fase del rilascio, l'aggancio la prima della presa: un offset in
+> coda all'immersione e uno in testa al sollevamento. Il telaio e' davvero in
+> fondo alla vasca mentre li si fa — e infatti il **posto resta occupato**,
+> `slot_occupancy_seconds` li conta — ma il processo non li vede. Alzarli non
+> stringe la permanenza utile; allunga il ciclo e l'occupazione del posto.
+
+> **Le corse a vuoto del gancio stanno fuori per un'altra ragione.** Quello
+> che risale dopo lo sgancio e quello che ricala prima dell'aggancio
 > avvengono davvero col pezzo giù, ma cadono **dentro** l'intervallo fra i due
-> istanti, quindi sono già contate lì. Il primo capoverso del docstring di
-> `bath_extra_seconds` le descrive prima di arrivare a questa conclusione, ed
-> e' riuscito a trarre in inganno: il foglio `FlussoPezzo` le ha sommate una
-> seconda volta per un po', gonfiando ogni permanenza riportata di una decina
-> di secondi. Chiunque scriva un secondo posto che calcola il bagno deve
-> passare da `bath_extra_seconds`, non riderivarlo.
+> istanti, quindi sono già contate lì. Sommarle di nuovo e' l'errore classico
+> di questo punto: il foglio `FlussoPezzo` l'ha fatto per un po', gonfiando
+> ogni permanenza riportata di una decina di secondi.
+
+La definizione vive in tre posti — il modello (`solve_*`), il verificatore
+(`_check_phase_and_dwell`) e il foglio `FlussoPezzo` di `excel_io` — e oggi i
+tre concordano perche' la formula e' una sottrazione sola. Chi la cambia deve
+cambiarla in tutti e tre: per un periodo modello e verificatore hanno
+condiviso una definizione sbagliata, e su una linea reale sei vasche su dieci
+sforavano il massimo mentre il file diceva `VERIFICA SUPERATA`. Un controllore
+che misura la stessa cosa del controllato non controlla niente.
 
 ### 4.4 Movimentazione verticale, e le posizioni di svincolo
 

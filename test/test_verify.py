@@ -513,9 +513,10 @@ def test_capienza_vasca():
         disengage_time=1.0,
     )
     # Il posto e' occupato da quando il telaio comincia a calare a quando ha
-    # finito di emergere e di sgocciolare. Le corse a VUOTO del gancio non
-    # contano: quelle stanno gia' dentro il bagno, e sommarle di nuovo qui
-    # sarebbe doppio conteggio.
+    # finito di emergere e di sgocciolare: tutte le fasi di rilascio e presa,
+    # sgancio e aggancio compresi, piu' il bagno in mezzo. Le corse a VUOTO
+    # del gancio non contano: quelle cadono nel bagno, e sommarle di nuovo
+    # qui sarebbe doppio conteggio.
     # le fasi si prendono per nome: col gancio che trasla basso le corse a
     # vuoto non ci sono, e per indice si prenderebbe quella sbagliata
     durate = {
@@ -524,31 +525,36 @@ def test_capienza_vasca():
     }
     atteso = (
         durate["immersione del telaio"]
+        + durate["sgancio"]
         + 50.0
+        + durate["aggancio"]
         + durate["sollevamento del telaio"]
         + durate["sgocciolamento"]
     )
     check(
         abs(data_v.slot_occupancy_seconds(2, 50.0) - atteso) < 1e-9,
-        f"occupazione posto = immersione + bagno + emersione + sgocciolamento "
-        f"({atteso:.2f} s)",
+        f"occupazione posto = immersione + sgancio + bagno + aggancio + "
+        f"emersione + sgocciolamento ({atteso:.2f} s)",
     )
-    # Col gancio che trasla basso -- lo standard -- il bagno eccede l'intervallo
-    # fra i movimenti dei soli tempi morti: le corse a vuoto non le fa nessuno.
+    # Sgancio e aggancio stanno dentro l'occupazione del posto -- il telaio e'
+    # in fondo alla vasca -- ma non sono bagno: li portano rilascio e presa.
+    tempi_morti = data_v.disengage_time + data_v.engage_time
     check(
-        abs(data_v.bath_extra_seconds(2) - 3.0) < 1e-9
+        abs(tempi_morti - 3.0) < 1e-9
+        and data_v.slot_occupancy_seconds(2, 50.0) - 50.0 >= tempi_morti
         and "discesa del gancio" not in durate,
-        f"col gancio che trasla basso il bagno eccede di soli sgancio+aggancio "
-        f"({data_v.bath_extra_seconds(2):.2f} s)",
+        f"sgancio+aggancio ({tempi_morti:.2f} s) occupano il posto ma non "
+        f"sono bagno",
     )
-    # ...e resta cosi' anche sull'impianto che obbliga il gancio a risalire:
-    # li' le corse a vuoto ci sono, ma cadono nel RIENTRO fra due mosse, e il
-    # rientro sta gia' tutto dentro l'intervallo fra i movimenti.
+    # E le corse a vuoto non toccano il bagno nemmeno sull'impianto che
+    # obbliga il gancio a risalire: li' ci sono, ma cadono nel RIENTRO fra due
+    # mosse, che sta gia' tutto dentro l'intervallo fra i due istanti.
     alto = _con_ostacoli(data_v)
     check(
-        abs(alto.bath_extra_seconds(2) - 3.0) < 1e-9
+        abs(alto.slot_occupancy_seconds(2, 50.0)
+            - data_v.slot_occupancy_seconds(2, 50.0)) < 1e-9
         and alto.empty_leg_seconds(1, 2) > data_v.empty_leg_seconds(1, 2),
-        f"e le corse a vuoto pesano sul rientro, non sul bagno "
+        f"e le corse a vuoto pesano sul rientro, non sul posto "
         f"({alto.empty_leg_seconds(1, 2):.2f} s contro "
         f"{data_v.empty_leg_seconds(1, 2):.2f})",
     )
@@ -1161,8 +1167,8 @@ def test_svincoli():
     # ...e non tocca ne' la presa ne' il bagno: quelle sono cose del pezzo
     check(
         con.pick_time_at(1) == senza.pick_time_at(1)
-        and con.bath_extra_seconds(1) == senza.bath_extra_seconds(1),
-        "e non tocca ne' la presa ne' il tempo in bagno",
+        and con.release_time_at(1) == senza.release_time_at(1),
+        "e non tocca ne' la presa ne' il rilascio",
     )
 
     # La traiettoria disegnata deve farcelo vedere: il carroponte si spinge

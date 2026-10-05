@@ -1030,10 +1030,8 @@ def test_risultati_flusso_pezzo():
         at = solution.actual_time
         scarti = []
         for s_idx, vasca, _, ingresso, uscita, permanenza in righe[1:-1]:
-            atteso = (
-                at[s_idx]
-                - (at[s_idx - 1] + data.loaded_leg_seconds(s_idx - 1))
-                + data.bath_extra_seconds(s_idx)
+            atteso = at[s_idx] - (
+                at[s_idx - 1] + data.loaded_leg_seconds(s_idx - 1)
             )
             if abs(permanenza - atteso) > 0.01:
                 scarti.append((vasca, permanenza, round(atteso, 2)))

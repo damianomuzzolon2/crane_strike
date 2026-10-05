@@ -846,9 +846,10 @@ def test_gancio_resta_giu(d: ProblemData):
     alto_d = dati_prova(gancio_basso=False)
     check(
         d.empty_leg_seconds(1, 2) < alto_d.empty_leg_seconds(1, 2)
-        and d.bath_extra_seconds(1) == alto_d.bath_extra_seconds(1),
+        and d.slot_occupancy_seconds(1, 50.0)
+        == alto_d.slot_occupancy_seconds(1, 50.0),
         f"il rientro costa {alto_d.empty_leg_seconds(1, 2):.1f} s invece di "
-        f"{d.empty_leg_seconds(1, 2):.1f}, e il bagno non cambia",
+        f"{d.empty_leg_seconds(1, 2):.1f}, e il posto occupato non cambia",
     )
 
     # ASPETTANDO SOPRA UNA VASCA IL GANCIO STA IN FONDO, e vale anche
