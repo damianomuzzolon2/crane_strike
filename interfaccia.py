@@ -92,6 +92,59 @@ def _durata_leggibile(secondi: float) -> str:
     return f"{minuti} min {resto} s"
 
 
+def _cornice_scorrevole(genitore) -> ttk.Frame:
+    """Una cornice che, se il contenuto non ci sta in altezza, si scorre con
+    la barra a destra o con la rotellina. Restituisce la cornice INTERNA, in
+    cui impacchettare il contenuto come in una cornice qualsiasi.
+
+    Serve perche' il pannello di destra chiede piu' altezza di quella che ha
+    una finestra normale, e Tk non scorre da se': taglia. A essere tagliati
+    erano i pulsanti in fondo -- Annulla, Verifica, Ottimizza -- cioe' proprio
+    quelli che si cercano.
+
+    La cornice interna prende la larghezza della tela (cosi' i fill=X
+    funzionano come prima) e almeno la sua altezza (cosi' gli expand=True si
+    allargano quando lo spazio c'e', e si scorre solo quando non c'e')."""
+    tela = tk.Canvas(
+        genitore,
+        highlightthickness=0,
+        borderwidth=0,
+        background=ttk.Style().lookup("TFrame", "background"),
+    )
+    barra = ttk.Scrollbar(genitore, orient=tk.VERTICAL, command=tela.yview)
+    tela.configure(yscrollcommand=barra.set)
+    barra.pack(side=tk.RIGHT, fill=tk.Y)
+    tela.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+    interna = ttk.Frame(tela)
+    finestra = tela.create_window(0, 0, window=interna, anchor=tk.NW)
+
+    def adatta(_evento=None):
+        altezza = max(interna.winfo_reqheight(), tela.winfo_height())
+        tela.itemconfigure(finestra, width=tela.winfo_width(), height=altezza)
+        tela.configure(scrollregion=(0, 0, tela.winfo_width(), altezza))
+
+    interna.bind("<Configure>", lambda e: adatta() if e.widget is interna else None)
+    tela.bind("<Configure>", adatta)
+
+    def rotella(evento):
+        # Legata a "all", quindi arriva da ovunque: si scorre solo se il
+        # puntatore sta sopra questa cornice. Le tabelle che hanno righe
+        # nascoste si scorrono da sole, e scorrere anche la cornice farebbe
+        # muovere due cose insieme.
+        sotto = tela.winfo_containing(evento.x_root, evento.y_root)
+        if sotto is None or not str(sotto).startswith(str(tela)):
+            return
+        if isinstance(sotto, ttk.Treeview) and sotto.yview() != (0.0, 1.0):
+            return
+        if isinstance(sotto, (ttk.Spinbox, ttk.Combobox)):
+            return
+        if tela.yview() != (0.0, 1.0):
+            tela.yview_scroll(-1 if evento.delta > 0 else 1, "units")
+
+    tela.bind_all("<MouseWheel>", rotella, add="+")
+    return interna
+
+
 class _BarraGrafico(NavigationToolbar2Tk):
     """La barra di navigazione di matplotlib (zoom a rettangolo, pan, vista
     intera, salva immagine), che avvisa l'applicazione quando la vista cambia.
@@ -398,9 +451,12 @@ class Applicazione(tk.Tk):
         # -- scheda: il ciclogramma ----------------------------------------
         # Una sola, per il calcolato e per il composto a mano: sono lo stesso
         # oggetto con gli stessi gradi di liberta'.
-        scheda_ciclogramma = ttk.Frame(schede, padding=6)
+        # Scorrevole: e' la scheda piu' alta, e in fondo ci sono i pulsanti.
+        scheda_ciclogramma = ttk.Frame(schede)
         schede.add(scheda_ciclogramma, text="Ciclogramma")
-        self._costruisci_scheda_ciclogramma(scheda_ciclogramma)
+        contenuto = ttk.Frame(_cornice_scorrevole(scheda_ciclogramma), padding=6)
+        contenuto.pack(fill=tk.BOTH, expand=True)
+        self._costruisci_scheda_ciclogramma(contenuto)
 
         # -- scheda: verifica ----------------------------------------------
         scheda_verifica = ttk.Frame(schede, padding=6)
@@ -625,7 +681,11 @@ class Applicazione(tk.Tk):
 
         # -- barra di stato -------------------------------------------------
         piede = ttk.Frame(self, padding=(10, 4))
-        piede.pack(fill=tk.X)
+        # In fondo ma PRIMO nell'ordine di pack: pack da' lo spazio nell'ordine
+        # in cui i widget sono stati impacchettati, e se il pannello di destra
+        # chiede piu' altezza di quella che c'e' l'ultimo resta schiacciato a
+        # zero. Era la barra di stato, e con lei la stima del tempo.
+        piede.pack(side=tk.BOTTOM, fill=tk.X, before=self.pack_slaves()[0])
         self.etichetta_stato = ttk.Label(piede, text="Pronto")
         self.etichetta_stato.pack(side=tk.LEFT)
         self.avanzamento = ttk.Progressbar(piede, mode="indeterminate", length=180)
