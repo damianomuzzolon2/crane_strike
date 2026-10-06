@@ -772,6 +772,7 @@ class Applicazione(tk.Tk):
             + "\nScegli come costruire il ciclogramma."
         )
         self._svuota_tabella()
+        self._banner_neutro("Nessun ciclogramma")
         self._grafico_vuoto("Nessun ciclogramma calcolato")
         self.tela.draw()
         self._stato("Linea caricata")
@@ -1313,7 +1314,11 @@ class Applicazione(tk.Tk):
             return
         if esito == "nessuna":
             self.soluzione = None
+            self.report = None
+            self.incoerenze = []
+            self.verifica_viva = False
             self.durata_calcolo = None
+            self._banner_neutro("NESSUNA SOLUZIONE   -   vedi il Riepilogo")
             self._aggiorna_stato_pulsanti()
             # Il tempo si dice anche qui, ed e' il caso in cui serve di piu':
             # se il calcolo ha consumato tutto il limite senza trovare niente,
@@ -2257,6 +2262,14 @@ class Applicazione(tk.Tk):
                 ),
             )
 
+    def _banner_neutro(self, testo: str):
+        """Il banner quando non c'e' un ciclogramma da giudicare. Il verdetto
+        di quello di prima non deve sopravvivergli: letto accanto a un'altra
+        linea, o a un calcolo fallito, direbbe una cosa falsa."""
+        self.banner.configure(
+            text=testo, background="#e8e8e8", foreground="#000000"
+        )
+
     def _aggiorna_banner_e_riepilogo(self):
         T, rep = self.T_corrente, self.report
         # Le incoerenze vengono PRIMA di tutto il resto. Sono i punti in cui il
@@ -2814,6 +2827,7 @@ class Applicazione(tk.Tk):
     def _svuota_tabella(self):
         for riga in self.tabella.get_children():
             self.tabella.delete(riga)
+        self.schede.tab(2, text="Verifica")
 
     def _stato(self, testo: str):
         self.etichetta_stato.configure(text=testo)
