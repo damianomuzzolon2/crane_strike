@@ -2015,6 +2015,7 @@ def solve(
     log_search: bool = False,
     allow_unsafe_layout: bool = False,
     interruzione: Optional[Interruzione] = None,
+    _rifinisci: Optional[Solution] = None,
 ) -> Solution:
     """allow_unsafe_layout: se True salta il controllo di geometria delle zone.
     Serve solo per studio/debug: le soluzioni prodotte possono contenere
@@ -2024,7 +2025,11 @@ def solve(
     interruzione: vedi `Interruzione`. Se viene fermata durante la ricerca e
     CP-SAT aveva gia' trovato una soluzione, la restituisce -- FEASIBLE, valida
     ma non dimostrata ottima; altrimenti UNKNOWN. In tutti e due i casi
-    `raw["interrotto"]` e' True."""
+    `raw["interrotto"]` e' True.
+
+    _rifinisci: uso interno di `riduci_soste`, che e' da chiamare al suo posto.
+    Si risolve lo STESSO modello col solo obiettivo di fare meno soste per
+    strada, tutto inchiodato alla soluzione data tranne i rientri a vuoto."""
     if data.zones is None:
         raise ValueError(
             "data.zones e' None: specifica le zone esplicitamente oppure usa "
@@ -2092,6 +2097,8 @@ def solve(
     # -- Variabili di takt time --------------------------------------------
     T_min, T_max = T_(data.takt_min), T_(data.takt_max)
     Tv = model.NewIntVar(T_min, T_max, "T")
+    if _rifinisci is not None:
+        model.Add(Tv == _rifinisci.raw["T_ticks"])
 
     # -- Orizzonte e limiti tecnici per i domini delle variabili -----------
     horizon = (
@@ -2807,7 +2814,11 @@ def solve(
     # una per mossa: cosi' un tick di takt time in meno vale sempre piu' di
     # qualunque numero di soste risparmiate, e l'ordine fra i due obiettivi e'
     # garantito invece che sperato.
-    if sel_soste:
+    if _rifinisci is not None:
+        # Il takt time e' gia' inchiodato: resta da contare le soste.
+        model.Minimize(sum(sel_soste))
+        _suggerisci(model, _rifinisci.raw.get("_suggerimento"), fissa=True)
+    elif sel_soste:
         model.Minimize(Tv * (data.n_moves + 1) + sum(sel_soste))
     else:
         model.Minimize(Tv)
@@ -2816,6 +2827,12 @@ def solve(
     solver.parameters.max_time_in_seconds = time_limit_s
     solver.parameters.log_search_progress = log_search
     solver.parameters.num_workers = 8
+    if _rifinisci is not None:
+        for nome, valore in PARAMETRI_RIFINITURA.items():
+            if isinstance(valore, list):
+                getattr(solver.parameters, nome).extend(valore)
+            else:
+                setattr(solver.parameters, nome, valore)
     if interruzione is not None and not interruzione._registra(solver):
         return _soluzione_interrotta()
     try:
@@ -2920,6 +2937,13 @@ def solve(
         "required_separation_m": required_sep,
         "clearance_step_mm": data.clearance_step_mm,
         "n_separation_constraints": n_sep_constraints,
+        "n_soste": sum(solver.Value(sel) for sel in sel_soste),
+        # Tutti i valori della soluzione, per ripartire da qui: vedi
+        # `riduci_soste`.
+        "_suggerimento": (
+            _firma_modello(model),
+            list(solver.ResponseProto().solution),
+        ),
     }
     if interrotto:
         raw["interrotto"] = True
@@ -2931,6 +2955,129 @@ def solve(
         plans=plans,
         actual_time=[data.to_seconds(solver.Value(v)) for v in actual_time],
     )
+
+
+# Le variabili che `riduci_soste` inchioda al valore della soluzione, per
+# prefisso del nome: takt time, istanti di prelievo del pezzo, fasi e periodi
+# di ogni mossa, ordine del giro. Resta libero solo come il carroponte va a
+# vuoto da una mossa alla successiva -- partenza, arrivo, sosta o no -- e i
+# vincoli di non collisione che ne discendono. Le soste da togliere stanno
+# tutte li', e il modello che resta e' piccolo: libero tutto, su una linea da
+# 14 mosse e 6 carroponti, CP-SAT non ne toglieva nessuna in 20 s, perche'
+# solo il presolve di 160 000 vincoli di non collisione se ne prendeva 18.
+_DECISE_FUORI_DAI_RIENTRI = frozenset(
+    {"T", "at", "lp", "fin", "arc", "inizio", "bersaglio"}
+)
+
+
+# I parametri di CP-SAT per la risoluzione di `riduci_soste`.
+# Senza rilassamento lineare: col modello ridotto ai rientri non serve, e
+# costruirlo e' la parte lenta.
+PARAMETRI_RIFINITURA: dict = dict(linearization_level=0)
+
+
+def _firma_modello(model) -> int:
+    """Un'impronta delle variabili del modello, in ordine. Due modelli con la
+    stessa impronta hanno le stesse variabili agli stessi indici, e una
+    soluzione dell'uno si puo' passare all'altro come suggerimento."""
+    return hash(tuple(v.name for v in model.Proto().variables))
+
+
+def _suggerisci(model, suggerimento, fissa: bool = False) -> None:
+    """Passa a CP-SAT i valori di una soluzione precedente come punto di
+    partenza, se e' stata trovata su un modello identico. Se non lo e', non
+    si suggerisce niente: un suggerimento sbagliato non rende il risultato
+    sbagliato, ma lo rende lento a trovarsi.
+
+    `fissa`: le variabili che non riguardano i rientri a vuoto non si
+    suggeriscono, si INCHIODANO (vedi `_DECISE_FUORI_DAI_RIENTRI`)."""
+    if suggerimento is None:
+        return
+    firma, valori = suggerimento
+    if firma != _firma_modello(model) or len(valori) != len(
+        model.Proto().variables
+    ):
+        return
+    for i, valore in enumerate(valori):
+        var = model.GetIntVarFromProtoIndex(i)
+        if fissa and var.Name().split("_")[0] in _DECISE_FUORI_DAI_RIENTRI:
+            model.Add(var == valore)
+        else:
+            model.AddHint(var, valore)
+
+
+# Il tetto per la risoluzione di `riduci_soste`. Parte da una soluzione gia' in
+# mano e cerca solo fra le soste, quindi di solito finisce molto prima.
+TEMPO_RIDUCI_SOSTE_S = 20.0
+
+
+def riduci_soste(
+    data: ProblemData,
+    sol: Solution,
+    time_limit_s: float = TEMPO_RIDUCI_SOSTE_S,
+    interruzione: Optional[Interruzione] = None,
+) -> Solution:
+    """La stessa soluzione, con meno soste per strada se si riesce.
+
+    L'obiettivo di `solve` preferisce gia', a parita' di takt time, il giro
+    con meno soste in una vasca in mezzo. Ma e' il SECONDO criterio: quando
+    CP-SAT scade prima di dimostrare l'ottimo (FEASIBLE) tutto il tempo e'
+    andato a limare il takt time, e restano soste di zero secondi che nessuno
+    ha voluto -- il carroponte trasla in un'altra vasca e torna indietro
+    senza fermarsi. Toglierle a posteriori non si puo': il vincolo di non
+    collisione protegge il percorso CON la sosta, non quello diritto.
+
+    Qui si risolve di nuovo, una volta sola, con tutto inchiodato alla
+    soluzione trovata -- takt time, prelievi, ordine del giro -- tranne i
+    rientri a vuoto (vedi `_DECISE_FUORI_DAI_RIENTRI`), che partono dalla
+    soluzione come suggerimento. Il modello che resta e' piccolo, e su una
+    linea da 14 mosse e 6 carroponti si chiude in una decina di secondi.
+
+    SI TIENE LA NUOVA SOLO SE E' MEGLIO: stesso takt time e meno soste.
+    Altrimenti -- tempo scaduto senza miglioramenti, modello che non si
+    costruisce, calcolo fermato dall'utente -- si restituisce `sol` cosi'
+    com'e', soste comprese. Non c'e' un caso in cui si peggiori.
+
+    `data` deve avere le zone della soluzione. Una soluzione OPTIMAL non si
+    tocca: l'ottimo e' dimostrato sull'obiettivo che conta gia' le soste."""
+    if (
+        sol.status != "FEASIBLE"
+        or not sol.raw.get("n_soste")
+        or "T_ticks" not in sol.raw
+        or sol.raw.get("interrotto")
+        or (interruzione is not None and interruzione.richiesta)
+    ):
+        return sol
+    try:
+        nuova = solve(
+            data,
+            time_limit_s=time_limit_s,
+            interruzione=interruzione,
+            _rifinisci=sol,
+        )
+    except ValueError:
+        return sol
+    if (
+        nuova.status not in ("OPTIMAL", "FEASIBLE")
+        or nuova.raw.get("interrotto")
+        or nuova.raw.get("T_ticks") != sol.raw["T_ticks"]
+        or nuova.raw.get("n_soste", 0) >= sol.raw["n_soste"]
+    ):
+        return sol
+    # Il takt time non e' stato ottimizzato di nuovo: resta FEASIBLE com'era.
+    # Del resto di `raw` si tiene quello che la ricerca aveva raccolto (zone,
+    # tentativi, numero di carroponti), aggiornando solo cio' che e' cambiato.
+    raw = dict(sol.raw)
+    raw.update(
+        # nella scala dell'obiettivo di `solve`, non di quello della rifinitura
+        objective=sol.raw["objective"] - sol.raw["n_soste"] + nuova.raw["n_soste"],
+        n_soste=nuova.raw["n_soste"],
+        n_separation_constraints=nuova.raw["n_separation_constraints"],
+        _suggerimento=nuova.raw["_suggerimento"],
+        soste_tolte=sol.raw["n_soste"] - nuova.raw["n_soste"],
+        wall_time_soste=nuova.raw["wall_time"],
+    )
+    return dataclasses.replace(nuova, status=sol.status, raw=raw)
 
 
 # --------------------------------------------------------------------------

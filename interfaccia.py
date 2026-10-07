@@ -42,8 +42,10 @@ from matplotlib.lines import Line2D
 from avvio import righe_di_riepilogo, trova_avvii
 from excel_io import leggi_problema, scrivi_modello, scrivi_risultati
 from model import (
+    TEMPO_RIDUCI_SOSTE_S,
     Interruzione,
     diagnosi_zone,
+    riduci_soste,
     solve,
     solve_auto_hoists,
     solve_auto_zones,
@@ -880,6 +882,17 @@ class Applicazione(tk.Tk):
             self._diagnostica(d, sol)
             return ("nessuna", sol, None, None)
         dati = dataclasses.replace(d, zones=zone)
+        # Una sola risoluzione in piu', sulla soluzione scelta, per togliere
+        # le soste inutili rimaste se CP-SAT e' scaduto prima dell'ottimo.
+        # Se non ci riesce, la soluzione resta quella di prima.
+        if sol.status == "FEASIBLE" and sol.raw.get("n_soste"):
+            self._coda.put(("stato", "Tolgo le soste per strada che non servono..."))
+        sol = riduci_soste(
+            dati,
+            sol,
+            time_limit_s=min(cfg.tempo_limite_s, TEMPO_RIDUCI_SOSTE_S),
+            interruzione=interruzione,
+        )
         return ("ok", sol, dati, verify_solution(dati, sol))
 
     def _diagnostica(self, d, sol):
@@ -1281,6 +1294,12 @@ class Applicazione(tk.Tk):
         try:
             while True:
                 tipo, carico = self._coda.get_nowait()
+                if tipo == "stato":
+                    # una fase del calcolo che non ha un avanzamento da contare
+                    self.avanzamento.configure(mode="indeterminate")
+                    self.avanzamento.start()
+                    self._stato(carico)
+                    continue
                 if tipo != "progresso":
                     break
                 self._mostra_avanzamento(*carico)

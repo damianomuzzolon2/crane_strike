@@ -523,6 +523,20 @@ ottime, e una sosta di zero secondi che nessuno ha voluto non si potrebbe
 nemmeno togliere a posteriori — il vincolo di non collisione protegge il percorso
 CON la sosta, non quello diritto.
 
+L'ordine pero' vale solo se CP-SAT arriva all'ottimo. Quando scade prima
+(FEASIBLE) il tempo e' andato tutto sul takt time, e le soste di zero secondi
+restano: il carroponte va in un'altra vasca e torna senza fermarsi. Per questo
+chi lancia il calcolo (`interfaccia._risolvi`, `ciclogramma.main`) passa la
+soluzione scelta a **`riduci_soste`**: lo stesso modello con il solo obiettivo
+`numero di soste`, takt time, prelievi e ordine del giro inchiodati alla
+soluzione (`_DECISE_FUORI_DAI_RIENTRI`), e i rientri a vuoto liberi con la
+soluzione come `AddHint`. Lasciando libero tutto non funzionava: il solo presolve
+dei vincoli di non collisione si prendeva quasi tutto il tempo.
+Si fa **una volta**, sulla soluzione finale, non dentro `solve`: la ricerca
+automatica chiama `solve` per ogni suddivisione in zone. Si tiene il risultato
+solo se ha lo stesso takt e meno soste, altrimenti torna la soluzione di prima.
+Gira senza rilassamento lineare (`PARAMETRI_RIFINITURA`), che qui non serve.
+
 ### 5.3 La fascia di esclusione — il vincolo difficile
 
 La condizione fisica e' `a(t) + c(t) >= D` con `D = hoist_length +

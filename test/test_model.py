@@ -1207,6 +1207,84 @@ def test_dove_va_ad_aspettare_il_carro():
         rep = verify_solution(d_con, con)
         check(rep.ok, _esito(con, rep, "e la soluzione con la sosta e' valida"))
 
+def test_riduci_soste():
+    print()
+    print("[9-bis-bis] le soste che non servono si tolgono, le altre restano")
+    # Quando CP-SAT scade prima dell'ottimo, il criterio delle soste -- il
+    # secondo, dopo il takt time -- non e' stato guardato, e restano soste di
+    # zero secondi: il carro va in un'altra vasca e torna senza fermarsi.
+    # `riduci_soste` risolve di nuovo col takt time inchiodato. Il contratto e'
+    # che non peggiora mai: stesso takt time, soste in meno, oppure la
+    # soluzione di prima COSI' COM'E'.
+    import dataclasses
+
+    from model import riduci_soste
+
+    stretta = dict(
+        takt_min=40.0, takt_max=60.0, dwell=(20, 900), capacity=20,
+        hoist_extent_pos=600, hoist_extent_neg=600, safety_distance=900,
+        lift_height=400, drain_time=3.0,
+        kin_lift_empty=Kinematics(v_max=400, a_max=600),
+        kin_lift_loaded=Kinematics(v_max=200, a_max=300),
+        engage_time=2.0, disengage_time=1.0, clearance_step_mm=300.0,
+    )
+    zone_tre = [HoistZone(0, 1), HoistZone(2, 3), HoistZone(4, 5)]
+    d = linea(6, 1500, zone_tre, max_soste_intermedie=2, **stretta)
+
+    def soste(sol):
+        return sum(len(p.soste_intermedie) for p in sol.plans)
+
+    # -- 1) una soluzione OPTIMAL non si tocca ------------------------------
+    ottima = solve(d, time_limit_s=120.0)
+    if ottima.status != "OPTIMAL":
+        check(False, f"la linea stretta non si e' risolta ({ottima.status})")
+        return
+    check(
+        ottima.raw.get("n_soste") == soste(ottima),
+        f"il conteggio delle soste corrisponde al piano "
+        f"({ottima.raw.get('n_soste')} contro {soste(ottima)})",
+    )
+    check(
+        riduci_soste(d, ottima) is ottima,
+        "una soluzione OPTIMAL esce tale e quale: l'ottimo conta gia' le soste",
+    )
+
+    # -- 2) senza miglioramento si restituisce la soluzione di prima --------
+    # Le soste dell'ottimo servono tutte: fingendola FEASIBLE non c'e' niente
+    # da togliere, e quello che torna dev'essere lei, soste comprese.
+    finta = dataclasses.replace(ottima, status="FEASIBLE")
+    check(
+        riduci_soste(d, finta) is finta,
+        f"se non si toglie niente torna la soluzione di prima, con le sue "
+        f"{soste(finta)} soste",
+    )
+    check(
+        riduci_soste(d, finta, time_limit_s=0.001) is finta,
+        "e cosi' se il tempo scade prima di trovare qualcosa",
+    )
+
+    # -- 3) da una soluzione trovata di corsa: stesso takt, mai piu' soste ---
+    di_corsa = solve(d, time_limit_s=2.0)
+    if di_corsa.status != "FEASIBLE" or not di_corsa.raw.get("n_soste"):
+        print(
+            f"       (in 2 s la soluzione e' {di_corsa.status} con "
+            f"{di_corsa.raw.get('n_soste')} soste: niente da ridurre)"
+        )
+        return
+    rifinita = riduci_soste(d, di_corsa)
+    check(
+        abs(rifinita.T - di_corsa.T) < 1e-9 and rifinita.status == "FEASIBLE",
+        f"il takt time resta {di_corsa.T:.2f} s, e lo stato FEASIBLE",
+    )
+    check(
+        soste(rifinita) <= soste(di_corsa)
+        and rifinita.raw["n_soste"] == soste(rifinita),
+        f"le soste non aumentano ({soste(di_corsa)} -> {soste(rifinita)})",
+    )
+    rep = verify_solution(d, rifinita)
+    check(rep.ok, "e la soluzione rifinita supera la verifica indipendente")
+
+
 
 def test_pezzo_in_vasca():
     print()
@@ -1532,6 +1610,7 @@ def main():
     test_ricostruzione_fedele()
     test_dove_sosta_il_carro()
     test_dove_va_ad_aspettare_il_carro()
+    test_riduci_soste()
     test_pezzo_in_vasca()
     test_frecce_delle_corse_verticali()
     test_ferma_il_calcolo()

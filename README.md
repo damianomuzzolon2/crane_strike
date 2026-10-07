@@ -2124,6 +2124,14 @@ di piu' tempo, e con un limite stretto puo' restituire un takt PEGGIORE di
 quello che si otterrebbe senza le soste. Se succede, alza il limite invece di
 abbassare le soste — o abbassale, se il calcolo deve restare veloce.
 
+**Le soste inutili si tolgono alla fine.** Se il calcolo scade prima di
+dimostrare l'ottimo (stato FEASIBLE), possono restare soste di zero secondi: il
+carroponte va in un'altra vasca e torna indietro senza fermarsi. Trovata la
+soluzione, il programma fa quindi una risoluzione in piu', col takt time fisso,
+che toglie le soste che non servono (al massimo 20 s, o meno se
+`tempo_limite_per_tentativo_s` e' piu' basso). Se non ci riesce resta la
+soluzione di prima, soste comprese: il takt time non cambia mai.
+
 **I candidati sono pochi per costruzione**, e non per prudenza: una sosta puo'
 servire solo se **entrambi** gli estremi del viaggio sono abbastanza vicini a un
 confine perche' il vicino possa arrivare a distanza minore di `D` (piu' la

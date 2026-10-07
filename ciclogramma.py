@@ -29,7 +29,7 @@ import sys
 
 from avvio import righe_di_riepilogo, trova_avvio
 from excel_io import leggi_problema, scrivi_modello, scrivi_risultati
-from model import solve, solve_auto_hoists
+from model import TEMPO_RIDUCI_SOSTE_S, riduci_soste, solve, solve_auto_hoists
 from verify import verify_solution
 
 
@@ -132,6 +132,14 @@ def main(argv=None) -> int:
         return 1
 
     data_finale = dataclasses.replace(data, zones=zones)
+    # le soste inutili rimaste se CP-SAT e' scaduto prima dell'ottimo
+    solution = riduci_soste(
+        data_finale,
+        solution,
+        time_limit_s=min(cfg.tempo_limite_s, TEMPO_RIDUCI_SOSTE_S),
+    )
+    if solution.raw.get("soste_tolte"):
+        print(f"  tolte {solution.raw['soste_tolte']} soste per strada che non servivano")
     print()
     print(f"Carroponti: {n_hoists}   zone: {[(z.lo, z.hi) for z in zones]}")
     print(f"Takt time: {solution.T:.2f} s")
