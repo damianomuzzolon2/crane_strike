@@ -1501,7 +1501,7 @@ class Applicazione(tk.Tk):
             return
         d = self.config_linea.data
         self._reimposta_grafico()
-        self.T_corrente = d.takt_min
+        self.T_corrente = d.takt_nominale
         self.permanenze = manuale.permanenze_iniziali(d)
         self.n_carroponti = min(2, d.n_moves)
         # NIENTE assegnato: il pettine parte tutto grigio ed e' l'utente a
