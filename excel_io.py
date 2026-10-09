@@ -34,6 +34,9 @@ from avvio import Avvio, righe_di_riepilogo, trova_avvio
 from kinematics import Kinematics
 from model import (
     SCALA_PESI,
+    errore_pesato,
+    scarti_dal_teorico,
+    scarto_pesato,
     HoistZone,
     ProblemData,
     SostaIntermedia,
@@ -2547,6 +2550,24 @@ def scrivi_risultati(
     voce("Takt time", round(T, 2), "s fra un pezzo e il successivo")
     voce("Produttivita'", round(3600.0 / T, 1) if T else "-", "pezzi/ora", "0.0")
     voce("Numero di carroponti", len(data.zones))
+    voce(
+        "Obiettivo del calcolo",
+        "scarto minimo dai teorici" if data.takt_fisso else "takt time minimo",
+        "takt time fisso al teorico, pesi nel foglio Percorso"
+        if data.takt_fisso
+        else "nella banda teorico - delta / teorico + delta",
+    )
+    # Si scrive sempre, non solo col takt fisso: col takt libero non e' quello
+    # che si e' ottimizzato, ma serve a confrontare le due soluzioni.
+    if solution.actual_time:
+        voce(
+            "Scarto pesato dai teorici",
+            round(
+                errore_pesato(data, scarti_dal_teorico(data, solution.actual_time)),
+                2,
+            ),
+            "s x peso, somma su tutte le vasche (dettaglio in FlussoPezzo)",
+        )
 
     # -- il punto di avvio -------------------------------------------------
     # Dove portare a mano i carroponti prima di dare il via, e in che istante
@@ -2798,6 +2819,7 @@ def scrivi_risultati(
     for s in range(data.n_stations):
         spec = data.route[s]
         cap = data.tanks[spec.tank_id].capacity
+        in_mezzo = 0 < s < data.n_moves
         if s == 0:
             arrivo, partenza, permanenza = 0.0, at[0] if at else 0.0, 0.0
         elif s < data.n_moves:
@@ -2839,10 +2861,16 @@ def scrivi_risultati(
                 round(partenza, 2),
                 round(permanenza, 2),
                 round(spec.nominale, 2),
+                round(permanenza - spec.nominale, 2) if in_mezzo else "",
                 round(spec.dwell_min, 2),
                 round(spec.dwell_max, 2),
-                round(permanenza - spec.dwell_min, 2) if 0 < s < data.n_moves else "",
-                round(spec.dwell_max - permanenza, 2) if 0 < s < data.n_moves else "",
+                round(permanenza - spec.dwell_min, 2) if in_mezzo else "",
+                round(spec.dwell_max - permanenza, 2) if in_mezzo else "",
+                spec.peso_sotto if in_mezzo else "",
+                spec.peso_sopra if in_mezzo else "",
+                round(scarto_pesato(spec, permanenza - spec.nominale), 2)
+                if in_mezzo
+                else "",
                 report.tank_occupancy.get(spec.tank_id, 1),
                 cap,
                 round(data.lift_height_at(s), 1),
@@ -2861,10 +2889,14 @@ def scrivi_risultati(
             "uscita [s]",
             "permanenza [s]",
             "teorico [s]",
+            "scarto [s]",
             "min [s]",
             "max [s]",
             "margine sul min [s]",
             "margine sul max [s]",
+            "peso sotto",
+            "peso sopra",
+            "scarto pesato",
             "posti usati",
             "posti disponibili",
             "corsa verticale [mm]",
@@ -2872,17 +2904,20 @@ def scrivi_risultati(
             "presa [s]",
             "rilascio [s]",
         ],
-        [5, 20, 14, 13, 12, 15, 12, 10, 10, 19, 19, 12, 17, 19, 19, 11, 13],
+        [5, 20, 14, 13, 12, 15, 12, 11, 10, 10, 19, 19, 11, 11, 14, 12, 17, 19, 19,
+         11, 13],
         righe,
         formati={
             4: "0.00",
             5: "0.00",
             6: "0.00",
             7: "0.00",
-            14: "0.000",
+            8: "+0.00;-0.00;0.00",
             15: "0.00",
-            16: "0.00",
-            17: "0.00",
+            18: "0.000",
+            19: "0.00",
+            20: "0.00",
+            21: "0.00",
         },
     )
     ws.append([])
@@ -2896,6 +2931,15 @@ def scrivi_risultati(
             "Tutto quello che il gancio fa nel frattempo -- risalire, traslare, "
             "ricalare -- e' gia' dentro questa permanenza, ed e' su questa che "
             "valgono i limiti di processo."
+        ]
+    )
+    ws.append(
+        [
+            "Lo scarto e' la permanenza meno il teorico: negativo sotto, positivo "
+            "sopra. Lo scarto pesato e' il suo valore assoluto per il peso del "
+            "lato su cui cade (colonne peso_sotto e peso_sopra del foglio "
+            "Percorso): e' la grandezza che il calcolo rende minima quando il "
+            "takt time e' fisso, e la somma sta nel Riepilogo."
         ]
     )
     ws.cell(ws.max_row, 1).font = Font(italic=True, color="808080")

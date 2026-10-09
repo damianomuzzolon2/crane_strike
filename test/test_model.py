@@ -1629,8 +1629,8 @@ def test_takt_fisso():
         f"({ {k: round(v, 2) for k, v in sc.items()} })",
     )
     check(
-        abs(errore_pesato(d, sol.actual_time) - sol.raw["errore_pesato"]) < 0.1,
-        f"lo scarto ricalcolato dagli istanti ({errore_pesato(d, sol.actual_time):.2f})"
+        abs(errore_pesato(d, scarti_dal_teorico(d, sol.actual_time)) - sol.raw["errore_pesato"]) < 0.1,
+        f"lo scarto ricalcolato dagli istanti ({errore_pesato(d, scarti_dal_teorico(d, sol.actual_time)):.2f})"
         f" torna con quello del solutore ({sol.raw['errore_pesato']:.2f})",
     )
     sotto_uguali = -sc[2]

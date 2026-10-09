@@ -45,6 +45,7 @@ from model import (
     TEMPO_RIDUCI_SOSTE_S,
     Interruzione,
     diagnosi_zone,
+    errore_pesato,
     riduci_soste,
     solve,
     solve_auto_hoists,
@@ -338,6 +339,18 @@ class Applicazione(tk.Tk):
             barra, text="Calcola auto", command=self._calcola_automatico
         )
         self.btn_auto.pack(side=tk.LEFT)
+        # COSA ottimizza "Calcola auto": il takt time piu' corto, oppure --
+        # col takt fisso al teorico -- i tempi in vasca piu' vicini ai teorici.
+        # Si legge dal file (parametro takt_fisso) e qui si puo' cambiare al
+        # volo: e' una domanda che si fa alla stessa linea, non un'altra linea.
+        self.var_takt_fisso = tk.BooleanVar(value=False)
+        self.chk_takt_fisso = ttk.Checkbutton(
+            barra,
+            text="Takt fisso",
+            variable=self.var_takt_fisso,
+            command=self._cambia_takt_fisso,
+        )
+        self.chk_takt_fisso.pack(side=tk.LEFT, padx=(6, 0))
         # Accanto a "Calcola auto", perche' e' il suo contrario: una ricerca
         # automatica puo' durare decine di minuti, e prima l'unico modo di
         # rinunciarci era chiudere il programma. Acceso solo mentre si calcola.
@@ -550,7 +563,7 @@ class Applicazione(tk.Tk):
         cornice_perm.pack(fill=tk.BOTH, expand=True)
         self.tabella_permanenze = ttk.Treeview(
             cornice_perm,
-            columns=("vasca", "tempo", "teorico", "min", "max"),
+            columns=("vasca", "tempo", "teorico", "scarto", "min", "max"),
             show="headings",
             height=7,
         )
@@ -558,6 +571,7 @@ class Applicazione(tk.Tk):
             ("vasca", "vasca", 130),
             ("tempo", "tempo [s]", 80),
             ("teorico", "teorico", 65),
+            ("scarto", "scarto", 60),
             ("min", "min", 55),
             ("max", "max", 55),
         ]:
@@ -757,6 +771,7 @@ class Applicazione(tk.Tk):
             self.finestra_simulazione.destroy()
             self.finestra_simulazione = None
         d = self.config_linea.data
+        self.var_takt_fisso.set(d.takt_fisso)
         self._mostra_percorso(percorso)
         self._scrivi_riepilogo(
             f"Linea: {percorso}\n"
@@ -764,7 +779,13 @@ class Applicazione(tk.Tk):
             f"Takt time teorico: {d.takt_nominale:.1f} s "
             f"(-{d.takt_delta_neg:.1f} / +{d.takt_delta_pos:.1f}), "
             f"ammesso {d.takt_min:.1f} - {d.takt_max:.1f} s\n"
-            f"Vasche: {', '.join(d.tanks)}\n\n"
+            + (
+                "Obiettivo: takt time FISSO al teorico, tempi in vasca il "
+                "piu' vicino possibile ai teorici (pesi del foglio Percorso)\n"
+                if d.takt_fisso
+                else "Obiettivo: takt time piu' corto nella banda ammessa\n"
+            )
+            + f"Vasche: {', '.join(d.tanks)}\n\n"
             + (
                 f"Zone indicate a mano: "
                 f"{[(z.lo, z.hi) for z in self.config_linea.zone_manuali]}\n"
@@ -834,6 +855,37 @@ class Applicazione(tk.Tk):
             "E' gia' compilato con una linea di esempio.\nVuoi aprirlo adesso?",
         ):
             self._carica(percorso)
+
+    def _cambia_takt_fisso(self):
+        """Il selettore "Takt fisso": cambia l'obiettivo della linea caricata.
+
+        Non tocca il ciclogramma che c'e': resta valido com'e', e cambia solo
+        cosa cerchera' il prossimo "Calcola auto". Il riepilogo pero' si
+        rinfresca, perche' dice quale dei due obiettivi e' in vigore."""
+        if self.config_linea is None:
+            self.var_takt_fisso.set(False)
+            return
+        fisso = self.var_takt_fisso.get()
+        try:
+            data = dataclasses.replace(self.config_linea.data, takt_fisso=fisso)
+        except ValueError as e:
+            # Col takt inchiodato al teorico una vasca puo' non starci piu' coi
+            # suoi posti, e ProblemData lo dice subito: meglio qui che come un
+            # INFEASIBLE muto dopo minuti di calcolo.
+            self.var_takt_fisso.set(not fisso)
+            self._errore("Takt fisso non applicabile", str(e))
+            return
+        self.config_linea = dataclasses.replace(self.config_linea, data=data)
+        if self.dati is not None:
+            self.dati = dataclasses.replace(self.dati, takt_fisso=fisso)
+        self._stato(
+            "Calcola auto cerchera' i tempi in vasca piu' vicini ai teorici, "
+            f"con il takt time fisso a {data.takt_nominale:.1f} s"
+            if fisso
+            else "Calcola auto cerchera' il takt time piu' corto nella banda"
+        )
+        if self.soluzione is not None and self.T_corrente is not None:
+            self._aggiorna_banner_e_riepilogo()
 
     def _calcola_automatico(self):
         if not self._pronto_per_calcolare():
@@ -1413,6 +1465,11 @@ class Applicazione(tk.Tk):
                 else f"Ciclogramma pronto in {_durata_leggibile(durata)} - "
             )
             + f"T = {sol.T:.2f} s"
+            + (
+                f", scarto pesato {sol.raw['errore_pesato']:.2f}"
+                if sol.raw.get("errore_pesato") is not None
+                else ""
+            )
             + self._esito_breve()
         )
 
@@ -2266,6 +2323,7 @@ class Applicazione(tk.Tk):
                     spec.tank_id,
                     f"{self.permanenze.get(k, 0.0):.1f}",
                     f"{spec.nominale:.0f}",
+                    f"{self.permanenze.get(k, 0.0) - spec.nominale:+.1f}",
                     f"{spec.dwell_min:.0f}",
                     f"{spec.dwell_max:.0f}",
                 ),
@@ -2295,6 +2353,22 @@ class Applicazione(tk.Tk):
                     "-" if p["carro"] is None else p["carro"] + 1,
                 ),
             )
+
+    def _scarto_pesato_corrente(self) -> float:
+        """Lo scarto pesato dai teorici del ciclogramma che si sta guardando.
+
+        Si calcola dai tempi in vasca e non dalla soluzione del solutore: cosi'
+        vale anche per un ciclogramma composto o ritoccato a mano, ed e' il
+        numero con cui confrontarlo con quello del calcolo automatico."""
+        d = self.config_linea.data
+        return errore_pesato(
+            d,
+            {
+                k: self.permanenze[k] - d.route[k].nominale
+                for k in range(1, d.n_moves)
+                if k in self.permanenze
+            },
+        )
 
     def _banner_neutro(self, testo: str):
         """Il banner quando non c'e' un ciclogramma da giudicare. Il verdetto
@@ -2370,8 +2444,15 @@ class Applicazione(tk.Tk):
             )
         righe += [
             "",
-            f"Takt time:      {T:.2f} s",
+            f"Takt time:      {T:.2f} s"
+            + ("  (fisso al teorico)" if self.dati.takt_fisso else ""),
             f"Produttivita':  {3600.0 / T:.1f} pezzi/ora",
+            f"Scarto pesato dai teorici: {self._scarto_pesato_corrente():.2f}"
+            + (
+                "  (e' cio' che Calcola auto rende minimo)"
+                if self.dati.takt_fisso
+                else ""
+            ),
             f"Carroponti:     {self.n_carroponti}",
         ]
         for h, z in enumerate(self.dati.zones):
@@ -2728,6 +2809,7 @@ class Applicazione(tk.Tk):
                 self.schede.select(0)
             self.schede.tab(1, state=tk.DISABLED)
         self.btn_auto.configure(state=stato)
+        self.chk_takt_fisso.configure(state=stato)
         # Ferma e' acceso solo mentre c'e' un calcolo da fermare, e si spegne
         # appena lo si preme: il calcolo non si ferma all'istante -- finisce la
         # costruzione del modello in corso, o il solutore deve accorgersene --

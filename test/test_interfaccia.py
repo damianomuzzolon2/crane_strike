@@ -1596,6 +1596,70 @@ def test_file_illeggibile():
         chiudi(app)
 
 
+def test_takt_fisso(percorso_linea):
+    print("\n[takt fisso] il selettore cambia l'obiettivo di Calcola auto")
+    from interfaccia import Applicazione
+
+    app = Applicazione(percorso_linea)
+    try:
+        for _ in range(50):  # il caricamento e' schedulato con after()
+            app.update()
+            if app.config_linea is not None:
+                break
+            time.sleep(0.02)
+        check(
+            not app.var_takt_fisso.get(),
+            "il modello d'esempio apre col takt libero, come dice il file",
+        )
+        app.var_takt_fisso.set(True)
+        app._cambia_takt_fisso()
+        d = app.config_linea.data
+        check(d.takt_fisso, "il selettore arriva alla linea")
+
+        app._calcola_automatico()
+        check(pompa(app, 600.0), "il calcolo termina")
+        sol = app.soluzione
+        check(
+            sol is not None and sol.status in ("OPTIMAL", "FEASIBLE"),
+            f"soluzione trovata (stato {sol.status if sol else '-'})",
+        )
+        if sol is None:
+            return
+        check(
+            abs(sol.T - d.takt_nominale) < 0.01,
+            f"il takt time e' il teorico ({sol.T:.2f} s)",
+        )
+        check(app.report.ok, "la soluzione supera la verifica indipendente")
+        riepilogo = app.testo_riepilogo.get("1.0", "end")
+        atteso = f"Scarto pesato dai teorici: {sol.raw['errore_pesato']:.2f}"
+        check(
+            atteso in riepilogo,
+            f"il Riepilogo riporta lo scarto del solutore ('{atteso}')",
+        )
+        check(
+            "scarto pesato" in app.etichetta_stato["text"],
+            "e la barra di stato lo dice a fine calcolo",
+        )
+        riga = app.tabella_permanenze.get_children()[0]
+        valori = app.tabella_permanenze.item(riga, "values")
+        check(
+            len(valori) == 6
+            and abs(float(valori[3]) - (float(valori[1]) - float(valori[2]))) < 0.11,
+            f"la tabella dei tempi in vasca ha la colonna dello scarto ({valori})",
+        )
+
+        # Tornare al takt libero non butta il ciclogramma: cambia solo cosa
+        # cerchera' il prossimo calcolo.
+        app.var_takt_fisso.set(False)
+        app._cambia_takt_fisso()
+        check(
+            app.soluzione is sol and not app.config_linea.data.takt_fisso,
+            "togliendo il segno il ciclogramma resta, cambia l'obiettivo",
+        )
+    finally:
+        chiudi(app)
+
+
 def main():
     print("=" * 72)
     print("TEST DELL'INTERFACCIA GRAFICA")
@@ -1622,6 +1686,7 @@ def main():
         test_punti_di_passaggio(linea)
         test_simulazione_dal_pulsante(linea)
         test_punti_di_avvio(linea)
+        test_takt_fisso(linea)
         test_file_illeggibile()
     finally:
         os.unlink(linea)

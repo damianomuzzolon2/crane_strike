@@ -2877,11 +2877,11 @@ def solve(
     # SCARTO PESATO dai tempi teorici (vedi `_pesi_scarto`), e le soste
     # restano il secondo con la stessa garanzia: un'unita' di scarto vale
     # piu' di tutte le soste possibili.
-    scarto_pesato = 0
+    obiettivo_scarti = 0
     for k, sotto, sopra in scarti:
         peso_sotto, peso_sopra = _pesi_scarto(data.route[k])
-        scarto_pesato += peso_sotto * sotto + peso_sopra * sopra
-    primo = scarto_pesato if data.takt_fisso else Tv
+        obiettivo_scarti += peso_sotto * sotto + peso_sopra * sopra
+    primo = obiettivo_scarti if data.takt_fisso else Tv
     if _rifinisci is not None:
         # Il primo criterio e' gia' inchiodato: resta da contare le soste.
         model.Minimize(sum(sel_soste))
@@ -3008,13 +3008,17 @@ def solve(
         "n_soste": sum(solver.Value(sel) for sel in sel_soste),
         # Lo scarto pesato dai tempi teorici, in secondi x peso: e' il primo
         # criterio con `takt_fisso`, e senza vale None (non e' stato cercato).
+        # Si ricalcola dagli istanti con i tempi di trasporto ESATTI, non si
+        # legge dalle variabili: quelle vedono i trasporti arrotondati al tick,
+        # e il numero differirebbe di qualche centesimo da quello che scrivono
+        # il riepilogo e il file -- che partono dai tempi in vasca veri.
         "errore_pesato": (
-            sum(
-                peso_sotto * solver.Value(sotto) + peso_sopra * solver.Value(sopra)
-                for k, sotto, sopra in scarti
-                for peso_sotto, peso_sopra in [_pesi_scarto(data.route[k])]
+            errore_pesato(
+                data,
+                scarti_dal_teorico(
+                    data, [data.to_seconds(solver.Value(v)) for v in actual_time]
+                ),
             )
-            / (scale * SCALA_PESI)
             if data.takt_fisso
             else None
         ),
@@ -3061,14 +3065,20 @@ def scarti_dal_teorico(data: ProblemData, actual_time: list[float]) -> dict[int,
     return out
 
 
-def errore_pesato(data: ProblemData, actual_time: list[float]) -> float:
+def scarto_pesato(spec: StationSpec, scarto: float) -> float:
+    """Quanto pesa lo scarto di UNA tappa: il suo valore assoluto per il peso
+    del lato su cui cade."""
+    return -scarto * spec.peso_sotto if scarto < 0 else scarto * spec.peso_sopra
+
+
+def errore_pesato(data: ProblemData, scarti: dict[int, float]) -> float:
     """Lo scarto pesato dai tempi teorici di un ciclogramma, nella stessa
-    unita' di `Solution.raw["errore_pesato"]` (secondi x peso)."""
-    totale = 0.0
-    for k, scarto in scarti_dal_teorico(data, actual_time).items():
-        spec = data.route[k]
-        totale += (-scarto * spec.peso_sotto) if scarto < 0 else scarto * spec.peso_sopra
-    return totale
+    unita' di `Solution.raw["errore_pesato"]` (secondi x peso).
+
+    `scarti`: stazione -> scarto in secondi, come da `scarti_dal_teorico`. Si
+    passano gli scarti e non gli istanti perche' chi compone a mano ha in
+    mano i tempi in vasca, non gli istanti di prelievo."""
+    return sum(scarto_pesato(data.route[k], v) for k, v in scarti.items())
 
 
 # Le variabili che `riduci_soste` inchioda al valore della soluzione, per

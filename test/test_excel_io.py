@@ -1053,6 +1053,57 @@ def test_risultati_flusso_pezzo():
         shutil.rmtree(cartella, ignore_errors=True)
 
 
+def test_risultati_scarto_pesato():
+    print("\n[15-bis] scarto pesato dai teorici nel Riepilogo e in FlussoPezzo")
+    percorso, data, solution, report, wb = _risultati_su_file()
+    try:
+        ws = wb["FlussoPezzo"]
+        titoli = [ws.cell(1, c).value for c in range(1, ws.max_column + 1)]
+        col = {t: i + 1 for i, t in enumerate(titoli)}
+        check(
+            all(
+                t in col
+                for t in ("scarto [s]", "peso sotto", "peso sopra", "scarto pesato")
+            ),
+            "FlussoPezzo ha scarto, pesi e scarto pesato",
+        )
+        righe = [
+            r
+            for r in range(2, ws.max_row + 1)
+            if isinstance(ws.cell(r, 1).value, int)
+            and isinstance(ws.cell(r, col["scarto pesato"]).value, (int, float))
+        ]
+        somma = sum(ws.cell(r, col["scarto pesato"]).value for r in righe)
+        coerenti = all(
+            abs(
+                ws.cell(r, col["scarto [s]"]).value
+                - (
+                    ws.cell(r, col["permanenza [s]"]).value
+                    - ws.cell(r, col["teorico [s]"]).value
+                )
+            )
+            < 0.02
+            for r in righe
+        )
+        check(coerenti, "scarto = permanenza - teorico su ogni riga")
+        ws = wb["Riepilogo"]
+        valori = {
+            ws.cell(r, 1).value: ws.cell(r, 2).value for r in range(1, ws.max_row + 1)
+        }
+        check(
+            valori.get("Obiettivo del calcolo") == "takt time minimo",
+            "il Riepilogo dice l'obiettivo del calcolo",
+        )
+        totale = valori.get("Scarto pesato dai teorici")
+        check(
+            totale is not None and abs(totale - somma) < 0.05,
+            f"e lo scarto pesato totale ({totale}) e' la somma delle righe "
+            f"({somma:.2f})",
+        )
+    finally:
+        os.unlink(percorso)
+
+
 def test_risultati_verifica():
     print("\n[16] foglio Verifica: elenca i rilievi del verificatore")
     from verify import verify_solution
@@ -1847,6 +1898,7 @@ def main():
     test_risultati_utilizzo()
     test_risultati_movimenti()
     test_risultati_flusso_pezzo()
+    test_risultati_scarto_pesato()
     test_risultati_verifica()
     test_risultati_due_meta()
     test_tempi_verticali()
