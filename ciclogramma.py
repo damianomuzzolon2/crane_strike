@@ -29,7 +29,12 @@ import sys
 
 from avvio import righe_di_riepilogo, trova_avvio
 from excel_io import leggi_problema, scrivi_modello, scrivi_risultati
-from model import TEMPO_RIDUCI_SOSTE_S, riduci_soste, solve, solve_auto_hoists
+from model import (
+    TEMPO_RIDUCI_SOSTE_S,
+    rifinisci_soluzione,
+    solve,
+    solve_auto_hoists,
+)
 from verify import verify_solution
 
 
@@ -132,12 +137,20 @@ def main(argv=None) -> int:
         return 1
 
     data_finale = dataclasses.replace(data, zones=zones)
-    # le soste inutili rimaste se CP-SAT e' scaduto prima dell'ottimo
-    solution = riduci_soste(
+    # col takt libero, a takt trovato, i tempi in vasca piu' vicini ai
+    # teorici; poi le soste inutili rimaste se CP-SAT e' scaduto prima
+    # dell'ottimo
+    solution = rifinisci_soluzione(
         data_finale,
         solution,
-        time_limit_s=min(cfg.tempo_limite_s, TEMPO_RIDUCI_SOSTE_S),
+        time_limit_s=cfg.tempo_limite_s,
+        time_limit_soste_s=min(cfg.tempo_limite_s, TEMPO_RIDUCI_SOSTE_S),
     )
+    if solution.raw.get("errore_pesato_prima") is not None:
+        print(
+            f"  scarto pesato dai teorici: {solution.raw['errore_pesato_prima']:.2f}"
+            f" -> {solution.raw['errore_pesato']:.2f}"
+        )
     if solution.raw.get("soste_tolte"):
         print(f"  tolte {solution.raw['soste_tolte']} soste per strada che non servivano")
     print()

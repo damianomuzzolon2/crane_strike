@@ -1662,6 +1662,67 @@ def test_takt_fisso():
     )
 
 
+def test_rifinitura_tempi_in_vasca():
+    print("\n[25] takt libero: a takt trovato, i tempi in vasca vicini ai teorici")
+    import dataclasses
+
+    from model import rifinisci_soluzione
+
+    # La stessa linea di [23]: tre vasche da 40 s teorici, un carroponte. A
+    # takt libero il calcolo scende al minimo della banda e dei bagni non si
+    # cura: la rifinitura deve tenere QUEL takt e avvicinarli ai teorici.
+    d = linea(4, 1000, [HoistZone(0, 3)], takt_min=25.0, takt_max=35.0)
+    route = (
+        [d.route[0]]
+        + [
+            StationSpec.da_teorico(f"V{i}", 40, 30, 30, *pesi)
+            for i, pesi in enumerate([(1, 1), (10, 1), (1, 1)], start=1)
+        ]
+        + [d.route[-1]]
+    )
+    d = dataclasses.replace(d, route=route, takt_nominal=30.0)
+    sol, r = risolvi_e_verifica(d, "takt libero")
+    if r is None:
+        check(False, _esito(sol, r, "soluzione a takt libero"))
+        return
+    prima = errore_pesato(d, scarti_dal_teorico(d, sol.actual_time))
+    rif = rifinisci_soluzione(d, sol, time_limit_s=60.0)
+    dopo = errore_pesato(d, scarti_dal_teorico(d, rif.actual_time))
+    check(rif.T == sol.T, f"il takt time non cambia ({sol.T} -> {rif.T} s)")
+    check(
+        dopo <= prima + 1e-6 and abs(rif.raw["errore_pesato"] - dopo) < 1e-6,
+        f"lo scarto non peggiora mai, e raw lo riporta ({prima:.2f} -> {dopo:.2f})",
+    )
+    # E' l'ottimo a quel takt: lo stesso che si trova chiedendo il takt fisso.
+    fissa = solve(
+        dataclasses.replace(d, takt_fisso=True, takt_nominal=sol.T),
+        time_limit_s=60.0,
+    )
+    check(
+        fissa.status == "OPTIMAL"
+        and abs(dopo - fissa.raw["errore_pesato"]) < 0.05,
+        f"ed e' lo scarto minimo a quel takt ({dopo:.2f}, col takt fisso "
+        f"{fissa.raw.get('errore_pesato')})",
+    )
+    rv = verify_solution(d, rif)
+    check(rv.ok, "la soluzione rifinita supera la verifica indipendente")
+    check(rif.status == sol.status, "lo stato resta quello del calcolo del takt")
+    if rif is not sol and "errore_pesato_prima" in rif.raw:
+        check(
+            abs(rif.raw["errore_pesato_prima"] - prima) < 1e-6,
+            "e raw dice da che scarto si e' partiti",
+        )
+
+    # Col takt fisso lo scarto era gia' l'obiettivo: niente seconda passata.
+    df = dataclasses.replace(d, takt_fisso=True)
+    sf = solve(df, time_limit_s=60.0)
+    check(
+        rifinisci_soluzione(df, sf, time_limit_s=60.0).raw["errore_pesato"]
+        == sf.raw["errore_pesato"],
+        "col takt fisso la rifinitura non rifa' il calcolo",
+    )
+
+
 def test_takt_fisso_ricerca_zone():
     print("\n[24] takt time fisso: zone, pre-filtro e diagnosi")
     import dataclasses
@@ -1772,6 +1833,7 @@ def main():
     test_ferma_il_calcolo()
     test_takt_fisso()
     test_takt_fisso_ricerca_zone()
+    test_rifinitura_tempi_in_vasca()
     print("\n" + "=" * 72)
     print(f"RISULTATO: {_n_pass} ok, {_n_fail} falliti  ({time.perf_counter() - t0:.0f}s)")
     print("=" * 72)

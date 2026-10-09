@@ -2058,6 +2058,7 @@ def solve(
     allow_unsafe_layout: bool = False,
     interruzione: Optional[Interruzione] = None,
     _rifinisci: Optional[Solution] = None,
+    _suggerimento_per_nome=None,
 ) -> Solution:
     """allow_unsafe_layout: se True salta il controllo di geometria delle zone.
     Serve solo per studio/debug: le soluzioni prodotte possono contenere
@@ -2071,7 +2072,12 @@ def solve(
 
     _rifinisci: uso interno di `riduci_soste`, che e' da chiamare al suo posto.
     Si risolve lo STESSO modello col solo obiettivo di fare meno soste per
-    strada, tutto inchiodato alla soluzione data tranne i rientri a vuoto."""
+    strada, tutto inchiodato alla soluzione data tranne i rientri a vuoto.
+
+    _suggerimento_per_nome: uso interno di `rifinisci_soluzione`. Il
+    `raw["_suggerimento"]` di una soluzione trovata su un modello DIVERSO, da
+    passare a CP-SAT come punto di partenza abbinando le variabili per nome
+    (vedi `_suggerisci_per_nome`)."""
     if data.zones is None:
         raise ValueError(
             "data.zones e' None: specifica le zone esplicitamente oppure usa "
@@ -2890,6 +2896,8 @@ def solve(
         model.Minimize(primo * (data.n_moves + 1) + sum(sel_soste))
     else:
         model.Minimize(primo)
+    if _rifinisci is None and _suggerimento_per_nome is not None:
+        _suggerisci_per_nome(model, _suggerimento_per_nome)
 
     solver = cp_model.CpSolver()
     solver.parameters.max_time_in_seconds = time_limit_s
@@ -3027,6 +3035,7 @@ def solve(
         "_suggerimento": (
             _firma_modello(model),
             list(solver.ResponseProto().solution),
+            _nomi_variabili(model),
         ),
     }
     if interrotto:
@@ -3100,11 +3109,16 @@ _DECISE_FUORI_DAI_RIENTRI = frozenset(
 PARAMETRI_RIFINITURA: dict = dict(linearization_level=0)
 
 
+def _nomi_variabili(model) -> tuple[str, ...]:
+    """I nomi delle variabili del modello, nell'ordine degli indici."""
+    return tuple(v.name for v in model.Proto().variables)
+
+
 def _firma_modello(model) -> int:
     """Un'impronta delle variabili del modello, in ordine. Due modelli con la
     stessa impronta hanno le stesse variabili agli stessi indici, e una
     soluzione dell'uno si puo' passare all'altro come suggerimento."""
-    return hash(tuple(v.name for v in model.Proto().variables))
+    return hash(_nomi_variabili(model))
 
 
 def _suggerisci(model, suggerimento, fissa: bool = False) -> None:
@@ -3117,7 +3131,7 @@ def _suggerisci(model, suggerimento, fissa: bool = False) -> None:
     suggeriscono, si INCHIODANO (vedi `_DECISE_FUORI_DAI_RIENTRI`)."""
     if suggerimento is None:
         return
-    firma, valori = suggerimento
+    firma, valori = suggerimento[:2]
     if firma != _firma_modello(model) or len(valori) != len(
         model.Proto().variables
     ):
@@ -3128,6 +3142,26 @@ def _suggerisci(model, suggerimento, fissa: bool = False) -> None:
             model.Add(var == valore)
         else:
             model.AddHint(var, valore)
+
+
+def _suggerisci_per_nome(model, suggerimento) -> None:
+    """Come `_suggerisci`, ma da un modello DIVERSO: le variabili si abbinano
+    per nome invece che per posizione.
+
+    Serve a `rifinisci_soluzione`, che risolve la stessa linea col takt time
+    inchiodato e con lo scarto dai teorici come obiettivo: le variabili sono
+    quasi tutte le stesse e con lo stesso nome, ma ce ne sono di nuove (gli
+    scarti) e altre cambiano di numero (le traslazioni, che dipendono dal
+    takt). Quelle che non si ritrovano restano senza suggerimento, e CP-SAT le
+    completa: il suggerimento serve a partire da una soluzione buona, non deve
+    essere completo per funzionare."""
+    if suggerimento is None or len(suggerimento) < 3:
+        return
+    _firma, valori, nomi = suggerimento
+    per_nome = dict(zip(nomi, valori))
+    for i, nome in enumerate(_nomi_variabili(model)):
+        if nome in per_nome:
+            model.AddHint(model.GetIntVarFromProtoIndex(i), per_nome[nome])
 
 
 # Il tetto per la risoluzione di `riduci_soste`. Parte da una soluzione gia' in
@@ -3201,6 +3235,108 @@ def riduci_soste(
         soste_tolte=sol.raw["n_soste"] - nuova.raw["n_soste"],
         wall_time_soste=nuova.raw["wall_time"],
     )
+    return dataclasses.replace(nuova, status=sol.status, raw=raw)
+
+
+def rifinisci_soluzione(
+    data: ProblemData,
+    sol: Solution,
+    time_limit_s: float,
+    time_limit_soste_s: float = TEMPO_RIDUCI_SOSTE_S,
+    interruzione: Optional[Interruzione] = None,
+) -> Solution:
+    """Le passate che seguono il calcolo automatico, sulla soluzione scelta.
+
+    COL TAKT TIME LIBERO il calcolo ha cercato il takt piu' corto e basta: fra
+    i tanti giri che lo raggiungono ne ha preso uno qualunque, senza guardare
+    quanto i bagni si allontanano dai teorici. Qui si risolve di nuovo con il
+    takt INCHIODATO a quello trovato, sulle stesse zone, cercando lo scarto
+    pesato minimo dai tempi teorici -- lo stesso obiettivo di `takt_fisso`.
+    Sulle linee reali la differenza e' grossa: a parita' di takt, scarti da
+    100-200 s x peso scendono a una decina, o a zero.
+
+    Non si spegne, perche' non c'e' niente da perderci:
+      - il takt time non cambia: e' inchiodato;
+      - la soluzione di partenza e' valida anche per il nuovo modello, e gli si
+        passa come suggerimento, quindi una soluzione c'e' sempre;
+      - SI TIENE LA NUOVA SOLO SE LO SCARTO SCENDE. Altrimenti -- tempo scaduto,
+        modello che non si costruisce, calcolo fermato -- resta `sol`.
+    Costa una risoluzione in piu', con `time_limit_s` (il limite per tentativo
+    della ricerca): col takt fisso il modello e' piu' piccolo, e si chiude in
+    genere prima di una risoluzione a takt libero.
+
+    Poi, in tutti e due i casi, `riduci_soste` sulla soluzione che si tiene.
+    Col takt FISSO lo scarto e' gia' stato l'obiettivo del calcolo, e resta
+    solo quella.
+
+    `data` deve avere le zone della soluzione. Nella soluzione restituita
+    `raw["errore_pesato"]` e' sempre valorizzato, e se la passata ha
+    migliorato `raw["errore_pesato_prima"]` dice da dove si e' partiti."""
+    # Chi ha premuto Ferma ha rinunciato al resto del lavoro: la soluzione
+    # trovata fino a li' si restituisce cosi' com'e', senza altre passate.
+    if sol.raw.get("interrotto") or (
+        interruzione is not None and interruzione.richiesta
+    ):
+        return sol
+    if data.takt_fisso or sol.status not in ("OPTIMAL", "FEASIBLE"):
+        return riduci_soste(data, sol, time_limit_soste_s, interruzione)
+    errore_prima = errore_pesato(data, scarti_dal_teorico(data, sol.actual_time))
+    nuova = None
+    if "T_ticks" in sol.raw:
+        T = data.to_seconds(sol.raw["T_ticks"])
+        try:
+            # la banda si allarga se serve a contenere T: e' gia' dentro per
+            # costruzione, ma un estremo fuori dalla griglia dei tick potrebbe
+            # lasciarlo fuori di un soffio, e ProblemData lo rifiuterebbe
+            fissa = dataclasses.replace(
+                data,
+                takt_fisso=True,
+                takt_nominal=T,
+                takt_min=min(data.takt_min, T),
+                takt_max=max(data.takt_max, T),
+            )
+            nuova = solve(
+                fissa,
+                time_limit_s=time_limit_s,
+                interruzione=interruzione,
+                _suggerimento_per_nome=sol.raw.get("_suggerimento"),
+            )
+        except ValueError:
+            nuova = None
+    if (
+        nuova is None
+        or nuova.status not in ("OPTIMAL", "FEASIBLE")
+        or nuova.raw.get("interrotto")
+        or nuova.raw.get("T_ticks") != sol.raw.get("T_ticks")
+        or nuova.raw["errore_pesato"] >= errore_prima - 1e-6
+    ):
+        sol = riduci_soste(data, sol, time_limit_soste_s, interruzione)
+        return dataclasses.replace(
+            sol, raw={**sol.raw, "errore_pesato": errore_prima}
+        )
+    # Le soste si tolgono sul modello su cui la nuova e' stata trovata: quello
+    # col takt fisso, che e' anche l'unico su cui il suo suggerimento vale.
+    nuova = riduci_soste(fissa, nuova, time_limit_soste_s, interruzione)
+    # Lo stato resta quello del calcolo vero: dice se il TAKT e' dimostrato
+    # minimo, e questa passata non l'ha toccato. Del resto di `raw` si tiene
+    # quello che la ricerca aveva raccolto (zone, tentativi, numero di
+    # carroponti), aggiornando solo cio' che e' cambiato.
+    raw = dict(sol.raw)
+    raw.update(
+        # nella scala dell'obiettivo del calcolo a takt libero
+        objective=sol.raw["objective"]
+        - sol.raw.get("n_soste", 0)
+        + nuova.raw.get("n_soste", 0),
+        n_soste=nuova.raw.get("n_soste", 0),
+        n_separation_constraints=nuova.raw["n_separation_constraints"],
+        _suggerimento=nuova.raw["_suggerimento"],
+        errore_pesato=nuova.raw["errore_pesato"],
+        errore_pesato_prima=errore_prima,
+        wall_time_tempi=nuova.raw["wall_time"],
+    )
+    for chiave in ("soste_tolte", "wall_time_soste"):
+        if chiave in nuova.raw:
+            raw[chiave] = nuova.raw[chiave]
     return dataclasses.replace(nuova, status=sol.status, raw=raw)
 
 

@@ -46,7 +46,7 @@ from model import (
     Interruzione,
     diagnosi_zone,
     errore_pesato,
-    riduci_soste,
+    rifinisci_soluzione,
     solve,
     solve_auto_hoists,
     solve_auto_zones,
@@ -783,7 +783,8 @@ class Applicazione(tk.Tk):
                 "Obiettivo: takt time FISSO al teorico, tempi in vasca il "
                 "piu' vicino possibile ai teorici (pesi del foglio Percorso)\n"
                 if d.takt_fisso
-                else "Obiettivo: takt time piu' corto nella banda ammessa\n"
+                else "Obiettivo: takt time piu' corto nella banda ammessa, "
+                "poi, a quel takt, i tempi in vasca piu' vicini ai teorici\n"
             )
             + f"Vasche: {', '.join(d.tanks)}\n\n"
             + (
@@ -937,15 +938,21 @@ class Applicazione(tk.Tk):
             self._diagnostica(d, sol)
             return ("nessuna", sol, None, None)
         dati = dataclasses.replace(d, zones=zone)
-        # Una sola risoluzione in piu', sulla soluzione scelta, per togliere
-        # le soste inutili rimaste se CP-SAT e' scaduto prima dell'ottimo.
-        # Se non ci riesce, la soluzione resta quella di prima.
-        if sol.status == "FEASIBLE" and sol.raw.get("n_soste"):
+        # Le passate sulla soluzione scelta: col takt libero, a takt trovato,
+        # i tempi in vasca piu' vicini ai teorici; poi, se CP-SAT e' scaduto
+        # prima dell'ottimo, via le soste inutili. Se non ci riescono, la
+        # soluzione resta quella di prima.
+        if not d.takt_fisso:
+            self._coda.put(
+                ("stato", "Avvicino i tempi in vasca ai teorici, a takt trovato...")
+            )
+        elif sol.status == "FEASIBLE" and sol.raw.get("n_soste"):
             self._coda.put(("stato", "Tolgo le soste per strada che non servono..."))
-        sol = riduci_soste(
+        sol = rifinisci_soluzione(
             dati,
             sol,
-            time_limit_s=min(cfg.tempo_limite_s, TEMPO_RIDUCI_SOSTE_S),
+            time_limit_s=cfg.tempo_limite_s,
+            time_limit_soste_s=min(cfg.tempo_limite_s, TEMPO_RIDUCI_SOSTE_S),
             interruzione=interruzione,
         )
         return ("ok", sol, dati, verify_solution(dati, sol))
@@ -2451,6 +2458,8 @@ class Applicazione(tk.Tk):
             + (
                 "  (e' cio' che Calcola auto rende minimo)"
                 if self.dati.takt_fisso
+                else "  (minimo a parita' di takt)"
+                if self.origine.startswith("calcolo") and not self.modificato
                 else ""
             ),
             f"Carroponti:     {self.n_carroponti}",

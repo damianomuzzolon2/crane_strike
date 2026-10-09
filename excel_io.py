@@ -276,10 +276,11 @@ _PARAMETRI = {
         "-",
         False,
         0,
-        "0 = cerca il takt time PIU' PICCOLO nella banda dei due delta. "
-        "1 = takt time FISSO al teorico, e si cercano i tempi in vasca piu' "
-        "vicini ai teorici, pesando gli scarti con le colonne peso_sotto e "
-        "peso_sopra del foglio Percorso",
+        "0 = cerca il takt time PIU' PICCOLO nella banda dei due delta, e "
+        "poi, a quel takt, i tempi in vasca piu' vicini ai teorici. "
+        "1 = takt time FISSO al teorico, e si cercano solo i tempi in vasca "
+        "piu' vicini ai teorici. In tutti e due i casi gli scarti si pesano "
+        "con le colonne peso_sotto e peso_sopra del foglio Percorso",
     ),
 }
 
@@ -1335,9 +1336,9 @@ def _righe_esempio():
     # vasca, tempo teorico, delta negativo, delta positivo: le soglie sono
     # teorico-delta_negativo e teorico+delta_positivo
     percorso = [
-        # i pesi contano solo con takt_fisso = 1: qui la zincatura, il bagno
-        # che fa il prodotto, pesa piu' dei risciacqui, e stare sotto il
-        # teorico pesa piu' che starci sopra
+        # i pesi dello scarto dal teorico: qui la zincatura, il bagno che fa
+        # il prodotto, pesa piu' dei risciacqui, e stare sotto il teorico pesa
+        # piu' che starci sopra
         ("CARICO", 0, 0, 0, 1, 1),
         ("SGRASSO", 75, 15, 15, 2, 1),
         ("RISCIACQUO_1", 30, 10, 10, 1, 1),
@@ -1686,8 +1687,8 @@ def _aggiungi_fogli_linea(
         ),
         ("gli stessi posti, e il calcolo ne tiene conto.", None),
         (
-            "  peso_sotto    (facoltativi, vuoto = 1) contano solo con takt_fisso "
-            "= 1 nel foglio Parametri:",
+            "  peso_sotto    (facoltativi, vuoto = 1) dopo il takt time, il "
+            "calcolo cerca i tempi in vasca piu' vicini ai teorici:",
             None,
         ),
         (
@@ -2552,13 +2553,16 @@ def scrivi_risultati(
     voce("Numero di carroponti", len(data.zones))
     voce(
         "Obiettivo del calcolo",
-        "scarto minimo dai teorici" if data.takt_fisso else "takt time minimo",
+        "scarto minimo dai teorici"
+        if data.takt_fisso
+        else "takt time minimo, poi scarto minimo",
         "takt time fisso al teorico, pesi nel foglio Percorso"
         if data.takt_fisso
-        else "nella banda teorico - delta / teorico + delta",
+        else "takt nella banda teorico -/+ delta; a quel takt, lo scarto "
+        "minimo dai teorici con i pesi del foglio Percorso",
     )
-    # Si scrive sempre, non solo col takt fisso: col takt libero non e' quello
-    # che si e' ottimizzato, ma serve a confrontare le due soluzioni.
+    # Si scrive sempre: con tutti e due gli obiettivi lo scarto e' stato reso
+    # minimo -- col takt libero a parita' di takt -- e serve a confrontare.
     if solution.actual_time:
         voce(
             "Scarto pesato dai teorici",
@@ -2938,8 +2942,9 @@ def scrivi_risultati(
             "Lo scarto e' la permanenza meno il teorico: negativo sotto, positivo "
             "sopra. Lo scarto pesato e' il suo valore assoluto per il peso del "
             "lato su cui cade (colonne peso_sotto e peso_sopra del foglio "
-            "Percorso): e' la grandezza che il calcolo rende minima quando il "
-            "takt time e' fisso, e la somma sta nel Riepilogo."
+            "Percorso): e' la grandezza che il calcolo rende minima -- col "
+            "takt time libero, a parita' di takt -- e la somma sta nel "
+            "Riepilogo."
         ]
     )
     ws.cell(ws.max_row, 1).font = Font(italic=True, color="808080")

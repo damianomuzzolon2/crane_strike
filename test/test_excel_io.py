@@ -1091,7 +1091,8 @@ def test_risultati_scarto_pesato():
             ws.cell(r, 1).value: ws.cell(r, 2).value for r in range(1, ws.max_row + 1)
         }
         check(
-            valori.get("Obiettivo del calcolo") == "takt time minimo",
+            valori.get("Obiettivo del calcolo")
+            == "takt time minimo, poi scarto minimo",
             "il Riepilogo dice l'obiettivo del calcolo",
         )
         totale = valori.get("Scarto pesato dai teorici")
