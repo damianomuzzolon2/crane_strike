@@ -18,13 +18,10 @@ In radice ci sono **solo i dieci moduli** del programma, i due documenti,
 `CraneStrike.bat` e `requirements.txt`. Il resto sta in `test/`, `strumenti/`,
 `doc/`, `dati/` e `risorse/`.
 
-`risorse/` contiene l'icona in due formati, **ricavati** da `doc/icon.png` con
-`python strumenti/genera_icona.py` (che rende trasparente il bianco esterno):
-`icona.png` per Tk, `icona.ico` con le misure piccole per Windows e per il file
-`.exe`. Le misure fino a 48 px nel `.ico` non sono rimpicciolite ma
-**ridisegnate** con i bordi sui pixel: ridotti, i tratti rossi da mezzo pixel
-diventavano una macchia e l'icona nel titolo sembrava sfocata. Le quote del
-disegno sono scritte nel generatore, e vanno rimisurate se `doc/icon.png` cambia. `interfaccia._applica_icona` la cerca accanto al modulo o, impacchettata,
+`risorse/` contiene l'icona in due formati: `icona.png`, l'originale con gli
+angoli trasparenti, per Tk, e `icona.ico` per Windows e per il file `.exe`,
+ricavato dal PNG con le misure da 16 a 256 px. Se l'icona cambia, l'ICO va
+rigenerato dal PNG nuovo (con Pillow: tutte le misure in un solo file). `interfaccia._applica_icona` la cerca accanto al modulo o, impacchettata,
 in `sys._MEIPASS`; per questo il `.spec` la dichiara in `datas`. Sulla finestra
 se ne imposta **uno solo dei due** (l'ICO su Windows): impostarli entrambi,
 misurato, toglie a Windows l'icona piccola e nel titolo compare quella
