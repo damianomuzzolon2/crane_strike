@@ -851,13 +851,16 @@ class Applicazione(tk.Tk):
         totale: int,
         n_valide: int,
         best_T: Optional[float],
+        best_errore: Optional[float] = None,
     ):
         """Chiamata dal solutore PRIMA di ogni tentativo, dal thread di lavoro.
 
         Non tocca widget: mette il messaggio nella coda, che e' l'unico modo
         sicuro di parlare con la finestra da un altro thread. Chi lo legge e'
         _controlla_coda."""
-        self._coda.put(("progresso", (n_hoists, indice, totale, n_valide, best_T)))
+        self._coda.put(
+            ("progresso", (n_hoists, indice, totale, n_valide, best_T, best_errore))
+        )
 
     def _risolvi(self, cfg, interruzione: Interruzione):
         """Gira nel thread di lavoro: niente widget qui dentro."""
@@ -1133,6 +1136,7 @@ class Applicazione(tk.Tk):
         totale: int,
         n_valide: int,
         best_T: Optional[float],
+        best_errore: Optional[float] = None,
     ):
         """A che punto e' la ricerca, quanto manca, e cosa c'e' gia' in mano.
 
@@ -1173,7 +1177,9 @@ class Applicazione(tk.Tk):
         cui si sta facendo tutto questo. Sapere che ci sono tre soluzioni dice
         che fermarsi e' sicuro; sapere che la migliore sta a 118 s dice se vale
         la pena aspettarne una quarta. Chi ha in mente il valore che gli serve
-        riconosce da solo quando puo' smettere."""
+        riconosce da solo quando puo' smettere. Con il takt time FISSO il takt
+        e' lo stesso per tutte, e il numero che dice quanto e' buona la
+        migliore e' il suo scarto pesato dai tempi teorici."""
         if self.avanzamento.cget("mode") != "determinate":
             self.avanzamento.stop()
             self.avanzamento.configure(mode="determinate", maximum=totale)
@@ -1205,6 +1211,15 @@ class Applicazione(tk.Tk):
             # errore in mezzo a un calcolo lungo, e non vale il rischio.
             if best_T is None:
                 testo += f" - {n_valide} gia' trovate: fermando ora resta la migliore"
+            elif best_errore is not None:
+                quante = (
+                    "1 soluzione trovata, scarto pesato"
+                    if n_valide == 1
+                    else f"{n_valide} soluzioni trovate, migliore scarto pesato"
+                )
+                testo += (
+                    f" - {quante} = {best_errore:.2f}: fermando ora resta quella"
+                )
             else:
                 testo += (
                     f" - {quante} = {best_T:.2f} s: fermando ora resta quella"

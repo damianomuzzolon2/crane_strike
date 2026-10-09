@@ -33,6 +33,7 @@ from typing import Optional
 from avvio import Avvio, righe_di_riepilogo, trova_avvio
 from kinematics import Kinematics
 from model import (
+    SCALA_PESI,
     HoistZone,
     ProblemData,
     SostaIntermedia,
@@ -827,6 +828,18 @@ def _peso_scarto(valore, cella: str, nome: str, errori: _Errori) -> Optional[flo
             cella,
             f"{nome} ({peso}) negativo: i pesi vanno da 0 (scarto "
             f"indifferente) in su",
+        )
+        return None
+    # Il solutore lavora con pesi interi, a due decimali (model.SCALA_PESI):
+    # un peso positivo che arrotondato fa zero diventerebbe "indifferente"
+    # senza che nessuno l'abbia chiesto.
+    if peso is not None and 0 < peso < 0.5 / SCALA_PESI:
+        errori.aggiungi(
+            FOGLIO_PERCORSO,
+            cella,
+            f"{nome} ({peso}) troppo piccolo: i pesi si considerano con due "
+            f"decimali, e questo varrebbe 0. Conta solo il rapporto fra i "
+            f"pesi: per farlo contare poco rispetto agli altri, alza quelli",
         )
         return None
     return peso

@@ -579,7 +579,7 @@ def test_tentativi_previsti():
         data,
         max_hoists=3,
         time_limit_per_candidate=15.0,
-        su_tentativo=lambda h, i, t, v, bt: visti.append((h, i, t, v, bt)),
+        su_tentativo=lambda h, i, t, v, bt, be: visti.append((h, i, t, v, bt)),
     )
     fatti: dict[int, int] = {}
     for h, _i, _t, _v, _bt in visti:
@@ -1567,7 +1567,7 @@ def test_ferma_il_calcolo():
     piccola = linea(4, 2500, None, takt_max=120.0)
     fermata = Interruzione()
 
-    def al_secondo(n_h, indice, totale, n_valide, best_T):
+    def al_secondo(n_h, indice, totale, n_valide, best_T, best_errore):
         tentativi_zone.append(indice)
         if indice == 2:
             fermata.ferma()
@@ -1662,6 +1662,87 @@ def test_takt_fisso():
     )
 
 
+def test_takt_fisso_ricerca_zone():
+    print("\n[24] takt time fisso: zone, pre-filtro e diagnosi")
+    import dataclasses
+
+    from model import diagnosi_zone, solve_auto_zones, tentativi_previsti
+
+    # Cinque mosse, due carroponti: a 25 s le quattro suddivisioni sono tutte
+    # fattibili, con scarti diversi. La migliore NON e' la prima provata:
+    # tenere la prima che riesce -- che col takt fisso hanno tutte lo stesso
+    # T -- darebbe un risultato a caso.
+    def dati(T, **kw):
+        d = linea(5, 2000, None, takt_min=T - 10, takt_max=T + 10, **kw)
+        route = (
+            [d.route[0]]
+            + [
+                StationSpec.da_teorico(f"V{i}", 40, 30, 30, 1 + i, 1)
+                for i in range(1, 5)
+            ]
+            + [d.route[-1]]
+        )
+        return dataclasses.replace(
+            d, route=route, takt_nominal=float(T), takt_fisso=True
+        )
+
+    d = dati(25)
+    visti = []
+    sol, zone = solve_auto_zones(
+        d,
+        2,
+        time_limit_per_candidate=30.0,
+        su_tentativo=lambda h, i, t, v, bt, be: visti.append(be),
+    )
+    singole = []
+    for z in (
+        [HoistZone(0, 0), HoistZone(1, 4)],
+        [HoistZone(0, 1), HoistZone(2, 4)],
+        [HoistZone(0, 2), HoistZone(3, 4)],
+        [HoistZone(0, 3), HoistZone(4, 4)],
+    ):
+        s = solve(dataclasses.replace(d, zones=z), time_limit_s=30.0)
+        if s.status in ("OPTIMAL", "FEASIBLE"):
+            singole.append(s.raw["errore_pesato"])
+    check(
+        zone is not None
+        and sol.T == 25.0
+        and abs(sol.raw["errore_pesato"] - min(singole)) < 0.01,
+        f"si tiene la suddivisione con lo scarto minore "
+        f"({sol.raw.get('errore_pesato')} fra {singole})",
+    )
+    check(
+        visti[0] is None and all(v is not None for v in visti[1:]),
+        "l'avanzamento riporta lo scarto della migliore trovata finora",
+    )
+
+    # Il pre-filtro deve usare il takt in cui si CERCA: un carroponte solo,
+    # col teorico appena sotto il carico della zona e la banda sopra.
+    d1 = dati(25)
+    carico = sum(d1.loaded_leg_seconds(k) for k in range(d1.n_moves))
+    d1 = dataclasses.replace(
+        d1, takt_min=carico - 20, takt_max=carico + 20, takt_nominal=carico - 1
+    )
+    check(
+        tentativi_previsti(d1, 1) == 0
+        and tentativi_previsti(dataclasses.replace(d1, takt_fisso=False), 1) == 1,
+        "pre-filtro: col takt fisso conta il teorico, non la banda",
+    )
+
+    # E la diagnosi deve dire che e' il takt FISSO a essere troppo corto,
+    # senza suggerire di allargare i delta del takt, che qui non contano.
+    righe = diagnosi_zone(
+        d1, [HoistZone(0, d1.n_moves - 1)], time_limit_s=30.0,
+        dettaglio_vasche=False,
+    )
+    testo = " ".join(righe)
+    check(
+        "TAKT TIME FISSO E' TROPPO CORTO" in testo
+        and "takt_delta_positivo_s" not in testo,
+        f"diagnosi: '{testo[:70]}...'",
+    )
+
+
 def main():
     print("=" * 72)
     print("TEST END-TO-END DEL MODELLO (richiede OR-Tools)")
@@ -1690,6 +1771,7 @@ def main():
     test_frecce_delle_corse_verticali()
     test_ferma_il_calcolo()
     test_takt_fisso()
+    test_takt_fisso_ricerca_zone()
     print("\n" + "=" * 72)
     print(f"RISULTATO: {_n_pass} ok, {_n_fail} falliti  ({time.perf_counter() - t0:.0f}s)")
     print("=" * 72)

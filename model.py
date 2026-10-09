@@ -3569,8 +3569,8 @@ def proposta_semplice(
     if T is None:
         # dentro la banda dichiarata se ci sta; altrimenti il minimo possibile,
         # e sara' il verificatore a segnalare che il takt time non e' rispettato
-        T = min(max(ciclo_minimo, d.takt_min), d.takt_max)
-        if ciclo_minimo > d.takt_max:
+        T = min(max(ciclo_minimo, d.takt_min_ricerca), d.takt_max_ricerca)
+        if ciclo_minimo > d.takt_max_ricerca:
             T = ciclo_minimo
     return build_solution(d, T, local_pick, status="PROPOSTA"), d
 
@@ -4061,9 +4061,10 @@ def _scarto_prefiltro(
     """
     # 1) una zona il cui solo trasporto-a-carico (senza nemmeno contare i
     # trasferimenti a vuoto) supera gia' il takt time massimo e' certamente
-    # infattibile, qualunque sia l'ordine di visita.
+    # infattibile, qualunque sia l'ordine di visita. Il massimo e' quello in
+    # cui si CERCA: con il takt fisso e' il teorico, non la banda dichiarata.
     for z in zones:
-        if sum(carichi[k] for k in range(z.lo, z.hi + 1)) > data.takt_max:
+        if sum(carichi[k] for k in range(z.lo, z.hi + 1)) > data.takt_max_ricerca:
             return ("carico", f"la zona [{z.lo}-{z.hi}] non ci sta nel takt time")
     # 2) geometria patologica (vasche non ordinate lungo la rotaia, zone che si
     # scavalcano). Scartarla qui, invece di lasciar fallire solve(), fa si' che
@@ -4096,6 +4097,16 @@ def tentativi_previsti(data: ProblemData, n_hoists: int) -> int:
     )
 
 
+def _chiave_migliore(sol: Solution) -> tuple:
+    """Su cosa si confrontano due soluzioni fattibili: piu' piccola e' meglio.
+
+    Col takt time libero conta il takt time. Con il takt FISSO il takt e' lo
+    stesso per tutte, e conta lo scarto pesato dai tempi teorici; il takt
+    resta in coda solo per completezza."""
+    errore = sol.raw.get("errore_pesato")
+    return (sol.T,) if errore is None else (errore, sol.T)
+
+
 def solve_auto_zones(
     data: ProblemData,
     n_hoists: int,
@@ -4108,17 +4119,21 @@ def solve_auto_zones(
     """Prova automaticamente tutte le suddivisioni contigue delle mosse in
     `n_hoists` zone (una per carroponte) e restituisce la soluzione con il
     takt time minore fra quelle trovate fattibili, insieme alle zone che
-    l'hanno generata.
+    l'hanno generata. Con `data.takt_fisso` il takt e' lo stesso per tutte, e
+    si tiene invece quella con lo scarto pesato minore dai tempi teorici
+    (vedi `_chiave_migliore`).
 
     `data.zones` puo' essere None (verra' ignorato/sovrascritto per ogni
     tentativo). Restituisce (Solution, zones) -- se nessuna suddivisione e'
     fattibile, Solution.status sara' "INFEASIBLE" e zones sara' None.
 
-    `su_tentativo(n_hoists, indice, totale, n_valide, best_T)` viene chiamata
-    PRIMA di ogni risoluzione, con l'indice contato da 1 e il totale gia' al
-    netto dei prefiltri. `n_valide` e' quante suddivisioni fattibili si sono
-    trovate fino a quel momento e `best_T` il takt time della migliore (None
-    se non se n'e' trovata ancora nessuna): insieme dicono cosa si avrebbe in
+    `su_tentativo(n_hoists, indice, totale, n_valide, best_T, best_errore)`
+    viene chiamata PRIMA di ogni risoluzione, con l'indice contato da 1 e il
+    totale gia' al netto dei prefiltri. `n_valide` e' quante suddivisioni
+    fattibili si sono trovate fino a quel momento, `best_T` il takt time della
+    migliore e `best_errore` il suo scarto pesato dai teorici (None se non se
+    n'e' trovata ancora nessuna, e `best_errore` None anche col takt time
+    libero, dove non si calcola): insieme dicono cosa si avrebbe in
     mano fermando adesso, quante soluzioni e quanto buona la migliore. Serve a
     chi mostra un avanzamento; gira nel thread del chiamante, quindi non deve
     toccare widget.
@@ -4219,6 +4234,9 @@ def solve_auto_zones(
                 len(da_provare),
                 n_valide,
                 None if best_solution is None else best_solution.T,
+                None
+                if best_solution is None
+                else best_solution.raw.get("errore_pesato"),
             )
         candidate_data = dataclasses.replace(data, zones=zones)
         n_tried += 1
@@ -4231,10 +4249,14 @@ def solve_auto_zones(
         if log_progress:
             zone_str = ", ".join(f"[{z.lo}-{z.hi}]" for z in zones)
             info = f"T={sol.T:.2f}s" if sol.T is not None else sol.status
+            if sol.raw.get("errore_pesato") is not None:
+                info += f", scarto pesato {sol.raw['errore_pesato']:.2f}"
             print(f"  zone {zone_str}: {info}")
         if sol.status in ("OPTIMAL", "FEASIBLE") and sol.T is not None:
             n_valide += 1
-            if best_solution is None or sol.T < best_solution.T:
+            if best_solution is None or _chiave_migliore(sol) < _chiave_migliore(
+                best_solution
+            ):
                 best_solution = sol
                 best_zones = zones
 
@@ -4348,6 +4370,22 @@ def diagnosi_zone(
     incerti: list[str] = []
     intermedie = list(range(1, data.n_stations - 1))
 
+    # Con il takt FISSO la banda che conta e' il solo teorico, e le prove qui
+    # sotto devono partire da li'. Si diagnostica la stessa linea a takt
+    # libero in [teorico, teorico]: per la fattibilita' e' identica -- cambia
+    # solo l'obiettivo, che qui non interessa -- e le prove che spostano il
+    # takt non devono portarsi dietro l'inchiodatura al teorico.
+    fisso = data.takt_fisso
+    if fisso:
+        nominale = data.takt_nominale
+        data = dataclasses.replace(
+            data,
+            takt_min=nominale,
+            takt_max=nominale,
+            takt_nominal=nominale,
+            takt_fisso=False,
+        )
+
     # -- 0) c'e' davvero qualcosa da diagnosticare? ------------------------
     #
     # Ogni prova qui sotto rilassa un vincolo e guarda se la linea passa. Su
@@ -4391,6 +4429,19 @@ def diagnosi_zone(
             # intervallo e' l'unica forma onesta -- annunciare `t` come "il
             # minimo" farebbe alzare il takt time dichiarato piu' del
             # necessario.
+            if fisso:
+                fuori.append(
+                    f"IL TAKT TIME FISSO E' TROPPO CORTO: con un ciclo di "
+                    f"{t:.0f} s queste zone funzionano, mentre il takt "
+                    f"richiesto e' {data.takt_max:.0f} s. Il minimo che basta "
+                    f"sta fra {precedente:.0f} e {t:.0f} s, cioe' servono da "
+                    f"{max(0.0, precedente - data.takt_max):.0f} a "
+                    f"{t - data.takt_max:.0f} s in piu'. Alza takt_teorico_s, "
+                    f"oppure aggiungi un carroponte per accorciare i giri. "
+                    f"Per sapere quale takt time si riesce davvero a "
+                    f"raggiungere, rilancia con takt_fisso = 0."
+                )
+                return fuori
             fuori.append(
                 f"IL TAKT TIME E' TROPPO STRETTO: con un ciclo di {t:.0f} s "
                 f"queste zone funzionano, mentre il massimo dichiarato e' "
@@ -4419,6 +4470,15 @@ def diagnosi_zone(
         ),
         zones, time_limit_s,
     )
+    if esito == "si" and fisso:
+        fuori.append(
+            f"IL TAKT TIME FISSO E' TROPPO LUNGO: con un ciclo di {t:.0f} s -- "
+            f"piu' corto dei {data.takt_min:.0f} s richiesti -- la linea si "
+            f"risolve. Un ciclo lungo tiene i pezzi in vasca oltre il tempo "
+            f"massimo di processo: abbassa takt_teorico_s, oppure allarga il "
+            f"delta positivo delle vasche."
+        )
+        return fuori
     if esito == "si":
         fuori.append(
             f"IL TAKT TIME MINIMO E' TROPPO ALTO: con un ciclo di {t:.0f} s -- "
@@ -4597,6 +4657,12 @@ def _vasche_che_bloccano(
 # ricerca del numero minimo di carroponti e' un semplice sweep crescente
 # N=1,2,3,... che si ferma al primo N per cui `solve_auto_zones` trova una
 # suddivisione in zone fattibile entro la tolleranza di takt time data.
+#
+# Con il takt FISSO la logica resta la stessa: si cerca prima il numero minimo
+# di carroponti che regge quel takt, e solo con quel numero lo scarto minimo
+# dai tempi teorici. Un carroponte in piu' potrebbe avvicinare i bagni ai
+# teorici, ma costa una macchina: e' una scelta da fare guardando i numeri,
+# alzando `min_hoists`, non qualcosa da decidere in automatico.
 
 
 def solve_auto_hoists(
@@ -4620,8 +4686,8 @@ def solve_auto_hoists(
     "INFEASIBLE" e zones/n_hoists saranno None -- in tal caso prova ad
     aumentare max_hoists o la tolleranza sul takt time.
 
-    `su_tentativo(n_hoists, indice, totale, n_valide, best_T)` viene passata a
-    solve_auto_zones: vedi li'. Il totale, il conteggio delle soluzioni e il
+    `su_tentativo(n_hoists, indice, totale, n_valide, best_T, best_errore)`
+    viene passata a solve_auto_zones: vedi li'. Il totale, il conteggio delle soluzioni e il
     miglior takt time riguardano il numero di carroponti in corso, non
     l'intera ricerca --
     quanti carroponti serviranno non si sa finche' non si trova. Non si perde
@@ -4672,6 +4738,7 @@ def solve_auto_hoists(
             "n_hoists": n_hoists,
             "status": sol.status,
             "T": sol.T,
+            "errore_pesato": sol.raw.get("errore_pesato"),
             # quante suddivisioni sono state davvero risolte e con che esito,
             # piu' una su cui indagare se non si trova niente: e' cio' che
             # permette di spiegare un fallimento invece di annunciarlo

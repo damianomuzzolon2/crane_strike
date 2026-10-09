@@ -1777,6 +1777,8 @@ def test_takt_fisso_e_pesi():
     for cella, valore_scritto, atteso in (
         ("F5", -2, "F5"),
         ("G4", "tanto", "G4"),
+        # positivo, ma a due decimali farebbe 0: diventerebbe "indifferente"
+        ("F4", 0.001, "F4"),
     ):
         p = modello_temporaneo()
         try:
