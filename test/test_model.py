@@ -29,7 +29,9 @@ from model import (
     StationSpec,
     Tank,
     build_solution,
+    errore_pesato,
     estrai_gradi_di_liberta,
+    scarti_dal_teorico,
     solve,
     solve_auto_hoists,
 )
@@ -1587,6 +1589,79 @@ def test_ferma_il_calcolo():
     )
 
 
+def test_takt_fisso():
+    print("\n[23] takt time fisso: si minimizza lo scarto pesato dai teorici")
+    import dataclasses
+
+    # Un carroponte solo, tre vasche da 40 s teorici con 30 s di tolleranza
+    # per parte. A 30 s di ciclo il giro non sta dentro senza spostare almeno
+    # un bagno: con pesi tutti uguali conviene accorciare di ~3 s la vasca di
+    # mezzo, che e' lo scarto piu' piccolo possibile.
+    def con_pesi(pesi):
+        d = linea(4, 1000, [HoistZone(0, 3)], takt_min=25.0, takt_max=35.0)
+        route = (
+            [d.route[0]]
+            + [
+                StationSpec.da_teorico(f"V{i}", 40, 30, 30, *pesi[i - 1])
+                for i in range(1, 4)
+            ]
+            + [d.route[-1]]
+        )
+        return dataclasses.replace(
+            d, route=route, takt_nominal=30.0, takt_fisso=True
+        )
+
+    def risolvi(pesi, etichetta):
+        d = con_pesi(pesi)
+        sol, r = risolvi_e_verifica(d, etichetta)
+        if r is None:
+            return d, sol, None
+        return d, sol, scarti_dal_teorico(d, sol.actual_time)
+
+    d, sol, sc = risolvi([(1, 1)] * 3, "pesi uguali")
+    check(sc is not None, _esito(sol, sc, "soluzione trovata"))
+    if sc is None:
+        return
+    check(sol.T == 30.0, f"il takt time resta il teorico ({sol.T} s)")
+    check(
+        sol.raw["errore_pesato"] > 0 and sc[2] < 0 and abs(sc[1]) + abs(sc[3]) < 0.05,
+        f"pesi uguali: si accorcia solo la vasca di mezzo "
+        f"({ {k: round(v, 2) for k, v in sc.items()} })",
+    )
+    check(
+        abs(errore_pesato(d, sol.actual_time) - sol.raw["errore_pesato"]) < 0.1,
+        f"lo scarto ricalcolato dagli istanti ({errore_pesato(d, sol.actual_time):.2f})"
+        f" torna con quello del solutore ({sol.raw['errore_pesato']:.2f})",
+    )
+    sotto_uguali = -sc[2]
+
+    # Stare sotto costa dieci volte tanto: la vasca di mezzo si allunga
+    # invece di accorciarsi, anche se lo scarto in secondi cresce.
+    d, sol, sc = risolvi([(1, 1), (10, 1), (1, 1)], "peso sotto alto")
+    check(
+        sc is not None and sc[2] > sotto_uguali and abs(sc[1]) + abs(sc[3]) < 0.05,
+        "peso sotto alto: la vasca di mezzo sta SOPRA il teorico"
+        + ("" if sc is None else f" ({sc[2]:+.2f} s)"),
+    )
+
+    # Peso alto da tutti e due i lati: la vasca di mezzo resta sul teorico e
+    # lo scarto finisce sulle altre.
+    d, sol, sc = risolvi([(1, 1), (10, 10), (1, 1)], "peso alto su V2")
+    check(
+        sc is not None and abs(sc[2]) < 0.05 and abs(sc[1]) + abs(sc[3]) > 0,
+        "peso alto su V2: V2 sul teorico, lo scarto va alle altre"
+        + ("" if sc is None else f" ({ {k: round(v, 2) for k, v in sc.items()} })"),
+    )
+
+    # Senza takt_fisso lo stesso problema cerca il takt minimo, come sempre.
+    d = dataclasses.replace(con_pesi([(1, 1)] * 3), takt_fisso=False)
+    sol, r = risolvi_e_verifica(d, "takt libero")
+    check(
+        r is not None and sol.T < 30.0 and sol.raw["errore_pesato"] is None,
+        _esito(sol, r, f"takt libero: si scende sotto il teorico ({sol.T} s)"),
+    )
+
+
 def main():
     print("=" * 72)
     print("TEST END-TO-END DEL MODELLO (richiede OR-Tools)")
@@ -1614,6 +1689,7 @@ def main():
     test_pezzo_in_vasca()
     test_frecce_delle_corse_verticali()
     test_ferma_il_calcolo()
+    test_takt_fisso()
     print("\n" + "=" * 72)
     print(f"RISULTATO: {_n_pass} ok, {_n_fail} falliti  ({time.perf_counter() - t0:.0f}s)")
     print("=" * 72)

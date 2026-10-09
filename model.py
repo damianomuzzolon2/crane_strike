@@ -776,12 +776,12 @@ class ProblemData:
             spec = self.route[s_idx]
             cap = self.tank_capacity(s_idx)
             occ_min = self.slot_occupancy_seconds(s_idx, spec.dwell_min)
-            if occ_min > cap * self.takt_max:
+            if occ_min > cap * self.takt_max_ricerca:
                 raise ValueError(
                     f"vasca '{spec.tank_id}' (stazione {s_idx}): un pezzo occupa "
                     f"un posto per almeno {occ_min:.1f}s, ma con capacity="
-                    f"{cap} e takt_max={self.takt_max:.1f}s il limite "
-                    f"e' {cap * self.takt_max:.1f}s. Aumenta la capacity della "
+                    f"{cap} e takt_max={self.takt_max_ricerca:.1f}s il limite "
+                    f"e' {cap * self.takt_max_ricerca:.1f}s. Aumenta la capacity della "
                     f"vasca (multi-posto), abbassa la permanenza minima "
                     f"({spec.dwell_min:.1f}s = teorico {spec.nominale:.1f}s - "
                     f"delta negativo {spec.delta_neg:.1f}s), o alza il takt "
@@ -819,6 +819,18 @@ class ProblemData:
     def takt_delta_pos(self) -> float:
         """Quanto il ciclo puo' stare SOPRA il takt time teorico."""
         return self.takt_max - self.takt_nominale
+
+    # La banda in cui il SOLUTORE cerca il takt time. Non e' sempre quella
+    # dichiarata: con `takt_fisso` si stringe al solo teorico, e tutto quello
+    # che dimensiona il modello sul takt (orizzonte, traslazioni, pre-filtro
+    # delle zone) deve leggere questa, non `takt_min`/`takt_max`.
+    @property
+    def takt_min_ricerca(self) -> float:
+        return self.takt_nominale if self.takt_fisso else self.takt_min
+
+    @property
+    def takt_max_ricerca(self) -> float:
+        return self.takt_nominale if self.takt_fisso else self.takt_max
 
     @property
     def n_stations(self) -> int:
@@ -2125,7 +2137,11 @@ def solve(
     max_escape = escape_ticks(required_sep * 2)
 
     # -- Variabili di takt time --------------------------------------------
-    T_min, T_max = T_(data.takt_min), T_(data.takt_max)
+    # Con `takt_fisso` la banda si chiude sul teorico: Tv resta una variabile
+    # di dominio [T, T], che il presolve sostituisce con la costante. Tutti i
+    # prodotti per Tv -- shift, capienza, copie traslate del vincolo di non
+    # collisione -- diventano cosi' termini noti, senza toccarli uno per uno.
+    T_min, T_max = T_(data.takt_min_ricerca), T_(data.takt_max_ricerca)
     Tv = model.NewIntVar(T_min, T_max, "T")
     if _rifinisci is not None:
         model.Add(Tv == _rifinisci.raw["T_ticks"])
@@ -2160,6 +2176,7 @@ def solve(
     model.Add(actual_time[0] == 0)
 
     occupancy = {}  # tappa -> espressione "per quanto tiene occupato un posto"
+    scarti = []  # (tappa, sotto, sopra): solo con takt_fisso
     for k in range(1, data.n_moves):
         station = (
             k  # la vasca k viene raggiunta dalla mossa k-1 e lasciata dalla mossa k
@@ -2176,6 +2193,17 @@ def solve(
         arrival = actual_time[k - 1] + travel_loaded[k - 1]
         model.Add(actual_time[k] >= arrival + dwell_min)
         model.Add(actual_time[k] <= arrival + dwell_max)
+
+        # Lo scarto dal teorico, separato nei due lati perche' pesano in modo
+        # diverso: bagno = teorico - sotto + sopra. Servono solo all'obiettivo
+        # a takt fisso, e minimizzandoli uno dei due resta sempre a zero. I
+        # domini sono gia' quelli che la banda rigida qui sopra consente.
+        if data.takt_fisso:
+            nominale = T_(spec.nominale)
+            sotto = model.NewIntVar(0, max(0, nominale - dwell_min), f"sotto_{k}")
+            sopra = model.NewIntVar(0, max(0, dwell_max - nominale), f"sopra_{k}")
+            model.Add(actual_time[k] - arrival == nominale - sotto + sopra)
+            scarti.append((k, sotto, sopra))
 
         # -- 1-bis) Capienza della vasca -------------------------------------
         # I pezzi entrano nella vasca ogni T secondi e ciascuno tiene occupato
@@ -2844,14 +2872,24 @@ def solve(
     # una per mossa: cosi' un tick di takt time in meno vale sempre piu' di
     # qualunque numero di soste risparmiate, e l'ordine fra i due obiettivi e'
     # garantito invece che sperato.
+    #
+    # Con `takt_fisso` il primo criterio non e' piu' il takt time ma lo
+    # SCARTO PESATO dai tempi teorici (vedi `_pesi_scarto`), e le soste
+    # restano il secondo con la stessa garanzia: un'unita' di scarto vale
+    # piu' di tutte le soste possibili.
+    scarto_pesato = 0
+    for k, sotto, sopra in scarti:
+        peso_sotto, peso_sopra = _pesi_scarto(data.route[k])
+        scarto_pesato += peso_sotto * sotto + peso_sopra * sopra
+    primo = scarto_pesato if data.takt_fisso else Tv
     if _rifinisci is not None:
-        # Il takt time e' gia' inchiodato: resta da contare le soste.
+        # Il primo criterio e' gia' inchiodato: resta da contare le soste.
         model.Minimize(sum(sel_soste))
         _suggerisci(model, _rifinisci.raw.get("_suggerimento"), fissa=True)
     elif sel_soste:
-        model.Minimize(Tv * (data.n_moves + 1) + sum(sel_soste))
+        model.Minimize(primo * (data.n_moves + 1) + sum(sel_soste))
     else:
-        model.Minimize(Tv)
+        model.Minimize(primo)
 
     solver = cp_model.CpSolver()
     solver.parameters.max_time_in_seconds = time_limit_s
@@ -2968,6 +3006,18 @@ def solve(
         "clearance_step_mm": data.clearance_step_mm,
         "n_separation_constraints": n_sep_constraints,
         "n_soste": sum(solver.Value(sel) for sel in sel_soste),
+        # Lo scarto pesato dai tempi teorici, in secondi x peso: e' il primo
+        # criterio con `takt_fisso`, e senza vale None (non e' stato cercato).
+        "errore_pesato": (
+            sum(
+                peso_sotto * solver.Value(sotto) + peso_sopra * solver.Value(sopra)
+                for k, sotto, sopra in scarti
+                for peso_sotto, peso_sopra in [_pesi_scarto(data.route[k])]
+            )
+            / (scale * SCALA_PESI)
+            if data.takt_fisso
+            else None
+        ),
         # Tutti i valori della soluzione, per ripartire da qui: vedi
         # `riduci_soste`.
         "_suggerimento": (
@@ -2985,6 +3035,40 @@ def solve(
         plans=plans,
         actual_time=[data.to_seconds(solver.Value(v)) for v in actual_time],
     )
+
+
+# I pesi dello scarto sono decimali nel file, ma CP-SAT vuole coefficienti
+# interi: si moltiplicano per questa scala. Due decimali bastano a qualunque
+# peso che abbia senso scrivere a mano.
+SCALA_PESI = 100
+
+
+def _pesi_scarto(spec: StationSpec) -> tuple[int, int]:
+    """I due pesi della tappa (sotto, sopra) come interi per CP-SAT."""
+    return round(spec.peso_sotto * SCALA_PESI), round(spec.peso_sopra * SCALA_PESI)
+
+
+def scarti_dal_teorico(data: ProblemData, actual_time: list[float]) -> dict[int, float]:
+    """Di quanto il bagno di ogni vasca in mezzo si scosta dal teorico, in
+    secondi: positivo sopra, negativo sotto. Chiave = indice di stazione.
+
+    Lavora sugli istanti di prelievo e non sulle variabili del solutore, cosi'
+    vale per qualunque ciclogramma -- trovato dal calcolo o composto a mano."""
+    out = {}
+    for k in range(1, data.n_moves):
+        bagno = actual_time[k] - actual_time[k - 1] - data.loaded_leg_seconds(k - 1)
+        out[k] = bagno - data.route[k].nominale
+    return out
+
+
+def errore_pesato(data: ProblemData, actual_time: list[float]) -> float:
+    """Lo scarto pesato dai tempi teorici di un ciclogramma, nella stessa
+    unita' di `Solution.raw["errore_pesato"]` (secondi x peso)."""
+    totale = 0.0
+    for k, scarto in scarti_dal_teorico(data, actual_time).items():
+        spec = data.route[k]
+        totale += (-scarto * spec.peso_sotto) if scarto < 0 else scarto * spec.peso_sopra
+    return totale
 
 
 # Le variabili che `riduci_soste` inchioda al valore della soluzione, per
