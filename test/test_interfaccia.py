@@ -973,6 +973,14 @@ def test_composizione_da_zero(percorso_linea):
         )
 
         # -- una composizione impossibile non blocca: la si vede -------------
+        # Un carroponte solo, bagni a zero: il giro e' tutte le mosse in fila
+        # piu' il ritorno a vuoto. Perche' sia IMPOSSIBILE il takt deve stare
+        # sotto quel giro, e lo si impone qui invece di contare sul takt da cui
+        # parte la composizione: sulla linea d'esempio il giro dura 129.6 s, e
+        # col takt teorico di 130 s ci starebbe -- per 0.4 s.
+        giro = sum(d.loaded_leg_seconds(k) for k in range(d.n_moves))
+        giro += d.empty_leg_seconds(d.n_moves, 0)
+        app.T_corrente = 0.8 * giro
         for k in range(d.n_moves):
             app.assegnazione[k] = 0
         app.permanenze = {k: 0.0 for k in range(1, d.n_moves)}
@@ -1335,8 +1343,17 @@ def test_punti_di_passaggio(percorso_linea):
         app._ricomponi("assegnazione di prova")
         # Un rientro del carroponte 1 con del margine: il punto ci va dentro,
         # fermo dove ha consegnato, cosi' e' raggiungibile su qualunque linea.
+        # Il rientro si SCEGLIE, quello con l'attesa piu' lunga: il primo del
+        # giro non e' detto che ne abbia -- col takt teorico della linea
+        # d'esempio il rientro dopo la mossa 0 e' gia' in ritardo, e un punto
+        # messo li' cade mentre il carroponte trasporta.
         piano = app.soluzione.plans[0]
-        k = piano.order[0]
+        k = max(piano.order, key=lambda m: piano.attese.get(m, 0.0))
+        check(
+            piano.attese.get(k, 0.0) > 1.0,
+            f"c'e' un rientro con del margine (dopo la mossa {k}: "
+            f"{piano.attese.get(k, 0.0):.1f} s di attesa)",
+        )
         t_punto = piano.finish[k] + 0.5
         x_punto = d.approach_position(k + 1)
         app.var_punto_t.set(f"{t_punto + 3 * app.T_corrente}")
