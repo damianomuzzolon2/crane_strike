@@ -1657,6 +1657,21 @@ def test_takt_fisso(percorso_linea):
             "scarto pesato" in app.etichetta_stato["text"],
             "e la barra di stato lo dice a fine calcolo",
         )
+        # La tabella dei tempi in vasca: una riga per vasca intermedia, col
+        # teorico e il tempo effettivo che il ciclogramma le da'.
+        righe_tabella = riepilogo.split("Tempi in vasca:")[-1].splitlines()[2:]
+        attese = [
+            f"{d.route[k].nominale:.1f}" in riga
+            and f"{app.permanenze[k]:.1f}" in riga
+            and riga.split()[0] == d.route[k].tank_id
+            for k, riga in zip(range(1, d.n_moves), righe_tabella)
+        ]
+        check(
+            "Tempi in vasca:" in riepilogo
+            and len(attese) == d.n_moves - 1
+            and all(attese),
+            "il Riepilogo ha la tabella teorico / effettivo, una riga per vasca",
+        )
         riga = app.tabella_permanenze.get_children()[0]
         valori = app.tabella_permanenze.item(riga, "values")
         check(

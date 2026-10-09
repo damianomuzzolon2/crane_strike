@@ -2361,6 +2361,46 @@ class Applicazione(tk.Tk):
                 ),
             )
 
+    def _tabella_tempi_in_vasca(self) -> list[str]:
+        """Tempo teorico ed effettivo di ogni vasca, come righe di testo
+        incolonnate per il Riepilogo.
+
+        La stessa cosa sta nella tabella della scheda Ciclogramma, ma quella si
+        apre solo per modificare: qui la si legge accanto al takt time e allo
+        scarto pesato, che sono i numeri con cui la si giudica. Le vasche fuori
+        dalla tolleranza si segnano, perche' in una colonna di numeri non si
+        vedono -- il verdetto lo da' la verifica, il segno dice dove guardare."""
+        d = self.config_linea.data
+        intermedie = [k for k in range(1, d.n_moves) if k in self.permanenze]
+        if not intermedie:
+            return []
+        larga = max(len("vasca"), *(len(d.route[k].tank_id) for k in intermedie))
+        righe = [
+            "Tempi in vasca:",
+            f"   {'vasca':<{larga}}  {'teorico':>8}  {'effettivo':>9}  "
+            f"{'scarto':>7}",
+        ]
+        fuori = False
+        for k in intermedie:
+            spec = d.route[k]
+            effettivo = self.permanenze[k]
+            segno = ""
+            # lo stesso mezzo centesimo di tolleranza dei valori mostrati: un
+            # bagno sul minimo, arrotondato, non deve sembrare fuori
+            if effettivo < spec.dwell_min - 0.005:
+                segno, fuori = "  < min", True
+            elif effettivo > spec.dwell_max + 0.005:
+                segno, fuori = "  > max", True
+            righe.append(
+                f"   {spec.tank_id:<{larga}}  {spec.nominale:>8.1f}  "
+                f"{effettivo:>9.1f}  {effettivo - spec.nominale:>+7.1f}{segno}"
+            )
+        if fuori:
+            righe.append(
+                "   (< min / > max: fuori dalla tolleranza teorico -/+ delta)"
+            )
+        return righe
+
     def _scarto_pesato_corrente(self) -> float:
         """Lo scarto pesato dai teorici del ciclogramma che si sta guardando.
 
@@ -2473,6 +2513,8 @@ class Applicazione(tk.Tk):
                 f"({self.dati.route[z.lo].tank_id} -> "
                 f"{self.dati.route[z.hi + 1].tank_id})"
             )
+        righe.append("")
+        righe += self._tabella_tempi_in_vasca()
         # Il punto di avvio: la linea nera verticale che si vede sul grafico,
         # scritta in chiaro. Sul disegno si legge QUANDO; qui si legge anche
         # DOVE va portato ogni carroponte, che e' quello che serve a chi sta
