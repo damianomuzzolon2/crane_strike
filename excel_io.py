@@ -268,9 +268,23 @@ _PARAMETRI = {
         15.0,
         "quanto puo' durare ogni singola risoluzione CP-SAT",
     ),
+    "takt_fisso": (
+        "-",
+        False,
+        0,
+        "0 = cerca il takt time PIU' PICCOLO nella banda dei due delta. "
+        "1 = takt time FISSO al teorico, e si cercano i tempi in vasca piu' "
+        "vicini ai teorici, pesando gli scarti con le colonne peso_sotto e "
+        "peso_sopra del foglio Percorso",
+    ),
 }
 
-_INTERI = {"risoluzione_tick_per_s", "max_carroponti", "max_soste_intermedie"}
+_INTERI = {
+    "risoluzione_tick_per_s",
+    "max_carroponti",
+    "max_soste_intermedie",
+    "takt_fisso",
+}
 
 # Come si chiamavano gli stessi parametri quando il progetto lavorava in metri.
 # Servono solo a riconoscere un file vecchio e dirlo chiaramente: leggerlo
@@ -478,6 +492,7 @@ def leggi_problema(percorso_file: str) -> Configurazione:
             takt_min=par["takt_teorico_s"] - par["takt_delta_negativo_s"],
             takt_max=par["takt_teorico_s"] + par["takt_delta_positivo_s"],
             takt_nominal=par["takt_teorico_s"],
+            takt_fisso=bool(par["takt_fisso"]),
             kin_empty=Kinematics(
                 v_max=par["v_max_vuoto_mm_s"],
                 a_max=par["a_max_vuoto_mm_s2"],
@@ -780,7 +795,16 @@ def _leggi_percorso(ws, tanks: dict[str, Tank], errori: _Errori) -> list[Station
                 f"({teorico}): la soglia minima verrebbe negativa",
             )
             continue
-        route.append(StationSpec.da_teorico(tid, teorico, dneg, dpos))
+        pesi = [
+            _peso_scarto(ws.cell(riga, colonna).value, f"{lettera}{riga}", nome, errori)
+            for colonna, lettera, nome in (
+                (6, "F", "peso sotto il teorico"),
+                (7, "G", "peso sopra il teorico"),
+            )
+        ]
+        if None in pesi:
+            continue
+        route.append(StationSpec.da_teorico(tid, teorico, dneg, dpos, *pesi))
     if len(route) < 2:
         errori.aggiungi(
             FOGLIO_PERCORSO,
@@ -788,6 +812,24 @@ def _leggi_percorso(ws, tanks: dict[str, Tank], errori: _Errori) -> list[Station
             f"il percorso deve avere almeno 2 stazioni, trovate {len(route)}",
         )
     return route
+
+
+def _peso_scarto(valore, cella: str, nome: str, errori: _Errori) -> Optional[float]:
+    """Un peso dello scarto dal teorico. Facoltativo: vuoto vale 1, cioe' tutte
+    le tappe contano uguale -- un file che non ha le colonne dei pesi si legge
+    com'era. None se la cella non e' valida (l'errore e' gia' registrato)."""
+    if valore is None or (isinstance(valore, str) and not valore.strip()):
+        return 1.0
+    peso = _numero(valore, FOGLIO_PERCORSO, cella, nome, errori)
+    if peso is not None and peso < 0:
+        errori.aggiungi(
+            FOGLIO_PERCORSO,
+            cella,
+            f"{nome} ({peso}) negativo: i pesi vanno da 0 (scarto "
+            f"indifferente) in su",
+        )
+        return None
+    return peso
 
 
 def _stazione_di(route, tank_id: str) -> Optional[int]:
@@ -1107,6 +1149,12 @@ def _leggi_parametri(ws, errori: _Errori) -> dict:
             intero=nome in _INTERI,
         )
     _controlla_takt(par, grezzi, errori)
+    if par.get("takt_fisso") not in (None, 0, 1):
+        errori.aggiungi(
+            FOGLIO_PARAMETRI,
+            f"B{grezzi['takt_fisso'][1]}",
+            f"takt_fisso ({par['takt_fisso']}) deve valere 0 oppure 1",
+        )
     return par
 
 
@@ -1271,18 +1319,22 @@ def _righe_esempio():
     # vasca, tempo teorico, delta negativo, delta positivo: le soglie sono
     # teorico-delta_negativo e teorico+delta_positivo
     percorso = [
-        ("CARICO", 0, 0, 0),
-        ("SGRASSO", 75, 15, 15),
-        ("RISCIACQUO_1", 30, 10, 10),
-        ("ZINCATURA", 200, 20, 20),
-        ("RISCIACQUO_2", 30, 10, 10),
-        ("PASSIVAZIONE", 37, 7, 8),
-        ("SCARICO", 0, 0, 0),
+        # i pesi contano solo con takt_fisso = 1: qui la zincatura, il bagno
+        # che fa il prodotto, pesa piu' dei risciacqui, e stare sotto il
+        # teorico pesa piu' che starci sopra
+        ("CARICO", 0, 0, 0, 1, 1),
+        ("SGRASSO", 75, 15, 15, 2, 1),
+        ("RISCIACQUO_1", 30, 10, 10, 1, 1),
+        ("ZINCATURA", 200, 20, 20, 10, 3),
+        ("RISCIACQUO_2", 30, 10, 10, 1, 1),
+        ("PASSIVAZIONE", 37, 7, 8, 4, 2),
+        ("SCARICO", 0, 0, 0, 1, 1),
     ]
     parametri = {
         "takt_teorico_s": 130,
         "takt_delta_negativo_s": 20,
         "takt_delta_positivo_s": 20,
+        "takt_fisso": 0,
         "v_max_vuoto_mm_s": 1600,
         "a_max_vuoto_mm_s2": 900,
         "d_max_vuoto_mm_s2": 1200,
@@ -1340,11 +1392,15 @@ def _righe_da_configurazione(cfg: Configurazione):
         )
         for t in d.tanks.values()
     ]
-    percorso = [(s.tank_id, s.nominale, s.delta_neg, s.delta_pos) for s in d.route]
+    percorso = [
+        (s.tank_id, s.nominale, s.delta_neg, s.delta_pos, s.peso_sotto, s.peso_sopra)
+        for s in d.route
+    ]
     parametri = {
         "takt_teorico_s": d.takt_nominale,
         "takt_delta_negativo_s": d.takt_delta_neg,
         "takt_delta_positivo_s": d.takt_delta_pos,
+        "takt_fisso": 1 if d.takt_fisso else 0,
         "v_max_vuoto_mm_s": d.kin_empty.v_max,
         "a_max_vuoto_mm_s2": d.kin_empty.a_max,
         "d_max_vuoto_mm_s2": d.kin_empty.d_max,
@@ -1613,6 +1669,26 @@ def _aggiungi_fogli_linea(
             None,
         ),
         ("gli stessi posti, e il calcolo ne tiene conto.", None),
+        (
+            "  peso_sotto    (facoltativi, vuoto = 1) contano solo con takt_fisso "
+            "= 1 nel foglio Parametri:",
+            None,
+        ),
+        (
+            "  peso_sopra    quanto pesa ogni secondo passato SOTTO o SOPRA il "
+            "tempo teorico di questa tappa.",
+            None,
+        ),
+        (
+            "                Piu' il peso e' alto, piu' il calcolo cerca di "
+            "tenere la tappa sul teorico. 0 = indifferente.",
+            None,
+        ),
+        (
+            "                Le soglie teorico -/+ delta restano comunque "
+            "rigide: i pesi decidono solo dove spendere lo scarto.",
+            None,
+        ),
         ("", None),
         (f"Foglio {FOGLIO_PARAMETRI}", titolo_par),
         (
@@ -1649,6 +1725,16 @@ def _aggiungi_fogli_linea(
         (
             "                  ma lo rende piu' lento: se non conclude, "
             "stringila.",
+            None,
+        ),
+        (
+            "  takt_fisso      1 = il takt time NON si ottimizza: resta il "
+            "teorico, e il calcolo cerca",
+            None,
+        ),
+        (
+            "                  invece i tempi in vasca piu' vicini ai teorici, "
+            "con i pesi del foglio Percorso.",
             None,
         ),
         (
@@ -1936,11 +2022,13 @@ def _aggiungi_fogli_linea(
             "permanenza_teorica_s",
             "delta_negativo_s",
             "delta_positivo_s",
+            "peso_sotto",
+            "peso_sopra",
         ],
-        [6, 22, 22, 20, 20],
+        [6, 22, 22, 20, 20, 14, 14],
     )
-    for n, (tid, teorico, dneg, dpos) in enumerate(percorso, start=1):
-        ws.append([n, tid, teorico, dneg, dpos])
+    for n, riga in enumerate(percorso, start=1):
+        ws.append([n, *riga])
 
     # -- Parametri -------------------------------------------------------
     ws = wb.create_sheet(FOGLIO_PARAMETRI)

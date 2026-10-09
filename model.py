@@ -202,9 +202,24 @@ class StationSpec:
     # risale, e il file va poi riscritto com'era stato compilato.
     dwell_nominal: Optional[float] = field(default=None, kw_only=True)
 
+    # Quanto pesa, nell'obiettivo a takt time FISSO, ogni secondo di scarto
+    # dal tempo teorico (vedi `ProblemData.takt_fisso`). I due lati sono
+    # separati perche' non si equivalgono: stare SOTTO il teorico vuol dire di
+    # solito un trattamento incompleto, stare sopra solo un bagno piu' lungo.
+    # Le soglie min/max restano comunque vincoli rigidi: i pesi dicono solo
+    # dove conviene spendere lo scarto dentro la banda. 0 = indifferente.
+    peso_sotto: float = field(default=1.0, kw_only=True)
+    peso_sopra: float = field(default=1.0, kw_only=True)
+
     @classmethod
     def da_teorico(
-        cls, tank_id: str, teorico: float, delta_neg: float, delta_pos: float
+        cls,
+        tank_id: str,
+        teorico: float,
+        delta_neg: float,
+        delta_pos: float,
+        peso_sotto: float = 1.0,
+        peso_sopra: float = 1.0,
     ) -> "StationSpec":
         """La tappa come la si dichiara: tempo teorico e le due tolleranze."""
         return cls(
@@ -212,6 +227,8 @@ class StationSpec:
             dwell_min=teorico - delta_neg,
             dwell_max=teorico + delta_pos,
             dwell_nominal=teorico,
+            peso_sotto=peso_sotto,
+            peso_sopra=peso_sopra,
         )
 
     @property
@@ -456,6 +473,14 @@ class ProblemData:
     # tutti e due i confini, e quello nel vincolo di non collisione non costa
     # quasi niente, perche' una sosta fuori dalle fasce non genera finestre.
     max_soste_intermedie: int = 1
+    # COSA si ottimizza. False (il default, il comportamento storico): il
+    # takt time e' libero nella banda [takt_min, takt_max] e si cerca il piu'
+    # piccolo. True: il takt time e' INCHIODATO al teorico (`takt_nominale`)
+    # e si cerca invece il giro i cui tempi in vasca stanno piu' vicini ai
+    # teorici, pesando lo scarto di ogni tappa con `StationSpec.peso_sotto` e
+    # `peso_sopra`. La banda del takt resta dichiarata -- serve a riscrivere
+    # il file com'era e alla diagnosi -- ma il solutore non la usa.
+    takt_fisso: bool = False
 
     def __post_init__(self):
         n_moves = len(self.route) - 1
@@ -479,6 +504,11 @@ class ProblemData:
                 raise ValueError(
                     f"dwell_min negativo per vasca '{s.tank_id}': il delta "
                     f"negativo non puo' superare il tempo teorico"
+                )
+            if s.peso_sotto < 0 or s.peso_sopra < 0:
+                raise ValueError(
+                    f"peso dello scarto negativo per vasca '{s.tank_id}': i "
+                    f"pesi vanno da 0 (indifferente) in su"
                 )
         if self.takt_min > self.takt_max:
             raise ValueError("takt_min > takt_max")

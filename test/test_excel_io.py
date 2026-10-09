@@ -1734,6 +1734,91 @@ def test_avvicinamento_sollevamento():
         os.unlink(p)
 
 
+def test_takt_fisso_e_pesi():
+    print("\n[22] takt time fisso e pesi dello scarto dal teorico")
+    from openpyxl import load_workbook
+
+    from excel_io import scrivi_linea
+
+    def scrivi_parametro(percorso, nome, valore):
+        wb = load_workbook(percorso)
+        ws = wb[FOGLIO_PARAMETRI]
+        for riga in range(2, ws.max_row + 1):
+            if ws.cell(riga, 1).value == nome:
+                ws.cell(riga, 2).value = valore
+        wb.save(percorso)
+
+    p = modello_temporaneo()
+    try:
+        d = leggi_problema(p).data
+        check(not d.takt_fisso, "il modello d'esempio ottimizza il takt time")
+        zinc = d.route[3]
+        check(
+            (zinc.tank_id, zinc.peso_sotto, zinc.peso_sopra) == ("ZINCATURA", 10, 3),
+            "i due pesi della tappa si leggono dalle colonne F e G",
+        )
+    finally:
+        os.unlink(p)
+
+    # Pesi lasciati vuoti: valgono 1, cosi' un file senza quelle colonne si
+    # legge com'era.
+    p = modello_temporaneo()
+    try:
+        modifica(p, FOGLIO_PERCORSO, "F5", None)
+        modifica(p, FOGLIO_PERCORSO, "G5", "")
+        zinc = leggi_problema(p).data.route[3]
+        check(
+            (zinc.peso_sotto, zinc.peso_sopra) == (1.0, 1.0),
+            "pesi vuoti -> 1",
+        )
+    finally:
+        os.unlink(p)
+
+    for cella, valore_scritto, atteso in (
+        ("F5", -2, "F5"),
+        ("G4", "tanto", "G4"),
+    ):
+        p = modello_temporaneo()
+        try:
+            modifica(p, FOGLIO_PERCORSO, cella, valore_scritto)
+            msg = errore_leggendo(p)
+            check(
+                f"{FOGLIO_PERCORSO}!{atteso}" in msg,
+                f"peso {valore_scritto!r} in {cella} respinto con la cella",
+            )
+        finally:
+            os.unlink(p)
+
+    p = modello_temporaneo()
+    try:
+        scrivi_parametro(p, "takt_fisso", 2)
+        check("takt_fisso" in errore_leggendo(p), "takt_fisso = 2 respinto")
+    finally:
+        os.unlink(p)
+
+    # Andata e ritorno: la modalita' e i pesi sopravvivono a una riscrittura.
+    p = modello_temporaneo()
+    fd, riscritto = tempfile.mkstemp(suffix=".xlsx")
+    os.close(fd)
+    try:
+        scrivi_parametro(p, "takt_fisso", 1)
+        modifica(p, FOGLIO_PERCORSO, "F3", 0.5)
+        cfg = leggi_problema(p)
+        check(cfg.data.takt_fisso, "takt_fisso = 1 letto")
+        scrivi_linea(riscritto, cfg)
+        d = leggi_problema(riscritto).data
+        check(d.takt_fisso, "e sopravvive alla riscrittura del file")
+        check(
+            [(s.peso_sotto, s.peso_sopra) for s in d.route]
+            == [(s.peso_sotto, s.peso_sopra) for s in cfg.data.route]
+            and d.route[1].peso_sotto == 0.5,
+            "anche i pesi di tutte le tappe",
+        )
+    finally:
+        os.unlink(p)
+        os.unlink(riscritto)
+
+
 def main():
     print("=" * 72)
     print("TEST DI LETTURA E SCRITTURA EXCEL (richiede openpyxl, non OR-Tools)")
@@ -1768,6 +1853,7 @@ def main():
     test_misure_di_disegno()
     test_decelerazione_separata()
     test_avvicinamento_sollevamento()
+    test_takt_fisso_e_pesi()
     print("\n" + "=" * 72)
     print(f"RISULTATO: {_n_pass} ok, {_n_fail} falliti")
     print("=" * 72)
