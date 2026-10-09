@@ -200,13 +200,20 @@ class _BarraGrafico(NavigationToolbar2Tk):
 
 
 class Applicazione(tk.Tk):
-    def __init__(self, file_iniziale: str | None = None):
+    def __init__(self, file_iniziale: str | None = None, con_splash: bool = False):
         super().__init__()
         self.title(TITOLO)
         # Tenuta in un attributo: fuori da Windows e' un'immagine di Tk, che
         # senza riferimenti viene raccolta dal garbage collector -- e la
         # finestra torna all'icona predefinita.
         self.icona = _applica_icona(self)
+        # La schermata di benvenuto sta davanti mentre la finestra si
+        # costruisce DIETRO, nascosta: i tre secondi si contano da qui e il
+        # tempo della costruzione ci sta dentro, invece di sommarsi.
+        self._splash: _Splash | None = None
+        if con_splash:
+            self.withdraw()
+            self._splash = _Splash(self)
         self.geometry("1280x800")
         self.minsize(1000, 640)
 
@@ -307,8 +314,22 @@ class Applicazione(tk.Tk):
 
         self._costruisci_interfaccia()
         self._aggiorna_stato_pulsanti()
+        attesa = 0
+        if self._splash is not None:
+            attesa = self._splash.restante_ms()
+            self.after(attesa, self._chiudi_splash)
         if file_iniziale:
-            self.after(100, lambda: self._carica(file_iniziale))
+            # dopo lo splash: un errore di lettura aprirebbe un messaggio
+            # sopra una finestra che ancora non si vede
+            self.after(attesa + 100, lambda: self._carica(file_iniziale))
+
+    def _chiudi_splash(self):
+        if self._splash is not None:
+            self._splash.destroy()
+            self._splash = None
+        self.deiconify()
+        self.lift()
+        self.focus_force()
 
     # ------------------------------------------------------------------
     # Costruzione dell'interfaccia
@@ -3032,6 +3053,111 @@ class Applicazione(tk.Tk):
         super().destroy()
 
 
+def _cartella_risorse() -> str:
+    """`risorse/` accanto a questo modulo, o dentro il pacchetto di
+    PyInstaller (`sys._MEIPASS`) quando gira l'eseguibile."""
+    return os.path.join(
+        getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__))),
+        "risorse",
+    )
+
+
+def _immagine_ridotta(master, percorso: str, larghezza: int):
+    """Un PNG portato a `larghezza` pixel, come immagine di Tk, o None.
+
+    Con Pillow (che c'e' sempre: lo porta matplotlib) il ridimensionamento e'
+    filtrato; `subsample` di Tk prende un pixel ogni tanti, e sui bordi dei
+    loghi si vede la seghettatura. Resta come ripiego."""
+    try:
+        from PIL import Image, ImageTk
+
+        with Image.open(percorso) as img:
+            altezza = round(img.height * larghezza / img.width)
+            ridotta = img.convert("RGBA").resize(
+                (larghezza, altezza), Image.LANCZOS
+            )
+        return ImageTk.PhotoImage(ridotta, master=master)
+    except Exception:
+        pass
+    try:
+        img = tk.PhotoImage(master=master, file=percorso)
+        fattore = max(1, round(img.width() / larghezza))
+        return img.subsample(fattore, fattore)
+    except Exception:
+        return None
+
+
+class _Splash(tk.Toplevel):
+    """La schermata di benvenuto: logo del programma, nome, logo IMEL.
+
+    Una finestra senza bordi al centro dello schermo, che resta almeno
+    `DURATA_MS` -- anche se la finestra principale e' pronta prima -- e non di
+    piu' se la costruzione ci mette di piu'. Un'immagine che manca non ferma
+    niente: si mostra quello che c'e'."""
+
+    DURATA_MS = 3000
+    SFONDO = "#ffffff"
+
+    def __init__(self, master):
+        super().__init__(master, bg=self.SFONDO)
+        self._inizio = time.monotonic()
+        self.overrideredirect(True)
+        self.attributes("-topmost", True)
+
+        # le misure sono pensate a 96 dpi; su uno schermo scalato crescono
+        scala = max(1.0, self.winfo_fpixels("1i") / 96.0)
+        cartella = _cartella_risorse()
+        # tenute in attributi: senza riferimenti Tk le cancella
+        self._logo = _immagine_ridotta(
+            self, os.path.join(cartella, "icona.png"), round(160 * scala)
+        )
+        self._imel = _immagine_ridotta(
+            self, os.path.join(cartella, "logo_imel.png"), round(200 * scala)
+        )
+
+        cornice = tk.Frame(
+            self,
+            bg=self.SFONDO,
+            highlightthickness=1,
+            highlightbackground="#c8c8c8",
+            padx=round(48 * scala),
+            pady=round(32 * scala),
+        )
+        cornice.pack(fill="both", expand=True)
+        if self._logo is not None:
+            tk.Label(cornice, image=self._logo, bg=self.SFONDO).pack()
+        tk.Label(
+            cornice,
+            text=TITOLO,
+            bg=self.SFONDO,
+            fg="#1f2a36",
+            font=("Segoe UI", 28, "bold"),
+        ).pack(pady=(round(12 * scala), round(28 * scala)))
+        if self._imel is not None:
+            tk.Label(
+                cornice,
+                text="powered by",
+                bg=self.SFONDO,
+                fg="#7a7a7a",
+                font=("Segoe UI", 10),
+            ).pack(pady=(0, round(6 * scala)))
+            tk.Label(cornice, image=self._imel, bg=self.SFONDO).pack()
+
+        self.update_idletasks()
+        w, h = self.winfo_reqwidth(), self.winfo_reqheight()
+        x = (self.winfo_screenwidth() - w) // 2
+        y = (self.winfo_screenheight() - h) // 2
+        self.geometry(f"{w}x{h}+{x}+{y}")
+        # disegnata subito: subito dopo la costruzione dell'interfaccia tiene
+        # occupato il ciclo degli eventi, e senza questo si vedrebbe vuota
+        self.update()
+
+    def restante_ms(self) -> int:
+        """Quanto deve restare ancora a schermo per arrivare a `DURATA_MS`."""
+        trascorso = (time.monotonic() - self._inizio) * 1000
+        return max(0, int(self.DURATA_MS - trascorso))
+
+
 def _applica_icona(finestra) -> "tk.PhotoImage | str | None":
     """Mette l'icona di CraneStrike sulla finestra, e su tutte quelle che si
     apriranno dopo -- la simulazione compresa. Restituisce quello che ha
@@ -3050,10 +3176,7 @@ def _applica_icona(finestra) -> "tk.PhotoImage | str | None":
 
     Un'icona che manca non e' un motivo per non partire: se il file non c'e',
     o Tk non lo legge, la finestra resta con quella predefinita."""
-    cartella = os.path.join(
-        getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__))),
-        "risorse",
-    )
+    cartella = _cartella_risorse()
     try:
         if sys.platform == "win32":
             percorso = os.path.join(cartella, "icona.ico")
@@ -3213,7 +3336,7 @@ def main(argv=None):
     file_iniziale = argv[0] if argv else None
     _identita_windows()
     try:
-        app = Applicazione(file_iniziale)
+        app = Applicazione(file_iniziale, con_splash=True)
         app.mainloop()
     except Exception:
         # Impacchettato in eseguibile non c'e' nessuna console: senza questo,
