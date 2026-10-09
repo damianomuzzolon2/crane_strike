@@ -3181,6 +3181,7 @@ def _applica_icona(finestra) -> "tk.PhotoImage | str | None":
         if sys.platform == "win32":
             percorso = os.path.join(cartella, "icona.ico")
             finestra.iconbitmap(default=percorso)
+            _icona_barra_nitida(finestra, percorso)
             return percorso
         immagine = tk.PhotoImage(
             master=finestra, file=os.path.join(cartella, "icona.png")
@@ -3189,6 +3190,60 @@ def _applica_icona(finestra) -> "tk.PhotoImage | str | None":
         return immagine
     except Exception:
         return None
+
+
+def _icona_barra_nitida(finestra, percorso: str):
+    """Dà alla barra delle applicazioni l'icona della misura che le serve.
+
+    La barra di Windows 11 disegna l'icona GRANDE della classe di finestra, e
+    Tk ci mette quella da 32 pixel: la barra, che al 100% ne vuole 24, la
+    rimpicciolisce da se', e il disegno -- linee sottili -- esce sfocato.
+    Misurato su Windows 11 e Tk 8.6: WM_SETICON sulla finestra non cambia
+    niente, cambiare l'icona della CLASSE si'. L'ICO ha gia' la misura giusta
+    disegnata a mano, e qui si sceglie quella.
+
+    La misura e' 24 pixel per la scala dello schermo. Il processo non dichiara
+    di gestire i dpi, quindi Windows gli risponderebbe sempre 96: la scala vera
+    si chiede mettendo per un attimo il thread in modalita' consapevole.
+
+    La classe e' quella delle finestre di primo livello di Tk, comune a tutte:
+    basta farlo una volta, ma su una finestra gia' mappata -- prima la cornice
+    esterna non esiste -- e per questo si aspetta la prima comparsa."""
+    import ctypes
+    from ctypes import wintypes
+
+    u = ctypes.windll.user32
+    u.LoadImageW.restype = wintypes.HANDLE
+    u.LoadImageW.argtypes = [
+        wintypes.HINSTANCE, wintypes.LPCWSTR, wintypes.UINT,
+        ctypes.c_int, ctypes.c_int, wintypes.UINT,
+    ]
+    u.SetClassLongPtrW.restype = ctypes.c_void_p
+    u.SetClassLongPtrW.argtypes = [wintypes.HWND, ctypes.c_int, ctypes.c_void_p]
+
+    def dpi_vero() -> int:
+        try:
+            u.SetThreadDpiAwarenessContext.restype = ctypes.c_void_p
+            u.SetThreadDpiAwarenessContext.argtypes = [ctypes.c_void_p]
+            prima = u.SetThreadDpiAwarenessContext(ctypes.c_void_p(-4))
+            try:
+                return u.GetDpiForSystem()
+            finally:
+                u.SetThreadDpiAwarenessContext(prima)
+        except Exception:
+            return 96
+
+    def applica(_evento=None):
+        try:
+            finestra.unbind("<Map>", legame)
+            lato = round(24 * dpi_vero() / 96)
+            icona = u.LoadImageW(None, percorso, 1, lato, lato, 0x10)  # IMAGE_ICON, LR_LOADFROMFILE
+            if icona:
+                u.SetClassLongPtrW(int(finestra.wm_frame(), 16), -14, icona)  # GCLP_HICON
+        except Exception:
+            pass  # resta l'icona di Tk: sfocata, ma c'e'
+
+    legame = finestra.bind("<Map>", applica, add="+")
 
 
 def _identita_windows():
