@@ -27,6 +27,7 @@ import dataclasses
 import os
 import sys
 
+from allinea_avvio import allinea_avvio, descrivi
 from avvio import righe_di_riepilogo, trova_avvio
 from excel_io import leggi_problema, scrivi_modello, scrivi_risultati
 from model import (
@@ -153,6 +154,16 @@ def main(argv=None) -> int:
         )
     if solution.raw.get("soste_tolte"):
         print(f"  tolte {solution.raw['soste_tolte']} soste per strada che non servivano")
+    # se il punto di avvio e' solo approssimato, si prova a renderlo esatto
+    # spostando di qualche secondo il giro di qualche carroponte
+    allineato = allinea_avvio(data_finale, solution)
+    if allineato is not None:
+        solution = allineato.soluzione
+        print(
+            f"  punto di avvio reso esatto: {descrivi(allineato.spostamenti)} "
+            f"(scarto pesato {allineato.errore_pesato_prima:.2f}"
+            f" -> {allineato.errore_pesato_dopo:.2f})"
+        )
     print()
     print(f"Carroponti: {n_hoists}   zone: {[(z.lo, z.hi) for z in zones]}")
     print(f"Takt time: {solution.T:.2f} s")

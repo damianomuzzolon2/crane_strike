@@ -14,7 +14,7 @@ test per **617 asserzioni** complessive.
 
 ### Dove stanno i file
 
-In radice ci sono **solo i dieci moduli** del programma, i due documenti,
+In radice ci sono **solo gli undici moduli** del programma, i due documenti,
 `CraneStrike.bat` e `requirements.txt`. Il resto sta in `test/`, `strumenti/`,
 `doc/`, `dati/` e `risorse/`.
 
@@ -63,6 +63,10 @@ da solo la regola qui sotto: nessun modulo chiama quelli che gli stanno sopra.
   interfaccia.py      ciclogramma.py   test/esempio.py      <- si lanciano
         |                   |                  |
         +-------------------+------------------+
+        |                   |
+        |           allinea_avvio.py             <- ritocco dell'avvio
+        |                   |
+        +----------+--------+-+---------+----------+
         |          |          |         |          |
   excel_io.py manuale.py plotting.py verify.py simulazione.py
         |          |          |         |          |
@@ -89,6 +93,10 @@ Le dipendenze vanno **in una direzione sola** ed e' un vincolo, non un caso:
   le posizioni, e sotto tutti gli altri perche' il punto di avvio si scrive in
   quattro posti -- il grafico, il foglio Riepilogo, il pannello della finestra e
   il terminale -- e deve essere lo stesso in tutti e quattro.
+- `allinea_avvio.py` invece **cambia** il ciclogramma, e per questo non sta in
+  `avvio.py`: usa `avvio` per sapere cosa sistemare, CP-SAT (in modo pigro,
+  come `model.py`) per scegliere gli spostamenti, e `verify` per decidere se
+  tenerli. Sta sopra tutti e tre, e lo chiamano solo i programmi.
 
 Chi rompe questa direzione rompe la testabilita' del progetto.
 
@@ -751,6 +759,63 @@ Il risultato si scrive in **quattro posti** e con le stesse parole, da
 sezione *Avvio della linea* del foglio Riepilogo, il pannello della finestra e
 il terminale di `ciclogramma.py`.
 
+### 6.3 `allinea_avvio.py` — l'avvio reso esatto, 359 righe
+
+Quando `avvio.py` trova solo un avvio **approssimato**, quasi sempre e' un caso:
+CP-SAT non sa che esiste un punto di avvio, e fra i giri buoni uguali ne ha
+preso uno in cui le finestre di riposo di due carroponti si mancano di pochi
+secondi. `allinea_avvio` rimedia senza risolvere di nuovo la linea, con
+**spostamenti rigidi**: il giro di ciascun carroponte si sposta in blocco di
+`s_h` secondi -- tutte le sue mosse (`actual_time`), con le stesse attese e
+soste, che quindi restano valide e si ripassano tali e quali a
+`build_solution`.
+
+Uno spostamento rigido tocca solo due cose, ed e' cio' che rende il problema
+piccolo:
+
+- i **bagni di confine** -- la tappa `k` in cui il carroponte di `k-1` consegna
+  e un altro preleva -- che cambiano di `s_dopo - s_prima` e devono restare
+  in `[dwell_min, dwell_max]`;
+- lo **sfasamento** fra due carroponti vicini. La loro distanza dipende solo da
+  `s_i - s_j`, quindi gli sfasamenti sicuri si calcolano *prima* di risolvere:
+  si campionano le traiettorie una volta su una griglia che divide esattamente
+  il periodo (`PASSO_S`), e spostarne una e' un `np.roll`. Fra due campioni la
+  distanza puo' calare al piu' di `(v_i + v_j) * passo / 2`, che si aggiunge
+  alla distanza richiesta. Lo sfasamento zero e' ammesso sempre: e' il
+  ciclogramma di partenza, gia' verificato.
+
+Il modello CP-SAT ha una variabile per carroponte (quello della mossa 0 sta
+fermo: uno spostamento comune a tutti non cambia niente), l'istante di avvio
+`t` e, per ogni carroponte, la scelta della finestra di riposo che deve
+contenere `t - s_h` con `MARGINE_MINIMO_S` da tutte e due le parti. Le finestre
+sono quelle di `avvio._nel_periodo`, ripetute di un periodo avanti e indietro.
+Tre obiettivi in fila, ciascuno a parita' dei precedenti:
+
+1. **il cambiamento minimo** -- la somma dei secondi di cui cambiano i bagni di
+   confine. Viene prima dello scarto di proposito: con lo scarto per primo, su
+   un ciclogramma lontano dai teorici il ritocco ne approfittava per spostare i
+   carroponti di decine di secondi, riottimizzando bagni che non c'entravano
+   niente con l'avvio -- e su un ciclogramma composto a mano, bagni scelti
+   dall'utente;
+2. lo **scarto pesato** dai teorici, con i pesi del foglio Percorso;
+3. il **margine** attorno all'avvio, fino a `MARGINE_CERCATO_S`.
+
+Il risultato si tiene **solo se** `trova_avvio` lo dice esatto e
+`verify_solution` lo passa. Usare il verificatore come filtro non lo rende meno
+indipendente dal modello principale -- non ne condivide niente -- ma vuol dire
+che su *questo* ritocco e' l'unico controllo: il campionamento a 50 ms delle
+distanze e' una scrematura, e i posti nelle vasche li guarda solo lui.
+
+Lo chiamano tre posti: `ciclogramma.py` e `interfaccia._allinea_nel_lavoro`
+alla fine del calcolo automatico (in silenzio: se non riesce resta la soluzione
+di prima), e il pulsante `Allinea avvio` sul ciclogramma che c'e'. Il pulsante
+non usa la soluzione restituita: rilegge i tempi in vasca da `actual_time`,
+sposta i punti di passaggio col loro carroponte, fissa attese e soste a quelle
+della soluzione e ricompone con `tieni_rientri=True` -- altrimenti
+`_ricomponi` tornerebbe alla regola predefinita delle attese, e disegnerebbe
+rientri diversi da quelli appena verificati. Gli spostamenti restano scritti
+in `Solution.raw["allineamento_avvio"]`, per indice di zona.
+
 ---
 
 ## 7. `verify.py` — il verificatore indipendente, 1043 righe
@@ -1097,6 +1162,7 @@ un codice d'uscita.
 | `test/test_excel_io.py` | 143 | — | un file compilato male viene respinto con un messaggio utile? |
 | `test/test_simulazione.py` | 84 | — | la simulazione mostra il ciclogramma che c'e'? |
 | `test/test_avvio.py` | 36 | — | il punto di avvio e' davvero un punto di avvio? |
+| `test/test_allinea_avvio.py` | 15 | OR-Tools | un avvio approssimato diventa esatto senza rompere niente? |
 | `test/test_model.py` | 94 | OR-Tools | il modello produce soluzioni fisicamente valide? |
 | `test/test_interfaccia.py` | 137 | OR-Tools + grafica | l'interfaccia si comporta come deve? |
 

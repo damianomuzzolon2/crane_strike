@@ -39,6 +39,7 @@ from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolb
 from matplotlib.figure import Figure
 from matplotlib.lines import Line2D
 
+from allinea_avvio import allinea_avvio, descrivi
 from avvio import righe_di_riepilogo, trova_avvii
 from excel_io import leggi_problema, scrivi_modello, scrivi_risultati
 from model import (
@@ -417,6 +418,16 @@ class Applicazione(tk.Tk):
             barra, text="Avvio", width=13, command=self._prossimo_avvio
         )
         self.btn_avvio.pack(side=tk.LEFT, padx=(6, 0))
+
+        # Quando il punto di avvio e' solo approssimato, sposta di qualche
+        # secondo il giro di qualche carroponte perche' diventi esatto (vedi
+        # allinea_avvio). Il calcolo automatico lo fa da solo; il pulsante serve
+        # ai ciclogrammi riletti da file o composti a mano. Acceso solo quando
+        # c'e' qualcosa da allineare.
+        self.btn_allinea = ttk.Button(
+            barra, text="Allinea avvio", command=self._allinea_avvio
+        )
+        self.btn_allinea.pack(side=tk.LEFT, padx=(6, 0))
 
         self.btn_salva = ttk.Button(
             barra, text="Salva risultati...", command=self._salva
@@ -976,7 +987,22 @@ class Applicazione(tk.Tk):
             time_limit_soste_s=min(cfg.tempo_limite_s, TEMPO_RIDUCI_SOSTE_S),
             interruzione=interruzione,
         )
+        sol = self._allinea_nel_lavoro(dati, sol, interruzione)
         return ("ok", sol, dati, verify_solution(dati, sol))
+
+    def _allinea_nel_lavoro(self, dati, sol, interruzione: Interruzione):
+        """Se il punto di avvio e' solo approssimato, prova a renderlo esatto
+        spostando di qualche secondo il giro di qualche carroponte (vedi
+        allinea_avvio). Gira nel thread di lavoro; se non ci riesce, o se il
+        calcolo e' stato fermato, la soluzione resta quella che era."""
+        if sol.raw.get("interrotto") or interruzione.richiesta:
+            return sol
+        self._coda.put(("stato", "Cerco un punto di avvio esatto..."))
+        try:
+            allineato = allinea_avvio(dati, sol)
+        except Exception:  # un ritocco non deve mai far perdere il calcolo
+            return sol
+        return sol if allineato is None else allineato.soluzione
 
     def _diagnostica(self, d, sol):
         """Perche' non si e' trovato niente. Gira nel thread di lavoro.
@@ -1498,6 +1524,12 @@ class Applicazione(tk.Tk):
                 if sol.raw.get("errore_pesato") is not None
                 else ""
             )
+            + (
+                f" - avvio reso esatto: "
+                f"{descrivi(sol.raw['allineamento_avvio'])}"
+                if sol.raw.get("allineamento_avvio")
+                else ""
+            )
             + self._esito_breve()
         )
 
@@ -1801,6 +1833,7 @@ class Applicazione(tk.Tk):
                     return ("interrotto", sol, None, None)
                 return ("nessuna", sol, None, None)
             dati = dataclasses.replace(cfg.data, zones=zone)
+            sol = self._allinea_nel_lavoro(dati, sol, interruzione)
             return ("ok", sol, dati, verify_solution(dati, sol))
 
         self._avvia_lavoro(f"Cerco la miglior soluzione con {n} carroponti...", lavoro)
@@ -2072,6 +2105,68 @@ class Applicazione(tk.Tk):
         self.btn_avvio.configure(
             text="Avvio" if a is None else f"Avvio {a.indice + 1} di {a.totale}",
             state=tk.NORMAL if len(self.avvii) > 1 else tk.DISABLED,
+        )
+        self.btn_allinea.configure(
+            state=tk.NORMAL
+            if a is not None and not a.esatto and not self._lavoro_in_corso
+            else tk.DISABLED
+        )
+
+    def _allinea_avvio(self):
+        """Pulsante 'Allinea avvio': rende esatto il punto di avvio spostando
+        rigidamente nel tempo il giro di qualche carroponte.
+
+        Per la finestra e' una modifica come le altre: cambia i tempi in vasca
+        delle tappe di confine, si annulla con Annulla, e i punti di passaggio
+        si spostano col loro carroponte. Attese e soste restano quelle che
+        erano: dentro il giro di un carroponte non cambia niente, quindi sono
+        ancora giuste -- e ricadere sulla regola predefinita disegnerebbe
+        rientri diversi da quelli appena verificati."""
+        if self.soluzione is None or self.dati is None or self._lavoro_in_corso:
+            return
+        self.configure(cursor="watch")
+        self.update_idletasks()
+        try:
+            r = allinea_avvio(self.dati, self.soluzione)
+        except Exception as e:
+            self._errore("Allineamento non riuscito", str(e))
+            return
+        finally:
+            self.configure(cursor="")
+        if r is None:
+            self._stato(
+                "Nessuno spostamento dei carroponti rende esatto il punto di "
+                "avvio restando nelle tolleranze e senza collisioni"
+            )
+            return
+        prima = self._istantanea()
+        d = self.dati
+        at = r.soluzione.actual_time
+        self.permanenze = {
+            k: at[k] - (at[k - 1] + d.loaded_leg_seconds(k - 1))
+            for k in range(1, d.n_moves)
+        }
+        per_carro = {
+            self.assegnazione[k]: v
+            for k, v in r.spostamenti_mosse.items()
+            if k in self.assegnazione
+        }
+        self.passaggi = [
+            dict(p, t=p["t"] + per_carro.get(p["carro"], 0.0))
+            if p.get("carro") is not None
+            else dict(p)
+            for p in self.passaggi
+        ]
+        self.attese = {k: v for p in r.soluzione.plans for k, v in p.attese.items()}
+        self.soste = {
+            k: v for p in r.soluzione.plans for k, v in p.soste_intermedie.items()
+        }
+        self._ricomponi(
+            f"Avvio reso esatto: {descrivi(r.spostamenti, self._carri_delle_zone())}"
+            f" (scarto pesato {r.errore_pesato_prima:.2f}"
+            f" -> {r.errore_pesato_dopo:.2f})",
+            prima,
+            tieni_rientri=True,
         )
 
     def _mostra_ciclogramma(self):

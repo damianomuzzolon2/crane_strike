@@ -29,7 +29,7 @@ periodici. È una scelta valida: il codice qui sotto la usa.
 
 ## I file del progetto
 
-In radice ci sta **solo il programma**: i dieci moduli che lo compongono, i due
+In radice ci sta **solo il programma**: gli undici moduli che lo compongono, i due
 documenti e il file da doppio clic. Tutto il resto e' in una sottocartella.
 
 ```text
@@ -37,6 +37,7 @@ create_cyclograms/
   interfaccia.py  simulazione.py  ciclogramma.py       <- i moduli: nessuna
   model.py  verify.py  excel_io.py  avvio.py               sottocartella, cosi'
   kinematics.py  plotting.py  manuale.py                  si importano per nome
+  allinea_avvio.py
   CraneStrike.bat  README.md  ARCHITETTURA.md
   requirements.txt
 
@@ -63,6 +64,10 @@ OR-Tools installato.
   interfaccia.py      ciclogramma.py   test/esempio.py      <- si lanciano
         |                   |                  |
         +-------------------+------------------+
+        |                   |
+        |           allinea_avvio.py                        <- ritocco dell'avvio
+        |                   |
+        +----------+--------+-+---------+----------+
         |          |          |         |          |
   excel_io.py manuale.py plotting.py verify.py simulazione.py   <- contorno
         |          |          |         |          |
@@ -91,6 +96,7 @@ OR-Tools installato.
 | `excel_io.py` | 1742 | Tutto l'Excel: `scrivi_modello()` genera il file da compilare, `leggi_problema()` lo rilegge raccogliendo **tutti** gli errori di compilazione con foglio e cella, `scrivi_risultati()` produce il file dei risultati -- che e' anche un file di ingresso, col ciclogramma dentro, per poterlo riaprire, diviso in due meta' (`Input` e `Output`) dietro due cartelli colorati. |
 | `plotting.py` | 470 | `plot_cyclogram()`: disegna il ciclogramma (posizione lungo la rotaia contro tempo) con il profilo cinematico vero, non con segmenti diritti, i punti sugli istanti in cui succede qualcosa (aggancio, sgancio, partenza, arrivo), le frecce su e giu' sulle corse verticali del gancio e il pezzo fermo in vasca come linea grigia. |
 | `avvio.py` | 572 | Il **punto di avvio**: `trova_avvii()` cerca nel ciclogramma gli istanti in cui tutti i carroponti sono fermi, col gancio in basso, e non stanno ne' al carico ne' allo scarico — quelli da cui la linea si puo' mettere in marcia. Ce n'e' quasi sempre piu' d'uno e sono equivalenti: si restituiscono tutti, e nella finestra si scorrono col pulsante `Avvio`. Se un istante del genere non esiste sceglie quello che sbaglia di meno, e dice di quanto. Non calcola niente di nuovo: legge i segmenti del ciclogramma. Il risultato si vede come linea nera verticale sul grafico, nel foglio Riepilogo, nel pannello della finestra e in fondo al comando da terminale. |
+| `allinea_avvio.py` | 359 | Rende **esatto** un punto di avvio approssimato: `allinea_avvio()` sposta rigidamente nel tempo il giro di qualche carroponte (tutte le sue mosse insieme, con attese e soste) finche' esiste un istante in cui sono tutti a riposo. Cambiano solo i bagni di confine fra un carroponte e l'altro, dentro le tolleranze, e le distanze fra carroponti restano rispettate. Gli spostamenti li sceglie un piccolo modello CP-SAT; il risultato si tiene solo se la verifica indipendente lo passa. Vedi *Il punto di avvio: la linea nera*. |
 | `simulazione.py` | 1388 | La **simulazione**: la linea vista di fronte, in movimento. `Simulazione` e' la parte che conta e non importa tkinter — dato un istante dice dove sta ogni carroponte (posizione, quota del gancio, cosa sta facendo) e ogni pezzo; `FinestraSimulazione` e' solo la finestra che la anima. Non calcola niente di nuovo: legge `segments_per_hoist` e `actual_time` della soluzione, cioe' gli stessi oggetti che disegnano il ciclogramma. |
 
 ### Programmi da lanciare
@@ -119,6 +125,7 @@ moduli si trovano comunque.
 | `test/test_model.py` | 586 | **Il modello CP-SAT.** Risolve davvero e passa ogni soluzione al verificatore: vasche ravvicinate, tre carroponti, capienza, tempi verticali, e la fedelta' della ricostruzione di una soluzione dai suoi gradi di liberta'. Richiede OR-Tools. |
 | `test/test_excel_io.py` | 954 | **La lettura e la scrittura Excel.** Quasi tutti i casi sono file compilati male: valori mancanti o non numerici, vasche inesistenti o duplicate, righe riordinate, parametri sbagliati, o un file scritto per la vecchia versione in metri. Piu' l'andata e ritorno del ciclogramma salvato nel file, e la struttura del file dei risultati: l'ordine dei fogli, i due cartelli colorati, e che l'elenco dentro un cartello dica davvero i fogli che seguono. Non richiede OR-Tools. |
 | `test/test_simulazione.py` | 755 | **La simulazione.** Il controllo che conta e' incrociato: ogni pezzo appeso deve stare *esattamente* dove sta il gancio di un carroponte che lo tiene, e ogni carroponte che tiene qualcosa deve avere un pezzo li'. Se simulazione e ciclogramma raccontassero due storie diverse, una delle due sarebbe sbagliata. Lo stesso controllo viene rifatto sulle quote **disegnate**, che non sono quelle vere: il telaio deve restare appeso al bilancino anche dopo il rimappaggio delle profondita'. Le vasche di prova hanno corse verticali **diverse fra loro** apposta: con corse tutte uguali, prendere la corsa della vasca sbagliata darebbe comunque il risultato giusto. In fondo, i casi in cui la geometria del disegno degenera: corse e ingombri tutti a zero, tutte le tappe nella stessa vasca. Non richiede OR-Tools. |
+| `test/test_allinea_avvio.py` | 163 | **L'avvio reso esatto.** Su un ciclogramma risolto con l'avvio approssimato, `allinea_avvio` lo deve rendere esatto con la verifica che passa, lo stesso takt, ogni giro spostato rigidamente con le sue attese, e cambiati solo i bagni di confine, dentro le tolleranze. Un avvio gia' esatto non si tocca; con le tolleranze di confine chiuse non si sposta niente. Richiede OR-Tools. |
 | `test/test_avvio.py` | 464 | **Il punto di avvio.** Che sia davvero un punto di avvio: in quell'istante ogni carroponte sta dove il riepilogo dice, fermo, col gancio in basso, lontano da carico e scarico, e con mezzo secondo di margine da entrambe le parti. Quando un istante comune non esiste, l'errore dichiarato viene confrontato con quello che si ottiene **campionando** tutto il ciclo: deve essere il minimo. E gli istanti equivalenti devono essere tanti quanti i tratti al minimo che si contano campionando, ciascuno in un tratto diverso. Non richiede OR-Tools. |
 | `test/test_interfaccia.py` | 1085 | **Le funzioni dell'interfaccia grafica.** La finestra viene costruita davvero e pilotata da codice — si "premono" i pulsanti chiamando i metodi e si fa girare il ciclo degli eventi con `update()` invece di `mainloop()`. Verifica che i pulsanti si abilitino al momento giusto, che il calcolo in background consegni il risultato, che una soluzione calcolata riletta come tempi in vasca e ricomposta dia esattamente lo stesso ciclogramma, che le modifiche vengano riverificate, che l'immagine salvata sia il ciclogramma anche componendo dal pettine, che la scheda di modifica si apra solo dopo 'Calcola man' o 'Modifica' e mai mentre il solutore lavora, che un ciclogramma salvato si riapra identico anche se lasciato a meta', che la composizione da zero produca il pettine giusto, che un trasporto assegnato si possa togliere con lo stesso gesto con cui lo si e' assegnato, e che la simulazione si apra solo quando un ciclogramma c'e' davvero e segua le modifiche mentre e' aperta. Richiede OR-Tools e un ambiente grafico. |
 
@@ -168,6 +175,7 @@ programma.
 | `Modifica` / `Fine modifica` | Apre alla modifica il ciclogramma che c'e', portando sul **pettine** — che e' il foglio su cui si assegna. Non cambia niente, ma e' il passaggio obbligato: senza, la scheda *Ciclogramma* resta chiusa. Premuto di nuovo chiude la modifica e riporta a guardare il ciclogramma. |
 | `Simulazione` | Apre una finestra a parte in cui la linea si vede **di fronte e in movimento**: i carroponti che scorrono, calano il gancio, tirano su il telaio, lo portano e lo immergono. Si accende solo quando un ciclogramma c'e' — calcolato o composto a mano, e' lo stesso oggetto. Vedi sotto. |
 | `Avvio 1 di 3` | Sposta la **linea nera** del punto di avvio sull'istante equivalente successivo, e dopo l'ultimo torna al primo. Il numero sul pulsante dice quanti ne sono stati trovati: sono tutti buoni uguali, e quale convenga lo sa chi conosce l'impianto. Spento quando ce n'e' uno solo. Quello che si sta guardando e' anche quello che finisce nell'Excel e nel PNG. |
+| `Allinea avvio` | Quando il punto di avvio e' solo **approssimato**, sposta di qualche secondo il giro di qualche carroponte perche' diventi esatto (vedi *Quando l'avvio e' approssimato*). E' una modifica come le altre: cambia i tempi in vasca di confine e si annulla con `Annulla`. Acceso solo quando c'e' qualcosa da allineare; `Calcola auto` lo fa gia' da solo. |
 | `Salva risultati...` | Scrive l'Excel dei risultati e, accanto, l'immagine del ciclogramma. **Lo stesso Excel si riapre con `Apri linea...`** per riprendere il lavoro: contiene anche la linea e il ciclogramma. Si abilita solo quando c'e' qualcosa da salvare. |
 
 A destra nella stessa barra c'e' il **percorso completo** del file caricato —
@@ -426,6 +434,34 @@ ciascun carroponte, in secondi, e' la piu' piccola; a pari errore, il primo. La
 linea nera porta allora la scritta *avvio (approssimato)*, e il Riepilogo dice
 di quanti secondi si sbaglia e su quale carroponte. Quei secondi si leggono
 come "tanto percorso bisogna fargli fare a mano prima di dare il via".
+
+#### Quando l'avvio e' approssimato
+
+Di solito non e' una necessita' della linea, ma un caso: il solutore non sa che
+esiste un punto di avvio, e fra tanti ciclogrammi buoni uguali ne ha preso uno
+in cui un carroponte arriva in basso pochi secondi dopo che un altro e' gia'
+ripartito. Si rimedia **spostando nel tempo il giro intero** di qualche
+carroponte — tutte le sue mosse insieme, con le sue attese — di qualche secondo
+avanti o indietro:
+
+- dentro il giro di un carroponte non cambia niente;
+- cambia solo il **tempo in vasca nelle tappe di confine**, dove un carroponte
+  consegna e il successivo preleva, e sempre **dentro le tolleranze** della
+  ricetta;
+- cambia di quanto due carroponti vicini sono sfasati, e lo spostamento si
+  sceglie fra quelli che li tengono **alla distanza richiesta**.
+
+Fra gli spostamenti possibili si prende quello che **cambia meno** il
+ciclogramma, poi quello che allontana meno i bagni dai teorici, poi quello che
+lascia piu' margine attorno all'istante di avvio (almeno mezzo secondo da tutte
+e due le parti). Il risultato si tiene **solo se** l'avvio diventa davvero
+esatto e la verifica indipendente lo passa; altrimenti resta il ciclogramma di
+prima, con l'avvio approssimato.
+
+`Calcola auto` (e `ciclogramma.py` da terminale) lo fa da solo alla fine del
+calcolo, e lo dice nella barra in basso: `avvio reso esatto: carroponte 3
+anticipato di 1.55 s, carroponte 4 ritardato di 3.15 s`. Su un ciclogramma
+riletto da file o composto a mano lo fa il pulsante **`Allinea avvio`**.
 
 ### Ingrandire
 
@@ -2237,6 +2273,7 @@ python test/test_verify.py       # il verificatore              (no OR-Tools)
 python test/test_excel_io.py     # lettura e scrittura Excel    (no OR-Tools)
 python test/test_simulazione.py  # la simulazione               (no OR-Tools)
 python test/test_avvio.py        # il punto di avvio            (no OR-Tools)
+python test/test_allinea_avvio.py # l'avvio reso esatto         (serve OR-Tools)
 python test/test_model.py        # il modello CP-SAT            (serve OR-Tools)
 python test/test_interfaccia.py  # l'interfaccia grafica        (serve OR-Tools)
 python test/esempio.py           # risoluzione reale + verifica + grafico
@@ -2283,6 +2320,12 @@ I sei file rispondono a domande diverse e si completano:
   **quanti** sono: i tratti del ciclo che arrivano al minimo si contano
   campionando, e devono essere tanti quanti gli istanti dichiarati — e' il
   controllo che tiene onesto il pulsante `Avvio`.
+- `test_allinea_avvio.py` — 3 casi. *Un avvio approssimato diventa esatto
+  senza rompere niente?* Su un ciclogramma risolto a tre carroponti, con
+  l'avvio approssimato: dopo il ritocco l'avvio e' esatto, la verifica passa, il
+  takt e' lo stesso, ogni giro e' spostato rigidamente con le sue attese, e
+  cambiano solo i bagni di confine, dentro le tolleranze. Un avvio gia' esatto
+  non si tocca, e con le tolleranze di confine chiuse non si sposta niente.
 - `test_interfaccia.py` — 14 casi. *L'interfaccia si comporta come deve?* La
   finestra viene costruita davvero e pilotata da codice. E' l'unico modo per
   accorgersi che un pulsante e' rimasto disabilitato, che il calcolo in
