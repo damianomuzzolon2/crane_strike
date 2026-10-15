@@ -66,6 +66,8 @@ _BORDO_PEZZO = "#4a5a68"
 # programma non conosce -- e riempie di colore un disegno in cui i colori
 # devono voler dire una cosa sola, di quale carroponte si tratta.
 _COLORE_BAGNO = "#c9dfee"
+# Opacita' delle vasche che ci sono ma che il percorso non usa.
+_ALFA_FUORI_PERCORSO = 0.35
 
 # Corsa verticale di riferimento quando nessuna vasca ne dichiara una: serve
 # solo a dare un'altezza al disegno. Senza, il grafico avrebbe altezza zero.
@@ -1249,6 +1251,19 @@ class FinestraSimulazione(tk.Toplevel):
             posizioni.setdefault(y, [])
             if st.tank_id not in posizioni[y]:
                 posizioni[y].append(st.tank_id)
+        # Le vasche dichiarate ma fuori dal percorso stanno comunque sulla
+        # linea, e il carroponte ci passa sopra: si disegnano anche loro, ma
+        # sbiadite, perche' in questa ricetta nessun pezzo ci entra. Senza, il
+        # disegno mostrava dei buchi dove nel capannone c'e' una vasca.
+        nel_percorso = {st.tank_id for st in d.route}
+        self.posizioni_fuori_percorso: set[float] = set()
+        for t in sorted(d.tanks.values(), key=lambda t: t.position):
+            if t.id in nel_percorso:
+                continue
+            if t.position not in posizioni:
+                posizioni[t.position] = []
+                self.posizioni_fuori_percorso.add(t.position)
+            posizioni[t.position].append(t.id)
         quote = sorted(posizioni)
 
         corse = [d.lift_height_at(i) for i in range(d.n_stations)]
@@ -1411,7 +1426,11 @@ class FinestraSimulazione(tk.Toplevel):
             e_vasca = any(
                 i not in estremi and d.lift_height_at(i) > 0 for i in qui
             )
-            if not e_vasca:
+            # fuori dal percorso: nessuna tappa ci si ferma, quindi niente
+            # corsa da guardare. Si disegna da vasca, sbiadita.
+            fuori_percorso = y in self.posizioni_fuori_percorso
+            alfa = _ALFA_FUORI_PERCORSO if fuori_percorso else 1.0
+            if not e_vasca and not fuori_percorso:
                 #
                 # A CHE ALTEZZA. Il piano segue la quota a cui il telaio ci
                 # viene POSATO, abbassato di quanto il telaio e' alto perche'
@@ -1459,6 +1478,7 @@ class FinestraSimulazione(tk.Toplevel):
                     facecolor=_COLORE_VASCA,
                     edgecolor=_BORDO_VASCA,
                     linewidth=1.6,
+                    alpha=alfa,
                     zorder=1,
                 )
             )
@@ -1470,9 +1490,12 @@ class FinestraSimulazione(tk.Toplevel):
                     livello + profonda - bordo_y,
                     facecolor=_COLORE_BAGNO,
                     edgecolor="none",
+                    alpha=alfa,
                     zorder=2,
                 )
             )
+            if fuori_percorso:
+                continue  # il pelo mosso farebbe sembrare la vasca in uso
             # il pelo libero, appena mosso: e' quello che fa leggere il bagno
             # come un liquido invece che come un rettangolo colorato
             xs = np.linspace(
@@ -1543,6 +1566,9 @@ class FinestraSimulazione(tk.Toplevel):
             [" / ".join(posizioni[y]) for y in quote], fontsize=8, rotation=25,
             ha="right", color="#3c4550",
         )
+        for y, etichetta in zip(quote, self.assi.get_xticklabels()):
+            if y in self.posizioni_fuori_percorso:
+                etichetta.set_alpha(_ALFA_FUORI_PERCORSO + 0.15)
         self.assi.set_yticks([])
         self.assi.tick_params(axis="x", length=0, pad=2)
         for lato in self.assi.spines.values():

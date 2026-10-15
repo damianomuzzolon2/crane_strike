@@ -1262,6 +1262,52 @@ def test_misure_dichiarate():
         radice.destroy()
 
 
+def test_vasca_fuori_percorso():
+    """Una vasca dichiarata ma che il percorso salta sta comunque sulla linea:
+    si disegna, ma sbiadita, e senza il pelo mosso del bagno."""
+    print("\n[15] vasche fuori dal percorso")
+    from simulazione import _ALFA_FUORI_PERCORSO, FinestraSimulazione
+
+    base = dati_prova()
+    dati_f = ProblemData(
+        tanks=base.tanks,
+        route=[s for s in base.route if s.tank_id != "RISCIACQUO"],
+        takt_min=40.0,
+        takt_max=400.0,
+        kin_empty=KIN_EMPTY,
+        kin_loaded=KIN_LOADED,
+        hoist_extent_pos=500,
+        hoist_extent_neg=700,
+        safety_distance=600,
+        kin_lift_empty=KIN_LIFT_EMPTY,
+        kin_lift_loaded=KIN_LIFT_LOADED,
+        engage_time=3.0,
+        disengage_time=2.0,
+    )
+    pos = base.tanks["RISCIACQUO"].position
+    radice = tk.Tk()
+    radice.geometry("200x100")
+    try:
+        sol, dati = proposta_semplice(dati_f)
+        f = FinestraSimulazione(radice, dati, sol)
+        f.update()
+        check(
+            f.posizioni_fuori_percorso == {pos},
+            f"la vasca saltata e' riconosciuta ({f.posizioni_fuori_percorso})",
+        )
+        sbiadite = [
+            p for p in f.assi.patches
+            if p.get_alpha() == _ALFA_FUORI_PERCORSO
+            and abs(p.get_x() + p.get_width() / 2 - pos) < 1e-6
+        ]
+        check(len(sbiadite) == 2, f"vasca e bagno disegnati sbiaditi ({len(sbiadite)})")
+        etichette = [t.get_text() for t in f.assi.get_xticklabels()]
+        check("RISCIACQUO" in etichette, "la vasca ha la sua etichetta")
+        f.destroy()
+    finally:
+        radice.destroy()
+
+
 def main() -> int:
     d = dati_prova()
     test_fasi_verticali(d)
@@ -1280,6 +1326,7 @@ def main() -> int:
         test_finestra(d)
         test_disegno_casi_limite()
         test_misure_dichiarate()
+        test_vasca_fuori_percorso()
     except tk.TclError as e:
         print(f"  --   ambiente grafico non disponibile, salto la finestra ({e})")
     print("\n" + "=" * 72)
