@@ -1202,20 +1202,44 @@ def test_misure_dichiarate():
             f"il telaio riempie la vasca quanto il pezzo riempie la sua "
             f"({f.altezza_telaio / profonda:.3f} contro {750.0 / 1500.0:.3f})",
         )
-        # e il simbolo disegnato, riportato in millimetri, e' il pezzo vero
-        punti_per_pixel = 72.0 / f.figura.get_dpi()
-        (x0, y0), (x1, y1) = f.assi.transData.transform([(0.0, 0.0), (1.0, 1.0)])
-        simbolo = f.pezzi_disegnati.get_marker()
-        misura = f.pezzi_disegnati.get_markersize()
-        ys = simbolo.vertices[:, 1]
-        larghezza_mm = misura / (abs(x1 - x0) * punti_per_pixel)
-        altezza_mm = misura * (ys.max() - ys.min()) / (abs(y1 - y0) * punti_per_pixel)
-        check(
-            abs(larghezza_mm - 1200.0) < 1.0
-            and abs(altezza_mm - f.altezza_telaio) < 1e-6,
-            f"il simbolo del telaio misura quanto il pezzo "
-            f"({larghezza_mm:.0f} mm di larghezza, {altezza_mm:.0f} di altezza)",
-        )
+        # e il simbolo disegnato, riportato in millimetri, e' il pezzo vero.
+        # Si misura come lo disegna matplotlib, normalizzazione del simbolo
+        # compresa: ricalcolandolo a mano senza, il test passava mentre sullo
+        # schermo il telaio usciva rimpicciolito.
+        import numpy as np
+        from matplotlib.markers import MarkerStyle
+
+        def misura_disegnata(finestra):
+            punti_per_pixel = 72.0 / finestra.figura.get_dpi()
+            (x0, y0), (x1, y1) = finestra.assi.transData.transform(
+                [(0.0, 0.0), (1.0, 1.0)]
+            )
+            stile = MarkerStyle(finestra.pezzi_disegnati.get_marker())
+            vertici = stile.get_transform().transform(stile.get_path().vertices)
+            vertici = vertici * finestra.pezzi_disegnati.get_markersize()
+            larghezza = np.ptp(vertici[:, 0]) / (abs(x1 - x0) * punti_per_pixel)
+            altezza = np.ptp(vertici[:, 1]) / (abs(y1 - y0) * punti_per_pixel)
+            return larghezza, altezza
+
+        # Due inquadrature: la linea intera, dove il telaio sullo schermo e'
+        # piu' alto che largo, e uno zoom stretto, dove e' piu' largo che alto.
+        # Il difetto stava in una sola delle due.
+        sinistra, destra = f.assi.get_xlim()
+        for nome, limiti in (
+            ("linea intera", (sinistra, destra)),
+            ("zoom", (dati.tanks["SGRASSO"].position - 1500.0,
+                      dati.tanks["SGRASSO"].position + 1500.0)),
+        ):
+            f.assi.set_xlim(*limiti)
+            f._misura_il_pezzo()
+            larghezza_mm, altezza_mm = misura_disegnata(f)
+            check(
+                abs(larghezza_mm - 1200.0) < 1.0
+                and abs(altezza_mm - f.altezza_telaio) < 1.0,
+                f"{nome}: il simbolo del telaio misura quanto il pezzo "
+                f"({larghezza_mm:.0f} mm di larghezza, {altezza_mm:.0f} di altezza)",
+            )
+        f.assi.set_xlim(sinistra, destra)
         f.destroy()
 
         # -- e senza le misure si torna alle convenzioni di prima -----------

@@ -1615,15 +1615,22 @@ class FinestraSimulazione(tk.Toplevel):
         altezza_pt = self.altezza_telaio * abs(y1 - y0) * punti_per_pixel
         if larghezza_pt <= 0 or altezza_pt <= 0:
             return
-        self.pezzi_disegnati.set_markersize(larghezza_pt)
         # I vertici del simbolo vanno da -0,5 a 0,5 in orizzontale e da -1 a 0
-        # in verticale, e vengono moltiplicati per la dimensione del marker:
-        # schiacciandoli in verticale di questo rapporto, il telaio esce alto
-        # quanto deve.
+        # in verticale: schiacciandoli in verticale di questo rapporto, il
+        # telaio esce alto quanto deve.
         verticale = altezza_pt / larghezza_pt
         self.pezzi_disegnati.set_marker(
             Path(_TELAIO.vertices * np.array([1.0, verticale]), _TELAIO.codes)
         )
+        # Matplotlib pero' NORMALIZZA ogni simbolo fatto a mano: lo scala
+        # perche' la sua coordinata piu' grande in valore assoluto valga 0,5,
+        # e solo dopo lo moltiplica per la dimensione. Qui la piu' grande e'
+        # il mezzo telaio in orizzontale (0,5) oppure tutta l'altezza
+        # (`verticale`), e la dimensione va gonfiata di quanto lui restringe.
+        # Ignorandolo, un telaio piu' alto che largo sullo schermo -- la linea
+        # vista intera, dove venti metri stanno in mille pixel -- usciva
+        # rimpicciolito di quel rapporto: un puntino in una vasca vuota.
+        self.pezzi_disegnati.set_markersize(larghezza_pt * max(1.0, 2.0 * verticale))
 
     def _ridimensionata(self, _evento):
         """La finestra ha cambiato dimensione: il telaio va rimisurato, e il
