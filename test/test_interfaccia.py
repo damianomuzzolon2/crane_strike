@@ -1664,13 +1664,15 @@ def test_takt_fisso(percorso_linea):
             f"{d.route[k].nominale:.1f}" in riga
             and f"{app.permanenze[k]:.1f}" in riga
             and riga.split()[0] == d.route[k].tank_id
+            and riga.split()[4] == f"{d.drain_time_at(k):.1f}"
             for k, riga in zip(range(1, d.n_moves), righe_tabella)
         ]
         check(
             "Tempi in vasca:" in riepilogo
             and len(attese) == d.n_moves - 1
             and all(attese),
-            "il Riepilogo ha la tabella teorico / effettivo, una riga per vasca",
+            "il Riepilogo ha la tabella teorico / effettivo / sgocciolo, una "
+            "riga per vasca",
         )
         riga = app.tabella_permanenze.get_children()[0]
         valori = app.tabella_permanenze.item(riga, "values")

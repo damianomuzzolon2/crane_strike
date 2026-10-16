@@ -2479,7 +2479,9 @@ class Applicazione(tk.Tk):
 
     def _tabella_tempi_in_vasca(self) -> list[str]:
         """Tempo teorico ed effettivo di ogni vasca, come righe di testo
-        incolonnate per il Riepilogo.
+        incolonnate per il Riepilogo, con lo sgocciolamento accanto: e' tempo
+        che il telaio passa sopra la vasca DOPO il bagno, e non sta dentro
+        l'effettivo.
 
         La stessa cosa sta nella tabella della scheda Ciclogramma, ma quella si
         apre solo per modificare: qui la si legge accanto al takt time e allo
@@ -2494,7 +2496,7 @@ class Applicazione(tk.Tk):
         righe = [
             "Tempi in vasca:",
             f"   {'vasca':<{larga}}  {'teorico':>8}  {'effettivo':>9}  "
-            f"{'scarto':>7}",
+            f"{'scarto':>7}  {'sgocciolo':>9}",
         ]
         fuori = False
         for k in intermedie:
@@ -2509,7 +2511,8 @@ class Applicazione(tk.Tk):
                 segno, fuori = "  > max", True
             righe.append(
                 f"   {spec.tank_id:<{larga}}  {spec.nominale:>8.1f}  "
-                f"{effettivo:>9.1f}  {effettivo - spec.nominale:>+7.1f}{segno}"
+                f"{effettivo:>9.1f}  {effettivo - spec.nominale:>+7.1f}  "
+                f"{d.drain_time_at(k):>9.1f}{segno}"
             )
         if fuori:
             righe.append(
