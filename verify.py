@@ -22,6 +22,9 @@ Cosa controlla:
   8. COLLISIONI REALI: distanza fra ogni coppia di carroponti campionata
      finemente nel tempo con il profilo cinematico vero (position_profile)
   9. capienza delle vasche (quanti pezzi ci stanno contemporaneamente)
+ 10. INTERBLOCCO delle vasche: un carroponte non parte verso una vasca
+     interbloccata finche' il vicino non l'ha lasciata ed e' arrivato su
+     un'altra (vedi model.vasche_in_interblocco)
 
 ATTENZIONE - il controllo 8 e' piu' STRETTO di quello che il modello impone:
   - il modello riserva l'intera finestra di sosta alla stazione di CONFINE fra
@@ -54,6 +57,7 @@ from model import (
     ProblemData,
     Segment,
     Solution,
+    coppie_interblocco,
     orario_passaggi,
     zone_layout_conflicts,
 )
@@ -83,7 +87,7 @@ class Violation:
 
     kind: str  # 'collision'|'dwell_min'|'dwell_max'|'periodicity'|'phase'|
     # 'segment_duration'|'continuity'|'zone_bounds'|'order'|
-    # 'takt_range'|'layout'|'transfer'|'tank_capacity'|'overlap'
+    # 'takt_range'|'layout'|'transfer'|'tank_capacity'|'overlap'|'interlock'
     severity: str  # 'error' | 'warning' | 'info'
     message: str
     hoists: tuple[int, ...] = ()
@@ -325,6 +329,7 @@ def verify_solution(
     sep = _check_collisions(
         data, trajectories, T, dt, required, space_tol, warn_margin, add
     )
+    _check_interlock(data, solution, T, time_tol, add)
 
     violations = sorted(
         V, key=lambda v: {"error": 0, "warning": 1, "info": 2}[v.severity]
@@ -1316,3 +1321,175 @@ def _check_collisions(
         err_bound=err_bound,
         n_samples=len(times),
     )
+
+
+# --------------------------------------------------------------------------
+# Interblocco delle vasche
+# --------------------------------------------------------------------------
+
+
+@dataclass
+class Prenotazione:
+    """Il tempo in cui un carroponte tiene impegnata una vasca, per la regola
+    dell'interblocco: dalla PARTENZA verso la vasca all'ARRIVO sulla vasca
+    successiva. In mezzo ci sono le due traslazioni e la fermata, che va
+    da `arrivo` a `partenza`.
+
+    Gli istanti sono sulla scala dei segmenti del carroponte, e possono
+    uscire dal periodo: la prima prenotazione comincia prima dell'inizio
+    del giro, l'ultima finisce dopo."""
+
+    vasca: str
+    inizio: float  # [s] parte verso la vasca
+    arrivo: float  # [s] e' sopra la vasca
+    partenza: float  # [s] la lascia
+    fine: float  # [s] e' arrivato sulla vasca dopo
+
+
+def prenotazioni(
+    data: ProblemData, segments: list[Segment], T: float
+) -> list[Prenotazione]:
+    """Le prenotazioni di un carroponte, ricavate dai soli SEGMENTI.
+
+    Il carroponte e' SU una vasca durante la presa e il rilascio (comprese
+    le traslazioni di cambio quota che ne fanno parte), durante un'attesa
+    ferma sopra di lei, e nell'istante in cui una traslazione comincia o
+    finisce li' -- e' cosi' che si vede anche una sosta di zero secondi.
+    Una corsa del gancio su uno svincolo, o un punto di passaggio fra due
+    vasche, non sono una vasca: chi e' li' sta ancora viaggiando. Fermate
+    successive sulla stessa vasca sono una fermata sola, perche' in mezzo il
+    carroponte non e' arrivato su un'altra.
+
+    E' la stessa definizione con cui `model.solve` costruisce il vincolo, ma
+    ricavata da quello che il disegno mostra e non dalle variabili del
+    solutore."""
+    segs = sorted(segments, key=lambda s: (s.t_start, s.t_end))
+    if not segs:
+        return []
+    quote = [
+        (data.approach_position(s), data.route[s].tank_id)
+        for s in range(data.n_stations)
+    ]
+
+    def vasca_in(x: float) -> Optional[str]:
+        for xq, tid in quote:
+            if abs(xq - x) < 1.0:
+                return tid
+        return None
+
+    traslazione_di = {s.move: s for s in segs if s.kind == "loaded"}
+    presenze: list[tuple[float, float, str]] = []
+    for s in segs:
+        if s.kind in ("pick", "release", "quota") and s.move is not None:
+            k = s.move
+            if s.kind == "pick":
+                stazione = k
+            elif s.kind == "release":
+                stazione = k + 1
+            else:
+                # una traslazione di cambio quota sta dentro la presa se
+                # viene prima del trasporto col pezzo, dentro il rilascio se
+                # viene dopo
+                col_pezzo = traslazione_di.get(k)
+                prima = col_pezzo is None or s.t_end <= col_pezzo.t_start + 1e-9
+                stazione = k if prima else k + 1
+            presenze.append((s.t_start, s.t_end, data.route[stazione].tank_id))
+        elif s.kind == "loaded" and s.move is not None:
+            presenze.append((s.t_start, s.t_start, data.route[s.move].tank_id))
+            presenze.append((s.t_end, s.t_end, data.route[s.move + 1].tank_id))
+        elif s.kind == "wait" and abs(s.x_end - s.x_start) < 1e-9:
+            v = vasca_in(s.x_start)
+            if v is not None:
+                presenze.append((s.t_start, s.t_end, v))
+        elif s.kind == "empty":
+            for x, t in ((s.x_start, s.t_start), (s.x_end, s.t_end)):
+                v = vasca_in(x)
+                if v is not None:
+                    presenze.append((t, t, v))
+    presenze.sort()
+
+    # fermate: [vasca, arrivo, partenza]
+    fermate: list[list] = []
+    for t_a, t_b, v in presenze:
+        if fermate and fermate[-1][0] == v:
+            fermate[-1][2] = max(fermate[-1][2], t_b)
+        else:
+            fermate.append([v, t_a, t_b])
+    if len(fermate) > 1 and fermate[0][0] == fermate[-1][0]:
+        # il giro si richiude sulla stessa vasca: e' una fermata sola, a
+        # cavallo dell'inizio del periodo
+        ultima = fermate.pop()
+        fermate[0][1] = ultima[1] - T
+    if len(fermate) < 2:
+        return []
+
+    n = len(fermate)
+    fuori = []
+    for i, (v, arrivo, partenza) in enumerate(fermate):
+        prec = fermate[i - 1][2] - (T if i == 0 else 0.0)
+        succ = fermate[(i + 1) % n][1] + (T if i == n - 1 else 0.0)
+        fuori.append(Prenotazione(v, prec, arrivo, partenza, succ))
+    return fuori
+
+
+def sovrapposizione(
+    a: Prenotazione, b: Prenotazione, T: float, spostamento: float = 0.0
+) -> tuple[float, float]:
+    """Per quanti secondi due prenotazioni periodiche di periodo T si
+    sovrappongono, con `b` spostata in avanti di `spostamento`, e di quanti
+    periodi va spostata `b` (in secondi) per ottenere quella sovrapposizione.
+    Zero o meno = non si toccano."""
+    a1, a2 = a.inizio, a.fine
+    b1, b2 = b.inizio + spostamento, b.fine + spostamento
+    meglio, quale = -math.inf, 0.0
+    for n in range(math.floor((a1 - b2) / T) - 1, math.ceil((a2 - b1) / T) + 2):
+        d = n * T
+        ov = min(a2, b2 + d) - max(a1, b1 + d)
+        if ov > meglio:
+            meglio, quale = ov, d
+    return meglio, quale
+
+
+def _check_interlock(data, solution, T, time_tol, add) -> None:
+    """10) Interblocco: le prenotazioni di due carroponti su vasche in
+    conflitto non si devono sovrapporre. Una violazione per coppia di
+    carroponti e di vasche, la peggiore."""
+    coppie = coppie_interblocco(data, data.zones)
+    if not coppie:
+        return
+    pren = {}
+    for h in {h for c in coppie for h in c}:
+        pren[h] = prenotazioni(data, solution.segments_per_hoist[h], T)
+    for (h1, h2), conflitti in sorted(coppie.items()):
+        peggiori: dict[tuple[str, str], tuple] = {}
+        for p in pren[h1]:
+            for q in pren[h2]:
+                if (p.vasca, q.vasca) not in conflitti:
+                    continue
+                ov, d = sovrapposizione(p, q, T)
+                chiave = (p.vasca, q.vasca)
+                if ov > time_tol and (
+                    chiave not in peggiori or ov > peggiori[chiave][0]
+                ):
+                    peggiori[chiave] = (ov, d, p, q)
+        for (va, vb), (ov, d, p, q) in sorted(peggiori.items()):
+            dove = va if va == vb else f"{va} e {vb}"
+            t = max(p.inizio, q.inizio + d) % T
+            add(
+                "interlock",
+                "error",
+                f"INTERBLOCCO non rispettato fra i carroponti {h1 + 1} e "
+                f"{h2 + 1} su {dove}: il {h1 + 1} tiene {va} da "
+                f"t={p.inizio % T:.1f}s (parte verso {va}) per "
+                f"{p.fine - p.inizio:.1f} s, fino all'arrivo sulla vasca dopo; "
+                f"il {h2 + 1} tiene {vb} da t={(q.inizio + d) % T:.1f}s per "
+                f"{q.fine - q.inizio:.1f} s. Si sovrappongono per {ov:.1f} s: "
+                f"chi arriva deve aspettare che l'altro sia arrivato su "
+                f"un'altra vasca. Per tornare alla sola distanza di sicurezza: "
+                f"interblocco_vasche = 0 fra i Parametri.",
+                hoists=(h1, h2),
+                t=t,
+                value=ov,
+                bound=0.0,
+                slack=-ov,
+            )

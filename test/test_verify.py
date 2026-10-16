@@ -34,13 +34,14 @@ from model import (
     Tank,
     ZonaCambioQuota,
     _build_zone_trajectory,
+    coppie_interblocco,
     proposta_semplice,
     solve,
     tratte_rientro,
     zone_layout_conflicts,
 )
 from model import build_solution as costruisci
-from verify import verify_solution
+from verify import prenotazioni, verify_solution
 
 KIN_EMPTY = Kinematics(v_max=1600, a_max=900)
 KIN_LOADED = Kinematics(v_max=1000, a_max=400)
@@ -121,6 +122,11 @@ def make_data(positions, dwells, zones, **kw) -> ProblemData:
         safety_distance=600,
         zones=zones,
         time_scale=100,
+        # Le soluzioni composte a mano in questo file sono state scritte per
+        # la sola distanza di sicurezza: parecchie fanno aspettare un
+        # carroponte sulla vasca di confine, che l'interblocco vieta. Qui si
+        # prova altro, e l'interblocco ha i suoi test (`test_interblocco`).
+        interblocco=False,
     )
     params.update(kw)
     return ProblemData(**params)
@@ -1537,6 +1543,90 @@ def test_ostacolo_allo_scarico():
     )
 
 
+def test_interblocco():
+    print("\n[25] interblocco delle vasche")
+    data, sol = reference_case()
+    con = dataclasses.replace(data, interblocco=True)
+
+    # -- le prenotazioni, lette dai segmenti --------------------------------
+    # Il carroponte 1 consegna in V2 (mossa 1): la prenota da quando parte da
+    # V1 col pezzo -- cioe' a presa finita -- a quando arriva sulla vasca
+    # dopo, che e' V0 dove ricomincia il giro.
+    p1 = {p.vasca: p for p in prenotazioni(con, sol.segments_per_hoist[0], sol.T)}
+    lp1 = sol.plans[0].local_pick[1]
+    check(
+        set(p1) == {"V0", "V1", "V2"},
+        f"il carroponte 1 prenota le sue tre vasche ({sorted(p1)})",
+    )
+    check(
+        abs(p1["V2"].inizio - (lp1 + con.pick_time_at(1))) < 1e-6,
+        "la prenotazione di V2 comincia quando il carro parte verso V2",
+    )
+    check(
+        p1["V2"].arrivo <= p1["V2"].partenza <= p1["V2"].fine,
+        "e finisce dopo che l'ha lasciata, all'arrivo sulla vasca dopo",
+    )
+
+    # -- il caso di riferimento lo viola -----------------------------------
+    # Il carroponte 2, appena consegnato in V4, torna subito in V2 e ci
+    # aspetta il pezzo: per la distanza va bene, per l'interblocco no, perche'
+    # nel frattempo il carroponte 1 viene a consegnare proprio li'.
+    r = verify_solution(con, sol)
+    il = kinds(r, "interlock", "error")
+    check(not r.ok and len(il) == 1, "l'attesa sulla vasca comune e' respinta")
+    check(
+        bool(il) and "V2" in il[0].message and il[0].hoists == (0, 1),
+        "il messaggio dice quali carroponti e quale vasca",
+    )
+    check(
+        verify_solution(data, sol).ok,
+        "con l'interblocco spento la stessa soluzione passa",
+    )
+
+    # -- lo stesso giro, con l'attesa fatta altrove, passa -----------------
+    # Il carroponte 2 resta in V4 dopo la consegna e parte all'ultimo momento:
+    # arriva in V2 quando il carroponte 1 se n'e' gia' andato.
+    p2 = sol.plans[1]
+    rientro = con.empty_leg_seconds(4, 2)
+    attesa = p2.local_pick[2] + sol.T - rientro - p2.finish[3]
+    giusta = costruisci(
+        con,
+        sol.T,
+        {**sol.plans[0].local_pick, **p2.local_pick},
+        status="OPTIMAL",
+        attese={**sol.plans[0].attese, 3: attesa},
+    )
+    r = verify_solution(con, giusta)
+    check(
+        r.ok,
+        "aspettando in V4 invece che in V2 l'interblocco e' rispettato",
+    )
+    for v in r.errors:
+        print("        ", v)
+
+    # -- quali coppie di vasche ---------------------------------------------
+    check(
+        coppie_interblocco(con, con.zones) == {(0, 1): {("V2", "V2")}},
+        "vasche lontane: solo la vasca comune",
+    )
+    vicine = make_data(
+        positions=[0, 3000, 6000, 7000, 10000],
+        dwells=[(0, 0), (30, 90), (30, 90), (30, 90), (0, 0)],
+        zones=[HoistZone(0, 1), HoistZone(2, 3)],
+        interblocco=True,
+    )
+    # D = 1200 + 600 = 1800: V3 a 1000 mm da V2 e' a ridosso, V1 a 3000 no
+    check(
+        coppie_interblocco(vicine, vicine.zones)
+        == {(0, 1): {("V2", "V2"), ("V2", "V3")}},
+        "una vasca del vicino piu' vicina di ingombro + sicurezza e' a ridosso",
+    )
+    check(
+        coppie_interblocco(con, [HoistZone(0, 3)]) == {},
+        "con un carroponte solo non c'e' niente da interbloccare",
+    )
+
+
 def main():
     print("=" * 72)
     print("TEST DEL VERIFICATORE (verify.py) -- non richiede OR-Tools")
@@ -1569,6 +1659,7 @@ def main():
     test_giro_che_non_parte_dal_confine()
     test_dove_si_aspetta()
     test_senza_valori_risolti()
+    test_interblocco()
     print("\n" + "=" * 72)
     print(f"RISULTATO: {_n_pass} ok, {_n_fail} falliti")
     print("=" * 72)

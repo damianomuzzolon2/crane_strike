@@ -34,6 +34,7 @@ from avvio import Avvio, righe_di_riepilogo, trova_avvio
 from kinematics import Kinematics
 from model import (
     SCALA_PESI,
+    coppie_interblocco,
     errore_pesato,
     scarti_dal_teorico,
     scarto_pesato,
@@ -282,6 +283,17 @@ _PARAMETRI = {
         "piu' vicini ai teorici. In tutti e due i casi gli scarti si pesano "
         "con le colonne peso_sotto e peso_sopra del foglio Percorso",
     ),
+    "interblocco_vasche": (
+        "-",
+        False,
+        1,
+        "1 = INTERBLOCCO delle vasche: un carroponte non parte verso una vasca "
+        "comune (o a ridosso di un confine) finche' il vicino non l'ha "
+        "lasciata ed e' arrivato su un'altra. Si aggiunge alla distanza di "
+        "sicurezza. Sono interbloccate le vasche servite da due carroponti e "
+        "quelle piu' vicine della distanza fra due ganci (ingombro + "
+        "sicurezza) a una vasca del vicino. 0 = solo la distanza di sicurezza",
+    ),
 }
 
 _INTERI = {
@@ -289,6 +301,7 @@ _INTERI = {
     "max_carroponti",
     "max_soste_intermedie",
     "takt_fisso",
+    "interblocco_vasche",
 }
 
 # Come si chiamavano gli stessi parametri quando il progetto lavorava in metri.
@@ -527,6 +540,7 @@ def leggi_problema(percorso_file: str) -> Configurazione:
             cambio_quota_scarico=cambio_quota["scarico"],
             larghezza_pezzo=par["larghezza_pezzo_mm"],
             altezza_pezzo=par["altezza_pezzo_mm"],
+            interblocco=bool(par["interblocco_vasche"]),
         )
     except ValueError as e:
         # le validazioni di ProblemData sono gia' scritte per un umano:
@@ -1166,12 +1180,13 @@ def _leggi_parametri(ws, errori: _Errori) -> dict:
             intero=nome in _INTERI,
         )
     _controlla_takt(par, grezzi, errori)
-    if par.get("takt_fisso") not in (None, 0, 1):
-        errori.aggiungi(
-            FOGLIO_PARAMETRI,
-            f"B{grezzi['takt_fisso'][1]}",
-            f"takt_fisso ({par['takt_fisso']}) deve valere 0 oppure 1",
-        )
+    for nome in ("takt_fisso", "interblocco_vasche"):
+        if par.get(nome) not in (None, 0, 1):
+            errori.aggiungi(
+                FOGLIO_PARAMETRI,
+                f"B{grezzi[nome][1]}",
+                f"{nome} ({par[nome]}) deve valere 0 oppure 1",
+            )
     return par
 
 
@@ -1374,6 +1389,7 @@ def _righe_esempio():
         "risoluzione_tick_per_s": 100,
         "passo_controllo_distanza_mm": 200,
         "max_soste_intermedie": 1,
+        "interblocco_vasche": 1,
         "larghezza_pezzo_mm": 1400,
         "altezza_pezzo_mm": 900,
         "max_carroponti": 4,
@@ -1440,6 +1456,7 @@ def _righe_da_configurazione(cfg: Configurazione):
         "risoluzione_tick_per_s": d.time_scale,
         "passo_controllo_distanza_mm": d.clearance_step_mm,
         "max_soste_intermedie": d.max_soste_intermedie,
+        "interblocco_vasche": 1 if d.interblocco else 0,
         "larghezza_pezzo_mm": d.larghezza_pezzo,
         "altezza_pezzo_mm": d.altezza_pezzo,
         "max_carroponti": cfg.max_carroponti,
@@ -2600,6 +2617,18 @@ def scrivi_risultati(
             f"mm, all'istante {report.min_separation_t:.2f} s",
             "0.0",
         )
+    # Quali vasche l'interblocco ha protetto: e' la prima cosa da sapere
+    # davanti a un takt time piu' alto del previsto.
+    interbloccate = sorted(
+        {v for cc in coppie_interblocco(data, data.zones).values() for c in cc for v in c}
+    )
+    voce(
+        "Interblocco delle vasche",
+        "attivo" if data.interblocco else "spento",
+        (", ".join(interbloccate) if interbloccate else "nessuna vasca contesa")
+        if data.interblocco
+        else "solo la distanza di sicurezza",
+    )
 
     sezione("Movimentazione verticale")
     corse = {round(data.lift_height_at(s), 1) for s in range(1, data.n_moves)}

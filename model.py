@@ -481,6 +481,14 @@ class ProblemData:
     # `peso_sopra`. La banda del takt resta dichiarata -- serve a riscrivere
     # il file com'era e alla diagnosi -- ma il solutore non la usa.
     takt_fisso: bool = False
+    # L'INTERBLOCCO DELLE VASCHE, per tutta la linea (vedi
+    # `vasche_in_interblocco`). True: un carroponte non parte verso una vasca
+    # interbloccata finche' il vicino non l'ha lasciata ed e' arrivato su
+    # un'altra -- la logica con cui il PLC dell'impianto protegge le vasche
+    # comuni e quelle a ridosso di un confine. Si AGGIUNGE alla distanza di
+    # sicurezza, non la sostituisce: quella continua a proteggere i passaggi.
+    # False: solo la distanza di sicurezza, come prima che esistesse.
+    interblocco: bool = True
 
     def __post_init__(self):
         n_moves = len(self.route) - 1
@@ -1446,6 +1454,60 @@ def confini_condivisi(data: "ProblemData", zone: "HoistZone") -> list[float]:
     if zone.hi < data.n_moves - 1:
         confini.append(data.approach_position(zone.hi + 1))
     return confini
+
+
+def vasche_in_interblocco(data: "ProblemData", vasca_a: str, vasca_b: str) -> bool:
+    """Se due carroponti DIVERSI, uno diretto alla vasca `a` e l'altro alla
+    `b`, devono escludersi a vicenda.
+
+    LA REGOLA e' quella del PLC: chi deve andare in una vasca interbloccata non
+    parte finche' il vicino non l'ha lasciata ed e' ARRIVATO su un'altra. Ogni
+    carroponte PRENOTA la vasca da quando comincia a muoversi verso di lei a
+    quando, ripartito, si ferma sulla vasca successiva; due prenotazioni in
+    conflitto non si sovrappongono mai. E' piu' severa della distanza di
+    sicurezza, che guarda solo dove sono i due carroponti e lascia che uno
+    arrivi mentre l'altro se ne sta andando, se lo spazio basta: qui conta che
+    la vasca sia libera, non che lo spazio basti.
+
+    Quali coppie sono in conflitto:
+      - la stessa vasca, servita da due carroponti: la vasca COMUNE di un
+        confine, dove uno consegna e l'altro preleva;
+      - due vasche piu' vicine della distanza fra due ganci (ingombro +
+        sicurezza): quelle A RIDOSSO di un confine, dove due carroponti non
+        possono stare fermi insieme.
+    Con `ProblemData.interblocco` falso nessuna coppia e' in conflitto."""
+    if not data.interblocco:
+        return False
+    if vasca_a == vasca_b:
+        return True
+    ta, tb = data.tanks[vasca_a], data.tanks[vasca_b]
+    return abs(ta.position - tb.position) < data.hoist_length + data.safety_distance
+
+
+def coppie_interblocco(
+    data: "ProblemData", zones: list["HoistZone"]
+) -> dict[tuple[int, int], set[tuple[str, str]]]:
+    """Per ogni coppia di carroponti (h1 < h2), le coppie di vasche (una di h1,
+    una di h2) che `vasche_in_interblocco` mette in conflitto. Le vasche di un
+    carroponte sono tutte le tappe della sua zona: preleva da ognuna tranne
+    l'ultima, consegna in ognuna tranne la prima, e le soste per strada stanno
+    li' dentro. Coppie di carroponti senza conflitti non compaiono, e con un
+    carroponte solo il dizionario e' vuoto."""
+    vasche = [
+        {data.route[s].tank_id for s in range(z.lo, z.hi + 2)} for z in zones
+    ]
+    fuori = {}
+    for h1 in range(len(zones)):
+        for h2 in range(h1 + 1, len(zones)):
+            coppie = {
+                (a, b)
+                for a in vasche[h1]
+                for b in vasche[h2]
+                if vasche_in_interblocco(data, a, b)
+            }
+            if coppie:
+                fuori[(h1, h2)] = coppie
+    return fuori
 
 
 def soste_candidate(
@@ -2864,6 +2926,141 @@ def solve(
                     model.AddNoOverlap([a_iv, b_iv])
                     n_sep_constraints += 1
 
+    # -- 3-bis) Interblocco delle vasche ------------------------------------
+    #
+    # IDEA. Ogni carroponte PRENOTA la vasca in cui si ferma: da quando parte
+    # verso di lei a quando, ripartito, arriva sulla vasca successiva. Se due
+    # vasche sono in conflitto (`vasche_in_interblocco`), le prenotazioni dei
+    # due carroponti non si sovrappongono mai, modulo T. E' la regola del PLC:
+    # chi deve andare in C non parte finche' il vicino, che era in C, non e'
+    # arrivato in D.
+    #
+    # Le prenotazioni si leggono dalle stesse tappe del vincolo di non
+    # collisione -- presa, traslazione col pezzo, rilascio, rientro con o
+    # senza sosta -- e il verificatore le ricostruisce dai segmenti con la
+    # stessa definizione (`verify.prenotazioni`). Per ogni mossa k ce ne sono
+    # due:
+    #   - sulla vasca k, dove preleva: dalla partenza del rientro che ce lo
+    #     porta (variabile `il_s`, perche' dipende dall'arco scelto) fino
+    #     all'arrivo sulla k+1 col pezzo;
+    #   - sulla vasca k+1, dove consegna: dalla fine della presa sulla k fino
+    #     all'arrivo sulla vasca dopo (`il_e`): quella dove prelevera', o la
+    #     vasca della sosta.
+    # Una sosta in mezzo e' una terza prenotazione, opzionale sul suo
+    # selettore. Se il carroponte riprende dalla STESSA vasca in cui ha
+    # consegnato, non c'e' nessun'altra vasca raggiunta in mezzo e le due
+    # prenotazioni sono una sola, dalla fine della presa precedente
+    # all'arrivo della mossa dopo.
+    def prenotazioni(zd, vasche: set[str]) -> dict[str, list]:
+        """Le prenotazioni (inizio, fine, letterale) del carroponte di `zd`
+        sulle sole `vasche` indicate, per vasca. Il letterale e' None per
+        quelle che ci sono sempre."""
+        lp, h = zd["local_pick"], zd["h"]
+        archi = zd["archi"]
+
+        def vasca(s: int) -> str:
+            return data.route[s].tank_id
+
+        def fine_presa(k: int):
+            return lp[k] + T_(data.pick_time_at(k))
+
+        def arrivo(prelievo, k: int):
+            # l'arrivo sulla k+1 col pezzo, dato l'istante di prelievo della k
+            return prelievo + travel_loaded[k] - T_(data.release_time_at(k + 1))
+
+        inizio_presa, fine_rilascio = {}, {}
+        for k in zd["moves"]:
+            if vasca(k) in vasche:
+                inizio_presa[k] = model.NewIntVar(-BIG, BIG, f"il_s_{h}_{k}")
+            if vasca(k + 1) in vasche:
+                fine_rilascio[k] = model.NewIntVar(-BIG, BIG, f"il_e_{h}_{k}")
+
+        out: dict[str, list] = {}
+        prelievo_di = {}
+        for arco in archi.values():
+            k1, k2 = arco["k1"], arco["k2"]
+            # il prelievo di k2 sulla scala dell'arco: per tutti gli archi
+            # che entrano in k2 e' lo stesso (`bersaglio`)
+            prelievo_di[k2] = arco["span_end"]
+            for opz in arco["opzioni"]:
+                sel, tappe = opz["sel"], opz["tappe"]
+                if len(tappe) == 1 and vasca(tappe[0][0]) == vasca(tappe[0][1]):
+                    # riprende dove ha consegnato: una prenotazione sola
+                    fine_a = arrivo(arco["span_end"], k2)
+                    inizio_b = fine_presa(k1)
+                else:
+                    fine_a = tappe[0][3]  # arrivo sulla prima vasca raggiunta
+                    inizio_b = tappe[-1][2]  # partenza dell'ultima tappa
+                for var, valore in (
+                    (fine_rilascio.get(k1), fine_a),
+                    (inizio_presa.get(k2), inizio_b),
+                ):
+                    if var is None:
+                        continue
+                    vincolo = model.Add(var == valore)
+                    if sel is not None:
+                        vincolo.OnlyEnforceIf(sel)
+                for i in range(1, len(tappe)):
+                    m = tappe[i][0]  # la vasca della sosta
+                    if vasca(m) in vasche:
+                        out.setdefault(vasca(m), []).append(
+                            (tappe[i - 1][2], tappe[i][3], sel)
+                        )
+        for k, var in inizio_presa.items():
+            out.setdefault(vasca(k), []).append(
+                (var, arrivo(prelievo_di[k], k), None)
+            )
+        for k, var in fine_rilascio.items():
+            out.setdefault(vasca(k + 1), []).append((fine_presa(k), var, None))
+        return out
+
+    n_il_constraints = 0
+    coppie_il = coppie_interblocco(data, data.zones)
+    if coppie_il:
+        # Tutti gli estremi delle prenotazioni stanno fra -(rientro piu'
+        # lungo) e DEP_MAX + (rientro piu' lungo): oltre quel numero di
+        # periodi due copie non possono piu' toccarsi.
+        rientro_max = max(
+            travel_empty_ticks(a, b)
+            for z in data.zones
+            for a in range(z.lo, z.hi + 2)
+            for b in range(z.lo, z.hi + 2)
+        )
+        n_shifts_il = math.ceil((DEP_MAX + 2 * rientro_max) / T_min) + 1
+        vasche_di: dict[int, set[str]] = {}
+        for (h1, h2), coppie in coppie_il.items():
+            vasche_di.setdefault(h1, set()).update(a for a, _ in coppie)
+            vasche_di.setdefault(h2, set()).update(b for _, b in coppie)
+        pren = {h: prenotazioni(zone_data[h], v) for h, v in vasche_di.items()}
+        intervalli: dict[tuple, object] = {}
+
+        def intervallo(h, vasca, j, sh):
+            """La prenotazione j del carroponte h su `vasca`, spostata di sh
+            periodi. Si costruisce una volta sola anche se serve a piu'
+            coppie."""
+            chiave = (h, vasca, j, sh)
+            if chiave not in intervalli:
+                s, e, lit = pren[h][vasca][j]
+                intervalli[chiave] = _make_interval(
+                    s + sh * Tv, e + sh * Tv, lit, f"il_{h}_{vasca}_{j}_{sh}"
+                )
+            return intervalli[chiave]
+
+        for (h1, h2), coppie in sorted(coppie_il.items()):
+            if interruzione is not None and interruzione.richiesta:
+                return _soluzione_interrotta()
+            for a, b in sorted(coppie):
+                # a coppie, come per la non collisione: le prenotazioni di uno
+                # stesso carroponte si sovrappongono fra loro durante ogni
+                # traslazione, e un unico AddNoOverlap le escluderebbe.
+                for i in range(len(pren[h1].get(a, []))):
+                    for j in range(len(pren[h2].get(b, []))):
+                        for sh in range(-n_shifts_il, n_shifts_il + 1):
+                            model.AddNoOverlap(
+                                [intervallo(h1, a, i, 0), intervallo(h2, b, j, sh)]
+                            )
+                            n_il_constraints += 1
+
     # -- Obiettivo: minimizzare il takt time entro la tolleranza data -------
     #
     # A parita' di takt time si preferisce il giro con MENO soste per strada.
@@ -3013,7 +3210,8 @@ def solve(
         "required_separation_m": required_sep,
         "clearance_step_mm": data.clearance_step_mm,
         "n_separation_constraints": n_sep_constraints,
-        "n_soste": sum(solver.Value(sel) for sel in sel_soste),
+        "n_interlock_constraints": n_il_constraints,
+        "n_soste":sum(solver.Value(sel) for sel in sel_soste),
         # Lo scarto pesato dai tempi teorici, in secondi x peso: e' il primo
         # criterio con `takt_fisso`, e senza vale None (non e' stato cercato).
         # Si ricalcola dagli istanti con i tempi di trasporto ESATTI, non si
@@ -4637,9 +4835,42 @@ def diagnosi_zone(
     if esito == "boh":
         incerti.append(f"takt time sotto {data.takt_min:.0f} s")
 
-    # -- 2) la non collisione fra carroponti ------------------------------
+    # -- 2) l'interblocco delle vasche --------------------------------------
+    #
+    # Prima della non collisione, perche' e' il vincolo piu' specifico dei
+    # due: se basta togliere lui, la risposta giusta e' quali vasche
+    # liberare, non quanto spazio lasciare fra i carroponti.
+    coppie = coppie_interblocco(data, zones)
+    if coppie:
+        esito, t = _prova(
+            dataclasses.replace(data, interblocco=False), zones, time_limit_s
+        )
+        if esito == "boh":
+            incerti.append("interblocco delle vasche")
+        if esito == "si":
+            in_gioco = sorted({v for cc in coppie.values() for c in cc for v in c})
+            fuori.append(
+                f"E' L'INTERBLOCCO DELLE VASCHE: senza, la linea si risolve "
+                f"(T = {t:.0f} s). Un carroponte non parte verso una vasca "
+                f"interbloccata finche' il vicino non l'ha lasciata ed e' "
+                f"arrivato su un'altra, e qui non c'e' il tempo per farlo. Le "
+                f"vasche in gioco: {', '.join(in_gioco)}. Sposta un confine di "
+                f"zona, allarga il bagno sulle vasche comuni, oppure metti "
+                f"interblocco_vasche = 0 fra i Parametri."
+            )
+            return fuori
+
+    # -- 2-bis) la non collisione fra carroponti ----------------------------
+    #
+    # Anche senza interblocco: le vasche a ridosso sono interbloccate PERCHE'
+    # vicine, e una prova con ingombri nulli e l'interblocco acceso
+    # lascerebbe in piedi proprio quelle delle vasche comuni.
     senza_urti = dataclasses.replace(
-        data, hoist_extent_pos=0.0, hoist_extent_neg=0.0, safety_distance=0.0
+        data,
+        hoist_extent_pos=0.0,
+        hoist_extent_neg=0.0,
+        safety_distance=0.0,
+        interblocco=False,
     )
     esito, _t = _prova(senza_urti, zones, time_limit_s)
     if esito == "boh":

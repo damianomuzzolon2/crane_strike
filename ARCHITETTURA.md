@@ -518,6 +518,7 @@ validarla.
    `(da, a, partenza, arrivo)`, ed e' da quelle che discendono sia il disegno sia
    gli intervalli del punto 5.
 5. **Non collisione** — vedi sotto.
+6. **Interblocco delle vasche** — vedi §5.4.
 
 **L'obiettivo** e' `Minimize(Tv)`, e quando ci sono soste in mezzo fra cui
 scegliere diventa `Minimize(Tv · (n_moves + 1) + numero di soste)`. Il peso e'
@@ -590,6 +591,55 @@ c'e' piu' nessuna stima — ogni tratta e' trattata per quello che e'.
 **Se aggiungi una fase alla presa, al rilascio o al rientro, non c'e' niente da
 aggiornare qui**: basta che la fase dichiari le sue posizioni. E' il punto di
 tutta la struttura.
+
+### 5.4 L'interblocco delle vasche
+
+E' la regola del PLC: chi deve andare in una vasca interbloccata non parte
+finche' il vicino non l'ha lasciata ed e' **arrivato su un'altra**. Si AGGIUNGE
+alla fascia di esclusione, non la sostituisce. Le coppie di vasche in conflitto
+le decide una funzione sola, `vasche_in_interblocco` (stessa vasca, oppure
+vasche piu' vicine di `D`; nessuna con `ProblemData.interblocco` falso), e `coppie_interblocco(data, zones)` le
+raccoglie per coppia di carroponti. Modello, verificatore, diagnosi, Riepilogo e
+`allinea_avvio` passano tutti di li'.
+
+Ogni carroponte **prenota** la vasca in cui si ferma, dalla partenza verso di
+lei all'arrivo sulla vasca successiva. Nel modello (`prenotazioni`, dentro
+`solve`) per ogni mossa `k` ce ne sono due, entrambe sempre presenti:
+
+- sulla vasca `k`: da `il_s_{h}_{k}` -- la partenza dell'ultima tappa del
+  rientro che ce lo porta, legata con `OnlyEnforceIf` al selettore
+  dell'alternativa scelta -- fino all'arrivo sulla `k+1` col pezzo;
+- sulla vasca `k+1`: dalla fine della presa sulla `k` fino a `il_e_{h}_{k}`,
+  l'arrivo della prima tappa del rientro (la vasca dove prelevera', o quella
+  della sosta).
+
+Una sosta in mezzo e' una terza prenotazione, opzionale sul suo selettore. Se il
+carroponte riprende dalla stessa vasca in cui ha consegnato, le due
+prenotazioni coincidono e vanno dalla fine della presa precedente all'arrivo
+della mossa dopo: una corsa del gancio sullo svincolo non e' "arrivare su
+un'altra vasca". Le prenotazioni di due carroponti su vasche in conflitto non
+si sovrappongono: `AddNoOverlap` a coppie, con le copie traslate di `±n·T`,
+come per la fascia (le prenotazioni di uno stesso carroponte si sovrappongono
+durante ogni traslazione, e un unico `AddNoOverlap` le escluderebbe).
+
+Il verificatore (`verify.prenotazioni`) le ricostruisce dai **segmenti**: il
+carroponte e' su una vasca durante presa e rilascio (cambio quota compreso),
+durante un'attesa ferma sopra di lei, e nell'istante in cui una traslazione
+comincia o finisce li' -- cosi' si vede anche una sosta di zero secondi, che il
+modello conta come vasca raggiunta. Fermate successive sulla stessa vasca sono
+una fermata sola.
+
+**La trappola**: le due definizioni devono coincidere. Se il verificatore
+vedesse una vasca raggiunta che il modello non conta, accetterebbe soluzioni
+che il modello non garantisce; nel verso opposto respingerebbe soluzioni
+buone. Chi cambia cosa vuol dire "fermarsi su una vasca" -- un tipo di
+segmento nuovo, una sosta in un posto che non e' una vasca -- deve aggiornare
+tutte e due.
+
+Il default e' **acceso**, anche costruendo `ProblemData` a mano. I test di
+`test_verify.py` che compongono soluzioni a mano lo spengono in `make_data`:
+sono stati scritti per la sola distanza, e parecchi fanno aspettare un carro
+sulla vasca di confine.
 
 ---
 
@@ -828,7 +878,7 @@ non un crash.
 
 I controlli, in ordine: strutturali → layout → coerenza per carroponte →
 copertura delle mosse → fase → permanenze → trasferimenti → **collisioni** →
-capienza.
+capienza → **interblocco** (§5.4).
 
 Il controllo dei **trasferimenti** misura il percorso SCELTO, sosta in mezzo
 compresa: guardare il rientro diritto sarebbe piu' permissivo del vero, cioe'

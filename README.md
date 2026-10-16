@@ -289,8 +289,9 @@ si vedeva, e una linea risolvibile poteva sembrare impossibile solo perche'
 nessuno ci aveva provato.
 
 **Il *perche'* si ottiene rilassando un vincolo per volta** e guardando quale
-rilassamento fa passare la linea: il takt time, le collisioni fra carroponti, i
-tempi massimi di processo, la capienza delle vasche. Quando la causa e' una
+rilassamento fa passare la linea: il takt time, l'interblocco delle vasche, le
+collisioni fra carroponti, i tempi massimi di processo, la capienza delle
+vasche. Quando la causa e' una
 grandezza, viene cercato anche *di quanto* — fino a nominare la singola vasca:
 «basta portare il massimo di ED da 190 a 212 s». Se nessun rilassamento singolo
 basta, lo dice: significa che a bloccare sono piu' vincoli insieme, e la strada
@@ -1395,6 +1396,9 @@ scrive nel Riepilogo.
      dividere la linea.
 6. **Sicurezza**: `hoist_extent_pos`, `hoist_extent_neg` (ingombro del
    carrello, vedi sotto) e `safety_distance` (margine minimo aggiuntivo).
+   In piu', l'**interblocco delle vasche** (`ProblemData.interblocco`, acceso
+   di default): vedi
+   [Interblocco delle vasche](#interblocco-delle-vasche).
 7. **Movimentazione verticale**: `kin_lift_empty`, `kin_lift_loaded`,
    `engage_time`, `disengage_time` — grandezze del carroponte. Corsa e
    sgocciolamento stanno sulla vasca (punto 1). Vedi sotto.
@@ -1927,7 +1931,11 @@ Controlla:
    finestre) e si controlla `|x_i(t) - x_j(t)| >= hoist_length + safety_distance`
    per ogni coppia e ogni istante;
 9. capienza delle vasche: quanti posti servono davvero contro quanti sono
-   dichiarati in `capacity`.
+   dichiarati in `capacity`;
+10. **interblocco delle vasche**: le prenotazioni di due carroponti su vasche
+    in conflitto non si sovrappongono (vedi
+    [Interblocco delle vasche](#interblocco-delle-vasche)). Le prenotazioni si
+    ricostruiscono dai segmenti disegnati, non dalle variabili del solutore.
 
 Il campionamento del punto 8 include **tutti** gli spigoli dei profili
 cinematici piu' una griglia uniforme di un tick. Fra due spigoli la posizione
@@ -2202,6 +2210,53 @@ adiacenti che si scavalcano o zone lontane che si sovrappongono nello spazio.
 un messaggio esplicito, e `solve_auto_zones` la usa come pre-filtro accanto a
 quello sul takt time — cosi' la scelta automatica delle zone trova da sola una
 suddivisione valida quando esiste.
+
+## Interblocco delle vasche
+
+La distanza di sicurezza guarda solo **dove** sono i due carroponti: lascia
+che il carro 1 arrivi in una vasca mentre il carro 2 se ne sta andando, se lo
+spazio basta. Sull'impianto il PLC ragiona di solito in un altro modo: se il
+carro 1 deve andare in C e in C c'e' il carro 2, il carro 1 **non parte**
+finche' il carro 2 non e' arrivato su un'altra vasca (D). L'interblocco porta
+questa regola nel calcolo.
+
+**Come funziona.** Ogni carroponte *prenota* la vasca in cui si ferma: da
+quando comincia a muoversi verso di lei a quando, ripartito, arriva sulla
+vasca successiva. Se due vasche sono in conflitto, le prenotazioni dei due
+carroponti non si sovrappongono mai. Una corsa del gancio su uno svincolo, o un
+punto di passaggio fra due vasche, non e' "arrivare su un'altra vasca": chi
+riprende dalla stessa vasca in cui ha consegnato la tiene prenotata per tutto
+il tempo. Una sosta per strada in un'altra vasca invece si', e libera la prima.
+
+**Quali vasche sono in conflitto** (fra due carroponti diversi), senza niente
+da compilare:
+
+| caso | esempio |
+| --- | --- |
+| la stessa vasca | la vasca comune di un confine, dove uno consegna e l'altro preleva |
+| due vasche piu' vicine della distanza fra due ganci (ingombro + sicurezza) | le vasche a ridosso di un confine |
+
+**Il parametro `interblocco_vasche`** (foglio Parametri, default **1**) lo
+accende o lo spegne per tutta la linea. Con 0 si torna alla sola distanza di
+sicurezza, come prima che l'interblocco esistesse.
+
+**Si aggiunge alla non collisione, non la sostituisce.** L'interblocco copre le
+vasche in cui i carroponti si fermano; la fascia di esclusione continua a
+proteggere i passaggi vicino al confine senza fermate.
+
+**Costa takt time, a volte.** La regola e' piu' severa della distanza: fra la
+consegna del carro 1 e il prelievo del carro 2 sulla vasca comune devono stare
+due viaggi in fila (il carro 1 che arriva altrove, poi il carro 2 che arriva
+li'), e il bagno su quella vasca deve poterli contenere. Se la linea non si
+risolve piu', la diagnosi lo dice con "E' L'INTERBLOCCO DELLE VASCHE" e
+l'elenco delle vasche in gioco. Il Riepilogo dei risultati dice sempre se
+l'interblocco era attivo, e su quali vasche.
+
+**Ciclogrammi salvati prima.** Un ciclogramma calcolato o composto senza
+interblocco puo' non rispettarlo: riaprendolo, il verificatore lo segnala con
+un errore `interlock` che dice quali carroponti, quale vasca e di quanti
+secondi si sovrappongono. Si ricalcola, oppure si mette
+`interblocco_vasche = 0`.
 
 ## Assunzioni e limitazioni importanti (leggere prima di fidarsi dei risultati)
 

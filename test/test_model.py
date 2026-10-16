@@ -1168,6 +1168,12 @@ def test_dove_va_ad_aspettare_il_carro():
         kin_lift_empty=Kinematics(v_max=400, a_max=600),
         kin_lift_loaded=Kinematics(v_max=200, a_max=300),
         engage_time=2.0, disengage_time=1.0, clearance_step_mm=300.0,
+        # La sosta in mezzo serve a stare lontani dal vicino per la DISTANZA
+        # di sicurezza. Con l'interblocco, su vasche a 1500 mm e ganci a
+        # 2100, le vasche attorno al confine sono tutte interbloccate fra loro
+        # e fermarsi nell'una o nell'altra non libera niente: qui si prova la
+        # sosta, non l'interblocco.
+        interblocco=False,
     )
     zone_tre = [HoistZone(0, 1), HoistZone(2, 3), HoistZone(4, 5)]
     # Limite di tempo largo di proposito: la domanda e' quale sia l'OTTIMO, non
@@ -1804,6 +1810,57 @@ def test_takt_fisso_ricerca_zone():
     )
 
 
+def test_interblocco():
+    """L'interblocco delle vasche, dal solutore al verificatore.
+
+    Il caso e' costruito perche' la differenza si veda: la vasca comune V2 ha
+    un bagno di al piu' 9 s, e le vasche vicine stanno a 6000 mm. La distanza
+    di sicurezza si accontenta di qualche secondo -- uno se ne va mentre
+    l'altro arriva -- mentre con l'interblocco il secondo carroponte puo'
+    partire solo quando il primo e' arrivato in V1, e i due viaggi in fila
+    non ci stanno in 9 s."""
+    print("\n[26] interblocco delle vasche")
+    import dataclasses
+
+    from model import diagnosi_zone
+
+    zone = [HoistZone(0, 1), HoistZone(2, 3)]
+
+    # 1) una linea normale: il solutore lo rispetta, il verificatore concorda
+    larga = linea(4, 6000, zone, dwell=(5, 60), takt_max=60.0)
+    sol, r = risolvi_e_verifica(larga, "interblocco su linea larga")
+    check(
+        r is not None and r.ok and sol.raw["n_interlock_constraints"] > 0,
+        _esito(
+            sol, r,
+            f"con l'interblocco la soluzione passa la verifica "
+            f"(T={sol.T}, {sol.raw.get('n_interlock_constraints')} vincoli)",
+        ),
+    )
+
+    # 2) la vasca comune con il bagno corto
+    route = list(larga.route)
+    route[2] = StationSpec("V2", 0.5, 9.0)
+    corta = dataclasses.replace(larga, route=route)
+    check(
+        solve(corta, time_limit_s=60.0).status == "INFEASIBLE",
+        "con l'interblocco il bagno corto sulla vasca comune non basta",
+    )
+    sol, r = risolvi_e_verifica(
+        dataclasses.replace(corta, interblocco=False), "senza interblocco"
+    )
+    check(
+        r is not None and r.ok,
+        _esito(sol, r, "senza interblocco la stessa linea si risolve"),
+    )
+    # 3) la diagnosi nomina l'interblocco, e la vasca
+    righe = diagnosi_zone(corta, zone, time_limit_s=30.0)
+    check(
+        any("INTERBLOCCO" in riga and "V2" in riga for riga in righe),
+        f'la diagnosi lo riconosce: "{righe[0][:70]}..."',
+    )
+
+
 def main():
     print("=" * 72)
     print("TEST END-TO-END DEL MODELLO (richiede OR-Tools)")
@@ -1834,6 +1891,7 @@ def main():
     test_takt_fisso()
     test_takt_fisso_ricerca_zone()
     test_rifinitura_tempi_in_vasca()
+    test_interblocco()
     print("\n" + "=" * 72)
     print(f"RISULTATO: {_n_pass} ok, {_n_fail} falliti  ({time.perf_counter() - t0:.0f}s)")
     print("=" * 72)

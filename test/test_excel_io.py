@@ -1543,6 +1543,53 @@ def test_misure_di_disegno():
         os.unlink(p)
 
 
+def test_interblocco():
+    print("\n[27-bis] interblocco: un parametro per tutta la linea")
+    from excel_io import scrivi_linea
+
+    def riga_parametro(percorso: str, nome: str) -> int:
+        from openpyxl import load_workbook
+
+        ws = load_workbook(percorso)[FOGLIO_PARAMETRI]
+        for riga in range(2, ws.max_row + 1):
+            if _testo_cella(ws.cell(riga, 1).value) == nome:
+                return riga
+        raise AssertionError(f"parametro '{nome}' non trovato nel modello")
+
+    p = modello_temporaneo()
+    rifatto = None
+    try:
+        check(leggi_problema(p).data.interblocco, "nel modello e' acceso")
+        check(
+            valore(p, FOGLIO_VASCHE, "K1") is None,
+            "il foglio Vasche non ha colonne per l'interblocco",
+        )
+        riga = riga_parametro(p, "interblocco_vasche")
+        modifica(p, FOGLIO_PARAMETRI, f"B{riga}", 0)
+        cfg = leggi_problema(p)
+        check(not cfg.data.interblocco, "interblocco_vasche = 0 lo spegne")
+        # si rilegge com'era: il file riscritto porta la stessa scelta
+        fd, rifatto = tempfile.mkstemp(suffix=".xlsx")
+        os.close(fd)
+        scrivi_linea(rifatto, cfg)
+        check(
+            not leggi_problema(rifatto).data.interblocco,
+            "riscrivendo la linea resta spento",
+        )
+        modifica(p, FOGLIO_PARAMETRI, f"B{riga}", None)
+        check(leggi_problema(p).data.interblocco, "vuoto vale 1")
+        modifica(p, FOGLIO_PARAMETRI, f"B{riga}", 2)
+        msg = errore_leggendo(p)
+        check(
+            "interblocco_vasche" in msg and "0 oppure 1" in msg,
+            f"un valore diverso da 0 e 1 viene respinto: \"{msg[-60:]}\"",
+        )
+    finally:
+        os.unlink(p)
+        if rifatto:
+            os.unlink(rifatto)
+
+
 def test_decelerazione_separata():
     """La frenata ha i suoi numeri, e si vedono nei tempi."""
     print("\n[28] decelerazione distinta dall'accelerazione")
@@ -1906,6 +1953,7 @@ def main():
     test_cambio_quota()
     test_ordine_svincoli()
     test_misure_di_disegno()
+    test_interblocco()
     test_decelerazione_separata()
     test_avvicinamento_sollevamento()
     test_takt_fisso_e_pesi()

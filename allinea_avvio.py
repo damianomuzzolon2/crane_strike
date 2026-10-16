@@ -30,7 +30,9 @@ Gli spostamenti si scelgono con un piccolo modello CP-SAT, che chiede:
     fanno collidere. Quali sono si sa PRIMA di risolvere: spostare rigidamente
     i giri vuol dire che la distanza fra due carroponti dipende solo da di
     quanto sono sfasati, e la si calcola per tutti gli sfasamenti campionando
-    le due traiettorie una volta sola.
+    le due traiettorie una volta sola. Lo stesso vale per l'INTERBLOCCO delle
+    vasche: le prenotazioni si spostano col giro, e si scartano gli
+    sfasamenti che ne farebbero sovrapporre due in conflitto.
 
 Fra gli spostamenti possibili si prende quello che CAMBIA MENO il ciclogramma
 -- la somma dei secondi di cui cambiano i bagni di confine --, a parita' quello
@@ -62,10 +64,11 @@ from model import (
     ProblemData,
     Solution,
     build_solution,
+    coppie_interblocco,
     errore_pesato,
     scarti_dal_teorico,
 )
-from verify import verify_solution
+from verify import prenotazioni, sovrapposizione, verify_solution
 
 # Margine minimo attorno all'istante di avvio [s]: per tanto prima e tanto dopo
 # tutti i carroponti devono essere a riposo. Zero vorrebbe dire un istante che
@@ -227,6 +230,28 @@ def allinea_avvio(
         sicuri[(a, b)] = _sfasamenti_sicuri(
             pos[a], pos[b], richiesta, buffer, min(2 * S, N // 2)
         )
+    # ... e quelli che non rompono l'INTERBLOCCO: spostare rigidamente i giri
+    # sposta rigidamente anche le prenotazioni delle vasche, quindi anche qui
+    # basta calcolarle una volta. Come per le distanze, lo zero resta.
+    coppie_il = coppie_interblocco(data, data.zones)
+    for (a, b), valori in sicuri.items():
+        conflitti = coppie_il.get((a, b))
+        if not conflitti:
+            continue
+        pa = prenotazioni(data, sol.segments_per_hoist[a], T)
+        pb = prenotazioni(data, sol.segments_per_hoist[b], T)
+        sicuri[(a, b)] = [
+            r
+            for r in valori
+            if r == 0
+            or all(
+                # `a` spostato di r passi rispetto a `b` = `b` spostato di -r
+                sovrapposizione(p, q, T, -r * g)[0] <= eps
+                for p in pa
+                for q in pb
+                if (p.vasca, q.vasca) in conflitti
+            )
+        ]
 
     # -- il modello ---------------------------------------------------------
     from ortools.sat.python import cp_model
