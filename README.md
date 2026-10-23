@@ -29,7 +29,7 @@ periodici. È una scelta valida: il codice qui sotto la usa.
 
 ## I file del progetto
 
-In radice ci sta **solo il programma**: gli undici moduli che lo compongono, i due
+In radice ci sta **solo il programma**: i dodici moduli che lo compongono, i due
 documenti e il file da doppio clic. Tutto il resto e' in una sottocartella.
 
 ```text
@@ -37,7 +37,7 @@ create_cyclograms/
   interfaccia.py  simulazione.py  ciclogramma.py       <- i moduli: nessuna
   model.py  verify.py  excel_io.py  avvio.py               sottocartella, cosi'
   kinematics.py  plotting.py  manuale.py                  si importano per nome
-  allinea_avvio.py
+  allinea_avvio.py  programma_carri.py
   CraneStrike.bat  README.md  ARCHITETTURA.md
   requirements.txt
 
@@ -97,6 +97,7 @@ OR-Tools installato.
 | `plotting.py` | 470 | `plot_cyclogram()`: disegna il ciclogramma (posizione lungo la rotaia contro tempo) con il profilo cinematico vero, non con segmenti diritti, i punti sugli istanti in cui succede qualcosa (aggancio, sgancio, partenza, arrivo), le frecce su e giu' sulle corse verticali del gancio e il pezzo fermo in vasca come linea grigia. |
 | `avvio.py` | 572 | Il **punto di avvio**: `trova_avvii()` cerca nel ciclogramma gli istanti in cui tutti i carroponti sono fermi, col gancio in basso, e non stanno ne' al carico ne' allo scarico — quelli da cui la linea si puo' mettere in marcia. Ce n'e' quasi sempre piu' d'uno e sono equivalenti: si restituiscono tutti, e nella finestra si scorrono col pulsante `Avvio`. Se un istante del genere non esiste sceglie quello che sbaglia di meno, e dice di quanto. Non calcola niente di nuovo: legge i segmenti del ciclogramma. Il risultato si vede come linea nera verticale sul grafico, nel foglio Riepilogo, nel pannello della finestra e in fondo al comando da terminale. |
 | `allinea_avvio.py` | 359 | Rende **esatto** un punto di avvio approssimato: `allinea_avvio()` sposta rigidamente nel tempo il giro di qualche carroponte (tutte le sue mosse insieme, con attese e soste) finche' esiste un istante in cui sono tutti a riposo. Cambiano solo i bagni di confine fra un carroponte e l'altro, dentro le tolleranze, e le distanze fra carroponti restano rispettate. Gli spostamenti li sceglie un piccolo modello CP-SAT; il risultato si tiene solo se la verifica indipendente lo passa. Vedi *Il punto di avvio: la linea nera*. |
+| `programma_carri.py` | 473 | Il **programma dei carri**: `programma_carri()` traduce il ciclogramma nei passi che ogni carro esegue sul PLC (`Lifting`, `Transfer`, `Dripping`, `Pause`, `External Request`, `Crane Syncro`, `End Program`). Non calcola niente di nuovo: legge i segmenti, e presa e rilascio dalle loro fasi. Il programma comincia dall'istante di avvio, e i `Crane Syncro` vengono dall'interblocco delle vasche. Lo scrive `excel_io` nel foglio `SequenzaCarri`. |
 | `simulazione.py` | 1388 | La **simulazione**: la linea vista di fronte, in movimento. `Simulazione` e' la parte che conta e non importa tkinter — dato un istante dice dove sta ogni carroponte (posizione, quota del gancio, cosa sta facendo) e ogni pezzo; `FinestraSimulazione` e' solo la finestra che la anima. Non calcola niente di nuovo: legge `segments_per_hoist` e `actual_time` della soluzione, cioe' gli stessi oggetti che disegnano il ciclogramma. |
 
 ### Programmi da lanciare
@@ -127,6 +128,7 @@ moduli si trovano comunque.
 | `test/test_simulazione.py` | 755 | **La simulazione.** Il controllo che conta e' incrociato: ogni pezzo appeso deve stare *esattamente* dove sta il gancio di un carroponte che lo tiene, e ogni carroponte che tiene qualcosa deve avere un pezzo li'. Se simulazione e ciclogramma raccontassero due storie diverse, una delle due sarebbe sbagliata. Lo stesso controllo viene rifatto sulle quote **disegnate**, che non sono quelle vere: il telaio deve restare appeso al bilancino anche dopo il rimappaggio delle profondita'. Le vasche di prova hanno corse verticali **diverse fra loro** apposta: con corse tutte uguali, prendere la corsa della vasca sbagliata darebbe comunque il risultato giusto. In fondo, i casi in cui la geometria del disegno degenera: corse e ingombri tutti a zero, tutte le tappe nella stessa vasca. Non richiede OR-Tools. |
 | `test/test_allinea_avvio.py` | 163 | **L'avvio reso esatto.** Su un ciclogramma risolto con l'avvio approssimato, `allinea_avvio` lo deve rendere esatto con la verifica che passa, lo stesso takt, ogni giro spostato rigidamente con le sue attese, e cambiati solo i bagni di confine, dentro le tolleranze. Un avvio gia' esatto non si tocca; con le tolleranze di confine chiuse non si sposta niente. Richiede OR-Tools. |
 | `test/test_avvio.py` | 464 | **Il punto di avvio.** Che sia davvero un punto di avvio: in quell'istante ogni carroponte sta dove il riepilogo dice, fermo, col gancio in basso, lontano da carico e scarico, e con mezzo secondo di margine da entrambe le parti. Quando un istante comune non esiste, l'errore dichiarato viene confrontato con quello che si ottiene **campionando** tutto il ciclo: deve essere il minimo. E gli istanti equivalenti devono essere tanti quanti i tratti al minimo che si contano campionando, ciascuno in un tratto diverso. Non richiede OR-Tools. |
+| `test/test_programma_carri.py` | 463 | **Il programma dei carri.** Che i passi siano comandi del PLC con parametri del PLC (velocita' 9 o 10, posizioni `Pos.<...>`, secondi interi); un trasporto col pezzo per mossa; le pause arrotondate che sommano il tempo d'attesa del ciclogramma; `External Request` solo prima di carico e scarico; un `Crane Syncro` prima di entrare nella vasca comune, riferito al passo del vicino che viene subito dopo il suo arrivo su un'altra vasca -- e che il vicino quel passo lo raggiunga davvero prima. Piu' svincoli, cambio quota, l'avvio e il foglio Excel. Non richiede OR-Tools. |
 | `test/test_interfaccia.py` | 1085 | **Le funzioni dell'interfaccia grafica.** La finestra viene costruita davvero e pilotata da codice — si "premono" i pulsanti chiamando i metodi e si fa girare il ciclo degli eventi con `update()` invece di `mainloop()`. Verifica che i pulsanti si abilitino al momento giusto, che il calcolo in background consegni il risultato, che una soluzione calcolata riletta come tempi in vasca e ricomposta dia esattamente lo stesso ciclogramma, che le modifiche vengano riverificate, che l'immagine salvata sia il ciclogramma anche componendo dal pettine, che la scheda di modifica si apra solo dopo 'Calcola man' o 'Modifica' e mai mentre il solutore lavora, che un ciclogramma salvato si riapra identico anche se lasciato a meta', che la composizione da zero produca il pettine giusto, che un trasporto assegnato si possa togliere con lo stesso gesto con cui lo si e' assegnato, e che la simulazione si apra solo quando un ciclogramma c'e' davvero e segua le modifiche mentre e' aperta. Richiede OR-Tools e un ambiente grafico. |
 
 `kinematics.py` ha in fondo un autotest che si lancia allo stesso modo
@@ -1033,7 +1035,7 @@ si guarda dove il conto non torna: li' non c'e' niente da trovare, si vede.
 Sia l'interfaccia sia la riga di comando producono, accanto al file di
 ingresso:
 
-- **`linea_risultati.xlsx`** — tredici fogli, in **due meta'**, ciascuna dietro
+- **`linea_risultati.xlsx`** — quattordici fogli, in **due meta'**, ciascuna dietro
   un cartello con la linguetta colorata:
 
   **`Input`** (linguetta blu) — quello che segue e' la **linea nel formato di
@@ -1047,6 +1049,7 @@ ingresso:
   | --- | --- |
   | `Riepilogo` | takt time, **produttivita' in pezzi/ora**, numero di carroponti, il **punto di avvio** (l'istante del ciclo da cui partire e dove si trova ogni carroponte in quel momento), zone e tratto di rotaia servito, **utilizzo di ciascun carroponte**, distanza minima raggiunta contro quella richiesta, esito della verifica |
   | `Movimenti` | una riga per tratto: carroponte, fase (presa, trasporto, rilascio, spostamento a vuoto, attesa), vasca di partenza e arrivo, istanti di inizio e fine, durata, posizioni. E' la tabella da passare a chi programma il PLC |
+  | `SequenzaCarri` | il **programma di ogni carro**, passo per passo, nel formato delle tabelle del PLC: un blocco di tre colonne per carro, cinque righe per passo (`step[n]`, `command`, `param1`, `param2`, `param3`). Vedi *Il foglio SequenzaCarri* qui sotto |
   | `TempiVerticali` | dove va a finire il tempo di presa e di rilascio, vasca per vasca: discesa del gancio, aggancio, sollevamento, sgocciolamento, e i totali. Serve a non dover indovinare perche' una presa duri quanto dura |
   | `FlussoPezzo` | il percorso di **un** pezzo lungo tutta la linea: ingresso e uscita da ogni vasca, permanenza effettiva, margine rispetto ai limiti di processo, posti occupati |
   | `Verifica` | l'elenco dei rilievi del verificatore indipendente, colorati per gravita' |
@@ -1060,6 +1063,46 @@ ingresso:
 
   Chiedendo solo il referto, senza la linea dentro, i cartelli non compaiono:
   non ci sarebbe niente da dividere.
+
+  **Il foglio `SequenzaCarri`** e' il ciclogramma detto come lo esegue il PLC:
+  per ogni carro la lista dei passi, ciascuno con un comando e tre parametri.
+
+  | comando | param1 | param2 |
+  | --- | --- | --- |
+  | `Lifting` | la quota: `Pos.Top`, `Pos.Btm`, e con una zona di cambio quota anche `Pos.Int1` e `Pos.Int2` | 9 col telaio appeso, 10 a vuoto |
+  | `Transfer` | `Pos.` seguito dal nome della vasca d'arrivo | 9 col telaio appeso, 10 a vuoto |
+  | `Transfer Outlet` | `Pos.` e la vasca: si va al suo svincolo **positivo**, o al punto di cambio quota del **carico** | come `Transfer` |
+  | `Transfer Inlet` | `Pos.` e la vasca: si va al suo svincolo **negativo**, o al punto di cambio quota dello **scarico** | come `Transfer` |
+  | `Dripping` | secondi di sgocciolamento | — |
+  | `Pause` | secondi di attesa | — |
+  | `External Request` | — | — |
+  | `Crane Syncro` | il carro da aspettare | il passo di quel carro in cui si e' tolto di mezzo |
+  | `End Program` | — | — |
+
+  - **Il passo 1** e' quello dell'istante di avvio del Riepilogo se in
+    quell'istante il carro e' fermo in posizione bassa; altrimenti e' quello
+    del primo istante dopo in cui lo e'. "Fermo in posizione bassa" vuol dire
+    le finestre di riposo del punto di avvio (attese, aggancio e sgancio, fuori
+    da carico e scarico); un carro che si ferma solo al carico o allo scarico
+    usa le sue attese li'. Se il passo 1 cade dentro un'attesa, l'attesa si
+    spezza in due: il resto apre il programma, la parte gia' passata lo chiude.
+  - **`External Request`** sta prima di partire verso il carico o verso lo
+    scarico -- prima di tutto il rientro, non solo dell'ultimo tratto.
+  - **`Crane Syncro`** sta prima di partire verso una vasca dell'interblocco
+    (la vasca comune di un confine, o una a ridosso di quelle del vicino). Il
+    passo indicato e' quello che il vicino comincia appena arrivato su una
+    vasca libera, l'ultima volta prima della partenza. Il ciclogramma rispetta
+    gia' l'interblocco, quindi il Crane Syncro e' una garanzia in piu' e non
+    un'attesa in piu'. Se il ciclogramma non lo rispetta (composto a mano,
+    per esempio) sotto le tabelle c'e' una nota: li' il PLC fara' aspettare.
+    Con l'interblocco spento non ci sono Crane Syncro.
+  - **Aggancio e sgancio** non sono passi: il PLC li fa dentro il `Lifting`.
+    Una corsa verticale lunga zero (il carico, di solito) non produce niente.
+  - **Le pause sono in secondi interi**, e l'arrotondamento si porta dietro il
+    resto: la somma delle pause di un giro resta quella del ciclogramma.
+  - **I punti che non sono vasche** si raggiungono con `Transfer Outlet` /
+    `Transfer Inlet`, e param1 resta `Pos.<vasca>`: e' il comando a dire che si
+    va allo svincolo (o al cambio quota) e non al centro della vasca.
 
 - **`linea.png`** — il **ciclogramma** disegnato. Sempre quello, anche se a
   schermo c'era il pettine: e' il documento che si consegna. La **linea nera
@@ -2328,6 +2371,7 @@ python test/test_verify.py       # il verificatore              (no OR-Tools)
 python test/test_excel_io.py     # lettura e scrittura Excel    (no OR-Tools)
 python test/test_simulazione.py  # la simulazione               (no OR-Tools)
 python test/test_avvio.py        # il punto di avvio            (no OR-Tools)
+python test/test_programma_carri.py # il programma dei carri    (no OR-Tools)
 python test/test_allinea_avvio.py # l'avvio reso esatto         (serve OR-Tools)
 python test/test_model.py        # il modello CP-SAT            (serve OR-Tools)
 python test/test_interfaccia.py  # l'interfaccia grafica        (serve OR-Tools)

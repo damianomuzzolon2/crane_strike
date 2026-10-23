@@ -14,7 +14,7 @@ test per **617 asserzioni** complessive.
 
 ### Dove stanno i file
 
-In radice ci sono **solo gli undici moduli** del programma, i due documenti,
+In radice ci sono **solo i dodici moduli** del programma, i due documenti,
 `CraneStrike.bat` e `requirements.txt`. Il resto sta in `test/`, `strumenti/`,
 `doc/`, `dati/` e `risorse/`.
 
@@ -69,6 +69,8 @@ da solo la regola qui sotto: nessun modulo chiama quelli che gli stanno sopra.
         +----------+--------+-+---------+----------+
         |          |          |         |          |
   excel_io.py manuale.py plotting.py verify.py simulazione.py
+        |          |          |         |          |
+  programma_carri.py          |         |          |
         |          |          |         |          |
         +----------+----+-----+---------+----------+
                         |
@@ -918,7 +920,7 @@ Il file dei **risultati** e' due cose insieme, in quest'ordine:
 
 ```text
 Input | Istruzioni Vasche Percorso Parametri Zone CambioQuota Ciclogramma
-Output | Riepilogo Movimenti TempiVerticali FlussoPezzo Verifica
+Output | Riepilogo Movimenti SequenzaCarri TempiVerticali FlussoPezzo Verifica
 ```
 
 `Input` e `Output` sono cartelli con la linguetta colorata. Il file si apre sul
@@ -968,6 +970,36 @@ Due punti che si sono gia' rivelati fragili:
 - **Il foglio `TempiVerticali`** esiste perche' una presa da 26 s su una corsa
   da un metro e mezzo sembra un errore di calcolo, finche' non si vede che dieci
   di quei secondi sono lo sgocciolamento dichiarato.
+
+### 8.2 Il foglio `SequenzaCarri` e `programma_carri.py`
+
+Il programma di ogni carro nei comandi del PLC. `programma_carri.py` decide i
+passi, `excel_io._scrivi_sequenza_carri` li scrive e basta. Tre cose da sapere:
+
+- **I passi si leggono, non si calcolano.** Trasporti, rientri a vuoto, corse
+  sugli svincoli e attese vengono dai `Segment`; presa e rilascio dalle loro
+  **fasi** (`pick_phases` / `release_phases`), una volta per blocco anche
+  quando il cambio quota li spezza in piu' segmenti. Aggancio e sgancio non
+  sono passi. Lo sgocciolamento si riconosce dalla forma della fase (ferma,
+  col telaio appeso, sopra la quota di riposo), non dal nome.
+- **Il `Crane Syncro` e' l'interblocco detto a passi.** Le coppie di vasche in
+  conflitto sono quelle di `coppie_interblocco`, e "arrivare su una vasca"
+  vuol dire la stessa cosa che in `verify.prenotazioni`: un Transfer che
+  finisce SU una vasca del percorso; svincoli e punti di passaggio sono
+  strada, il punto di cambio quota conta come la sua vasca. Se le due
+  definizioni divergessero, i passi indicati non sarebbero quelli in cui il
+  vicino e' davvero fuori. Quando il ciclogramma viola l'interblocco il
+  Crane Syncro si scrive lo stesso, con una nota sotto le tabelle.
+- **Il passo 1 si sceglie carro per carro** (`_inizio_del_programma`):
+  l'istante di avvio se il carro li' e' a riposo secondo
+  `avvio.finestre_di_riposo`, altrimenti l'inizio della sua prossima finestra.
+  Le due definizioni di "a riposo" sono la stessa apposta: il Riepilogo dice
+  dove lasciare i carri, e il programma deve partire da li'.
+- **I numeri di passo si risolvono per ultimi.** Il passo da aspettare si
+  tiene come riferimento all'oggetto `Passo` (il Transfer che porta il vicino
+  fuori), e diventa un numero solo quando tutti i programmi sono completi:
+  ruotati sull'avvio, con le richieste inserite e le pause a zero tolte.
+  Contarlo prima darebbe un numero sbagliato appena si aggiunge un passo.
 
 ---
 
@@ -1212,6 +1244,7 @@ un codice d'uscita.
 | `test/test_excel_io.py` | 143 | — | un file compilato male viene respinto con un messaggio utile? |
 | `test/test_simulazione.py` | 84 | — | la simulazione mostra il ciclogramma che c'e'? |
 | `test/test_avvio.py` | 36 | — | il punto di avvio e' davvero un punto di avvio? |
+| `test/test_programma_carri.py` | 56 | — | il programma dei carri e' il ciclogramma, detto nei comandi del PLC? |
 | `test/test_allinea_avvio.py` | 15 | OR-Tools | un avvio approssimato diventa esatto senza rompere niente? |
 | `test/test_model.py` | 94 | OR-Tools | il modello produce soluzioni fisicamente valide? |
 | `test/test_interfaccia.py` | 137 | OR-Tools + grafica | l'interfaccia si comporta come deve? |

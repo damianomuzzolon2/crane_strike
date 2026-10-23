@@ -45,6 +45,7 @@ from model import (
     Tank,
     ZonaCambioQuota,
 )
+from programma_carri import programma_carri
 
 FOGLIO_ISTRUZIONI = "Istruzioni"
 FOGLIO_VASCHE = "Vasche"
@@ -54,6 +55,7 @@ FOGLIO_ZONE = "Zone"
 FOGLIO_CAMBIO_QUOTA = "CambioQuota"
 FOGLIO_CICLOGRAMMA = "Ciclogramma"
 FOGLIO_PASSAGGI = "Passaggi"
+FOGLIO_SEQUENZA_CARRI = "SequenzaCarri"
 
 # Le colonne della tabella del foglio Ciclogramma, nell'ordine in cui si
 # scrivono. UNA definizione sola, usata da chi scrive e da chi rilegge: le
@@ -2378,6 +2380,68 @@ def _righe_movimenti(data: ProblemData, solution) -> list[list]:
     return righe
 
 
+def _scrivi_sequenza_carri(wb, data: ProblemData, solution, avvio) -> None:
+    """Il foglio con il programma di ogni carro, nel formato delle tabelle del
+    PLC: un blocco di tre colonne per carro, cinque righe per passo (il passo,
+    il comando e i suoi tre parametri). Il formato e' quello che si incolla
+    nel progetto del PLC, e per questo il foglio non porta nient'altro: le
+    note, quando ci sono, stanno sotto l'ultimo passo.
+
+    I passi li decide `programma_carri`; qui si scrivono e basta."""
+    from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
+    from openpyxl.utils import get_column_letter
+
+    programma = programma_carri(data, solution, avvio)
+    ws = wb.create_sheet(FOGLIO_SEQUENZA_CARRI)
+    spesso = Side(style="medium")
+    bordo = Border(left=spesso, right=spesso, top=spesso, bottom=spesso)
+    sfondo = PatternFill("solid", fgColor="D9E1F2")
+    grigio = PatternFill("solid", fgColor="F2F2F2")
+    for h, passi in enumerate(programma.programmi):
+        c = 1 + 4 * h  # tre colonne per carro e una vuota in mezzo
+        ws.merge_cells(start_row=1, start_column=c, end_row=1, end_column=c + 2)
+        ws.cell(1, c, f"crane {h + 1}")
+        for col in range(c, c + 3):
+            ws.cell(1, col).border = bordo
+            ws.cell(1, col).fill = sfondo
+        ws.cell(1, c).font = Font(bold=True)
+        ws.cell(1, c).alignment = Alignment(horizontal="center")
+        for i, passo in enumerate(passi):
+            r = 2 + 5 * i
+            ws.cell(r, c, f"step[{i + 1}]")
+            ws.cell(r, c + 1, "UDT PROGRAM STEP")
+            for col in range(c, c + 3):
+                ws.cell(r, col).fill = grigio
+            for j, (nome, valore) in enumerate(
+                zip(("command", "param1", "param2", "param3"), passo.riga()),
+                start=1,
+            ):
+                ws.cell(r + j, c, nome)
+                ws.cell(r + j, c + 1, "Int")
+                ws.cell(r + j, c + 2, valore)
+        ws.column_dimensions[get_column_letter(c)].width = 9.3
+        ws.column_dimensions[get_column_letter(c + 1)].width = 18.1
+        ws.column_dimensions[get_column_letter(c + 2)].width = 16
+        ws.column_dimensions[get_column_letter(c + 3)].width = 4
+
+    r = ws.max_row + 3
+    for testo in (
+        "Il passo 1 di ogni carro e' quello dell'istante di avvio del Riepilogo"
+        + (f" ({avvio.t:.2f} s del ciclo)" if avvio is not None else "")
+        + " se in quell'istante il carro e' fermo in posizione bassa, altrimenti "
+        "quello del primo istante dopo in cui lo e'.",
+        "Velocita' (param2 di Lifting e Transfer): "
+        "9 col telaio appeso, 10 a vuoto. Pause e Dripping in secondi.",
+        "Transfer Outlet: verso lo svincolo positivo della vasca, o il cambio "
+        "quota del carico. Transfer Inlet: verso lo svincolo negativo, o il "
+        "cambio quota dello scarico.",
+        *programma.note,
+    ):
+        ws.cell(r, 1, testo).font = Font(italic=True, color="808080")
+        r += 1
+    ws.freeze_panes = "A2"
+
+
 def _utilizzo_carroponti(solution, T: float) -> list[float]:
     """Frazione del ciclo in cui ciascun carroponte non e' fermo: traslazioni
     e corse verticali (presa, rilascio, corsa a vuoto del gancio) contano
@@ -2411,6 +2475,8 @@ _COSA_CONTIENE = {
     "Riepilogo": "takt time, produttivita', carroponti, punto di avvio, "
     "esito della verifica",
     "Movimenti": "ogni tratto di ogni carroponte: quando, da dove, a dove",
+    FOGLIO_SEQUENZA_CARRI: "il programma di ogni carro, passo per passo, nel "
+    "formato delle tabelle del PLC",
     "TempiVerticali": "dove va il tempo di presa e di rilascio, vasca per vasca",
     "FlussoPezzo": "il percorso di un pezzo, vasca per vasca",
     "Verifica": "i rilievi del verificatore indipendente, divisi per gravita'",
@@ -2597,9 +2663,12 @@ def scrivi_risultati(
     # la produzione: chi legge il foglio per mettere in marcia la linea trova
     # prima il takt time e poi da dove partire.
     sezione("Avvio della linea")
-    for etichetta, valore, nota in righe_di_riepilogo(
-        trova_avvio(data, solution) if avvio is None else avvio
-    ):
+    # Lo stesso istante fa cominciare il programma dei carri (foglio
+    # SequenzaCarri): il passo 1 e' quello da cui riparte ogni carro lasciato
+    # dove dice questa sezione.
+    if avvio is None:
+        avvio = trova_avvio(data, solution)
+    for etichetta, valore, nota in righe_di_riepilogo(avvio):
         voce(etichetta, valore, nota)
 
     sezione("Sicurezza")
@@ -2745,6 +2814,8 @@ def scrivi_risultati(
     ):
         ws.append([testo])
         ws.cell(ws.max_row, 1).font = Font(italic=True, color="808080")
+
+    _scrivi_sequenza_carri(wb, data, solution, avvio)
 
     # -- Tempi verticali -------------------------------------------------
     # Dove va a finire il tempo di presa e di rilascio, vasca per vasca. Senza,

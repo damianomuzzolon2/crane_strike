@@ -884,7 +884,7 @@ def test_risultati_struttura():
     try:
         check(
             wb.sheetnames
-            == ["Riepilogo", "Movimenti", "TempiVerticali", "FlussoPezzo", "Verifica"],
+            == ["Riepilogo", "Movimenti", "SequenzaCarri", "TempiVerticali", "FlussoPezzo", "Verifica"],
             f"fogli: {wb.sheetnames}",
         )
         testo = "\n".join(
@@ -1204,6 +1204,7 @@ def test_risultati_due_meta():
         "Output",
         "Riepilogo",
         "Movimenti",
+        "SequenzaCarri",
         "TempiVerticali",
         "FlussoPezzo",
         "Verifica",
@@ -1262,7 +1263,7 @@ def test_risultati_due_meta():
     scrivi_risultati(solo, dati, sol, verify_solution(dati, sol))
     check(
         load_workbook(solo).sheetnames
-        == ["Riepilogo", "Movimenti", "TempiVerticali", "FlussoPezzo", "Verifica"],
+        == ["Riepilogo", "Movimenti", "SequenzaCarri", "TempiVerticali", "FlussoPezzo", "Verifica"],
         "senza la linea dentro, nessun cartello: non dividerebbe niente",
     )
 

@@ -142,6 +142,7 @@ nascosti += [
     "manuale",
     "model",
     "plotting",
+    "programma_carri",
     "simulazione",
     "verify",
 ]
