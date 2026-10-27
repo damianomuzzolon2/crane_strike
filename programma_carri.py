@@ -17,7 +17,11 @@ I comandi sono quelli del PLC:
     Pause             param1 = secondi di attesa
     External Request  prima di andare al carico o allo scarico
     Crane Syncro      param1 = carro da aspettare, param2 = il passo di quel
-                      carro in cui si e' tolto di mezzo
+                      carro in cui si e' tolto di mezzo. Il PLC a ogni End
+                      Program riallinea i carri, quindi ogni giro e' come il
+                      primo: si aspetta un carro solo se, nel giro, e' gia'
+                      passato sulla vasca comune (o c'era all'avvio); chi ci
+                      va per primo non aspetta nessuno
     End Program       chiude il giro, che ricomincia dal passo 1
 
 La velocita' e' `VELOCITA_CARICO` col telaio appeso e `VELOCITA_VUOTO` senza.
@@ -436,6 +440,25 @@ def programma_carri(
             "sicurezza, che il PLC non sa sincronizzare a passi."
         )
 
+    # Da che istante comincia il programma di ogni carro: serve qui per sapere
+    # chi arriva per primo su una vasca comune, e dopo per farlo cominciare.
+    # Il PLC a ogni End Program aspetta che tutti i carri ci siano arrivati,
+    # quindi ogni giro ricomincia insieme, come il primo: gli istanti si
+    # leggono su un giro solo, [riferimento, riferimento + T), senza
+    # ricordarsi del giro prima.
+    riferimento = avvio.t if avvio is not None else 0.0
+    inizi: list[float] = []
+    for passi, segs in zip(basi, solution.segments_per_hoist):
+        if avvio is not None and segs:
+            inizio = _inizio_del_programma(data, segs, avvio.t, T)
+        else:
+            inizio = passi[0].t if passi else 0.0
+        inizi.append(riferimento + (inizio - riferimento + eps) % T - eps)
+
+    def nel_giro(k: int, t: float) -> float:
+        """L'istante `t` del ciclogramma nel giro del carro k."""
+        return inizi[k] + (t - inizi[k] + eps) % T - eps
+
     inserimenti: list[tuple[int, Passo, list[Passo]]] = []
     for h, ferm in enumerate(fermate):
         if len(ferm) < 2:
@@ -451,12 +474,12 @@ def programma_carri(
             for k, ferm_k in enumerate(fermate):
                 if k == h or not any(in_conflitto(h, verso, k, g.vasca) for g in ferm_k):
                     continue
-                # quando il carro k e' uscito dai piedi: arriva su una vasca
-                # libera venendo da una in conflitto. Si prende l'ultima volta
-                # prima che questo carro parta.
+                coppie_k = list(zip(ferm_k, ferm_k[1:] + ferm_k[:1]))
+                # quando il carro k esce dai piedi: arriva su una vasca libera
+                # venendo da una in conflitto...
                 uscite = [
                     b
-                    for a, b in zip(ferm_k, ferm_k[1:] + ferm_k[:1])
+                    for a, b in coppie_k
                     if in_conflitto(h, verso, k, a.vasca)
                     and not in_conflitto(h, verso, k, b.vasca)
                     and b.arrivato_con is not None
@@ -468,23 +491,41 @@ def programma_carri(
                         f"passo a cui sincronizzarsi."
                     )
                     continue
-                ultima = min(uscite, key=lambda b: (partenza.t - b.arrivo + eps) % T)
-                nuovi.append(Passo(CRANE_SYNCRO, k + 1, aspetta=(k, ultima.arrivato_con)))
-                # Se fra quell'uscita e la partenza il carro k e' gia' tornato
-                # verso una vasca in conflitto, il ciclogramma non rispetta
-                # l'interblocco: il PLC qui fara' aspettare, e i tempi reali
-                # non saranno quelli del ciclogramma.
-                finestra = (partenza.t - ultima.arrivo + eps) % T
+                # ...e quando ci rientra: parte da una vasca libera verso una
+                # in conflitto.
                 rientri = [
                     a.partenza_con.t
-                    for a, b in zip(ferm_k, ferm_k[1:] + ferm_k[:1])
+                    for a, b in coppie_k
                     if a.partenza_con is not None
                     and not in_conflitto(h, verso, k, a.vasca)
                     and in_conflitto(h, verso, k, b.vasca)
                 ]
-                if any(
-                    eps < (r - ultima.arrivo) % T < finestra - eps for r in rientri
-                ):
+                # Si aspetta il carro k solo se, in questo giro, e' gia' stato
+                # sulle vasche in conflitto prima che questo carro parta: ci
+                # e' rientrato dopo l'inizio del suo programma, o c'era gia'
+                # all'avvio. Se no, per primo ci passa questo carro, ed e' il
+                # carro k che si sincronizzera' con lui.
+                t_partenza = nel_giro(h, partenza.t)
+                prima = [
+                    t for t in (nel_giro(k, r) for r in rientri) if t < t_partenza - eps
+                ]
+                dentro_all_avvio = min(
+                    ((inizi[k] - r + eps) % T for r in rientri), default=T
+                ) < min((inizi[k] - b.arrivo + eps) % T for b in uscite)
+                if prima:
+                    entrato = max(prima)
+                elif dentro_all_avvio:
+                    entrato = inizi[k]
+                else:
+                    continue
+                # Si aspetta la prima uscita dopo quell'ingresso.
+                uscita = min(uscite, key=lambda b: (b.arrivo - entrato + eps) % T)
+                nuovi.append(Passo(CRANE_SYNCRO, k + 1, aspetta=(k, uscita.arrivato_con)))
+                # Se il carro k esce solo dopo che questo e' partito, il
+                # ciclogramma non rispetta l'interblocco: il PLC qui fara'
+                # aspettare, e i tempi reali non saranno quelli del ciclogramma.
+                t_uscita = entrato + (uscita.arrivo - entrato + eps) % T - eps
+                if t_uscita > t_partenza + eps:
                     note.append(
                         f"Carro {h + 1}, verso {verso}: quando parte, il carro "
                         f"{k + 1} e' ancora sulle vasche in conflitto. Il "
@@ -499,9 +540,8 @@ def programma_carri(
 
     # -- da dove si parte, e i numeri dei passi -----------------------------
     programmi = []
-    for passi, segs in zip(basi, solution.segments_per_hoist):
+    for passi, segs, inizio in zip(basi, solution.segments_per_hoist, inizi):
         if avvio is not None and segs:
-            inizio = _inizio_del_programma(data, segs, avvio.t, T)
             passi = _ruota(passi, inizio, T, eps)
         passi = _arrotonda_pause(passi)
         passi.append(Passo(END_PROGRAM))
@@ -515,6 +555,7 @@ def programma_carri(
             altro = programmi[k]
             j = next(i for i, q in enumerate(altro) if q is arrivo)
             # il passo DOPO l'arrivo: da li' il carro k e' fuori dai piedi.
-            # Se l'arrivo e' l'ultimo passo prima di End Program, e' il passo 1.
-            p.param2 = j + 2 if altro[j + 1].comando != END_PROGRAM else 1
+            # Se l'arrivo e' l'ultimo passo, e' End Program: il giro e' uno
+            # solo, e il passo 1 sarebbe gia' quello del giro dopo.
+            p.param2 = j + 2
     return ProgrammaCarri(programmi, note)

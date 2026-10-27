@@ -226,17 +226,34 @@ def test_external_request():
 def test_crane_syncro():
     print("\n[4] Crane Syncro prima di entrare nella vasca comune")
     data, sol = caso_interbloccato()
-    pc = programma_carri(data, sol, trova_avvio(data, sol))
+    avvio = trova_avvio(data, sol)
+    pc = programma_carri(data, sol, avvio)
     check(not pc.note, f"nessuna nota su un ciclogramma che rispetta l'interblocco {pc.note}")
+    T = sol.T
+
+    def primo_in_v2(passi) -> float:
+        """Quanto dopo l'avvio il carro parte verso V2."""
+        p = next(p for p in passi if p.comando == TRANSFER and p.param1 == "Pos.V2")
+        return (p.t - avvio.t) % T
+
+    # dall'avvio il carro 1 arriva in V2 prima del carro 2: aspetta solo il 2
+    primo = min(range(2), key=lambda h: primo_in_v2(pc.programmi[h]))
+    check(primo == 0, "dall'avvio il carro 1 entra in V2 prima del carro 2")
     for h, passi in enumerate(pc.programmi):
         altro = pc.programmi[1 - h]
         verso_v2 = [i for i, p in enumerate(passi)
                     if p.comando == TRANSFER and p.param1 == "Pos.V2"]
         check(len(verso_v2) == 1, f"carro {h + 1}: entra in V2 una volta per giro")
         sync = [p for p in prima_di(passi, verso_v2[0]) if p.comando == CRANE_SYNCRO]
+        if h == primo:
+            check(
+                not sync,
+                f"carro {h + 1}: arriva per primo, non aspetta il carro {2 - h}",
+            )
+            continue
         check(
             len(sync) == 1 and sync[0].param1 == 2 - h,
-            f"carro {h + 1}: prima aspetta il carro {2 - h}",
+            f"carro {h + 1}: arriva per secondo, prima aspetta il carro {2 - h}",
         )
         if not sync:
             continue
@@ -249,7 +266,6 @@ def test_crane_syncro():
         )
         # e quel passo il carro vicino lo raggiunge davvero PRIMA che questo
         # parta: il Crane Syncro e' gia' soddisfatto dal ciclogramma
-        T = sol.T
         t_partenza = passi[verso_v2[0]].t
         t_uscita = arrivo.t + arrivo.durata
         check(
@@ -258,7 +274,7 @@ def test_crane_syncro():
             f"prima che parta",
         )
     tot = sum(comandi(p).count(CRANE_SYNCRO) for p in pc.programmi)
-    check(tot == 2, f"due Crane Syncro in tutto, uno per carro ({tot})")
+    check(tot == 1, f"un Crane Syncro in tutto, del carro che arriva dopo ({tot})")
 
     # senza interblocco non ci sono passi a cui sincronizzarsi, e lo si dice
     spento = dataclasses.replace(data, interblocco=False)
@@ -280,6 +296,19 @@ def test_crane_syncro():
     check(
         any("non rispetta l'interblocco" in n for n in pc.note),
         f"ciclogramma che viola l'interblocco: segnalato ({len(pc.note)} note)",
+    )
+    # li' il carro 2 e' su V2 gia' all'avvio, e ci torna dopo che c'e' passato
+    # il carro 1: il primo giro lo fa senza aspettare nessuno, il ritorno no
+    uno, due = pc.programmi
+    i_v2 = next(i for i, p in enumerate(uno) if p.comando == TRANSFER and p.param1 == "Pos.V2")
+    check(
+        [p.param1 for p in prima_di(uno, i_v2) if p.comando == CRANE_SYNCRO] == [2],
+        "carro 1: verso V2 aspetta il carro 2, che c'era all'avvio",
+    )
+    i_v2 = next(i for i, p in enumerate(due) if p.comando == TRANSFER and p.param1 == "Pos.V2")
+    check(
+        [p.param1 for p in prima_di(due, i_v2) if p.comando == CRANE_SYNCRO] == [1],
+        "carro 2: tornando in V2 aspetta il carro 1, che c'e' passato nel giro",
     )
 
 
