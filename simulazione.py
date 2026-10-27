@@ -1115,7 +1115,9 @@ class FinestraSimulazione(tk.Toplevel):
     # e un pulsante che a volte fa un passo e a volte due non si controlla.
     ATTESA_RAFFICA_MS = 350
 
-    def __init__(self, padre, data, solution, carri=None, titolo_linea=""):
+    def __init__(
+        self, padre, data, solution, carri=None, titolo_linea="", avvio_t=None
+    ):
         super().__init__(padre)
         self.title("Simulazione della linea" + (f" - {titolo_linea}" if titolo_linea else ""))
         self.geometry("1180x620")
@@ -1123,6 +1125,12 @@ class FinestraSimulazione(tk.Toplevel):
 
         self.sim: Optional[Simulazione] = None
         self.t = 0.0
+        # Da dove parte la simulazione, e dove torna "Torna all'inizio": il
+        # punto di avvio scelto nella finestra principale. Lo 0 del ciclogramma
+        # e' solo l'origine dei tempi, non un istante in cui l'impianto si
+        # accende -- partire da li' farebbe vedere la linea da un punto che
+        # nessuno ha scelto.
+        self.t_avvio = 0.0
         self._in_moto = False
         self._lavoro = None  # identificativo del timer di tkinter
         self._raffica = None  # il timer del pulsante tenuto premuto
@@ -1207,15 +1215,19 @@ class FinestraSimulazione(tk.Toplevel):
         self.avviso.pack(fill=tk.X)
 
         self.protocol("WM_DELETE_WINDOW", self.destroy)
-        self.aggiorna(data, solution, carri)
+        self.aggiorna(data, solution, carri, avvio_t)
         self.avvia_o_ferma()  # parte da sola: e' quello che si e' chiesto
 
     # -- contenuto -------------------------------------------------------
 
-    def aggiorna(self, data, solution, carri=None):
+    def aggiorna(self, data, solution, carri=None, avvio_t=None):
         """Rilegge il ciclogramma. Si chiama anche mentre la finestra e'
         aperta: modificando il ciclogramma nella finestra principale la
-        simulazione deve mostrare quello nuovo, non quello di prima."""
+        simulazione deve mostrare quello nuovo, non quello di prima.
+
+        `avvio_t` e' l'istante di avvio [s] dentro il ciclo, None se non ce
+        n'e' uno (allora si parte da 0). Se cambia, la simulazione ci salta:
+        il punto di avvio nuovo e' quello che si vuole guardare."""
         # prima si costruisce, poi si sostituisce: se il ciclogramma nuovo non
         # e' simulabile, la finestra deve restare su quello di prima invece di
         # trovarsi con i dati nuovi e la simulazione vecchia
@@ -1224,6 +1236,7 @@ class FinestraSimulazione(tk.Toplevel):
         self.cursore.configure(to=self.sim.durata)
         if self.t > self.sim.durata:
             self.t = 0.0
+        self._imposta_avvio(avvio_t)
         self._prepara_scena()
         scoperte = self.sim.mosse_scoperte()
         self.avviso.configure(
@@ -1790,8 +1803,25 @@ class FinestraSimulazione(tk.Toplevel):
             self._lavoro = None
 
     def da_capo(self):
-        self.t = 0.0
+        self.t = self.t_avvio
         self._disegna()
+
+    def _imposta_avvio(self, avvio_t) -> bool:
+        """Memorizza l'istante di avvio; True se e' cambiato, e allora ci porta
+        anche il tempo corrente. La durata e' un numero intero di takt, quindi
+        l'istante -- che sta in [0, T) -- e' sempre dentro il giro."""
+        nuovo = 0.0 if avvio_t is None else float(avvio_t) % self.sim.durata
+        if abs(nuovo - self.t_avvio) <= 1e-9:
+            return False
+        self.t_avvio = nuovo
+        self.t = nuovo
+        return True
+
+    def imposta_avvio(self, avvio_t):
+        """Il punto di avvio e' cambiato nella finestra principale, il
+        ciclogramma no: si salta li' senza ricostruire la scena."""
+        if self.sim is not None and self._imposta_avvio(avvio_t):
+            self._disegna()
 
     def _fotogramma(self) -> float:
         """Di quanti secondi di simulazione avanza un fotogramma.
@@ -1957,8 +1987,9 @@ class FinestraSimulazione(tk.Toplevel):
     def _titolo(self, t: float, n_pezzi: int) -> str:
         return (
             f"t = {t:6.1f} s   di {self.sim.durata:.1f} s "
-            f"({self.sim.periodi} takt da {self.sim.T:.2f} s)   -   "
-            f"{n_pezzi} pezzi in linea"
+            f"({self.sim.periodi} takt da {self.sim.T:.2f} s"
+            + (f", avvio a {self.t_avvio:.1f} s" if self.t_avvio else "")
+            + f")   -   {n_pezzi} pezzi in linea"
         )
 
     def _descrizione(self, istante: Istantanea) -> str:

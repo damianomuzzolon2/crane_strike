@@ -1308,6 +1308,41 @@ def test_vasca_fuori_percorso():
         radice.destroy()
 
 
+def test_parte_dall_avvio(d: ProblemData):
+    """La simulazione parte dall'istante di avvio scelto, non dallo 0 del
+    ciclogramma, e "Torna all'inizio" riporta li'."""
+    print("\n[16] la simulazione parte dal punto di avvio")
+    from simulazione import FinestraSimulazione
+
+    sol, dati = proposta_semplice(d)
+    avvio = 0.37 * sol.T
+    radice = tk.Tk()
+    radice.geometry("200x100")
+    try:
+        f = FinestraSimulazione(radice, dati, sol, avvio_t=avvio)
+        f.avvia_o_ferma()  # in pausa: il tempo lo muoviamo noi
+        check(abs(f.t - avvio) < 1e-9, f"si apre all'avvio ({f.t:.2f} s)")
+        f._passo_a_mano(+1)
+        f.da_capo()
+        check(abs(f.t - avvio) < 1e-9, "\"Torna all'inizio\" torna all'avvio")
+        # un altro punto di avvio: ci si salta
+        f.imposta_avvio(0.8 * sol.T)
+        check(abs(f.t - 0.8 * sol.T) < 1e-9, "cambiando punto di avvio ci si salta")
+        # il ciclogramma si aggiorna, l'avvio no: il tempo resta dov'e'
+        f._passo_a_mano(+1)
+        fermo = f.t
+        f.aggiorna(dati, sol, avvio_t=0.8 * sol.T)
+        check(abs(f.t - fermo) < 1e-9, "ricomporre senza cambiare avvio non fa saltare")
+        # senza punto di avvio si parte da 0, come prima
+        g = FinestraSimulazione(radice, dati, sol)
+        g.avvia_o_ferma()
+        check(g.t == 0.0, "senza punto di avvio si parte da 0")
+        g.destroy()
+        f.destroy()
+    finally:
+        radice.destroy()
+
+
 def main() -> int:
     d = dati_prova()
     test_fasi_verticali(d)
@@ -1327,6 +1362,7 @@ def main() -> int:
         test_disegno_casi_limite()
         test_misure_dichiarate()
         test_vasca_fuori_percorso()
+        test_parte_dall_avvio(d)
     except tk.TclError as e:
         print(f"  --   ambiente grafico non disponibile, salto la finestra ({e})")
     print("\n" + "=" * 72)

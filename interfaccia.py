@@ -1108,6 +1108,7 @@ class Applicazione(tk.Tk):
                 self.soluzione,
                 carri=self._carri_delle_zone(),
                 titolo_linea=os.path.basename(self.percorso_file or ""),
+                avvio_t=self._t_avvio(),
             )
         except Exception as e:
             self._errore("Impossibile simulare", str(e))
@@ -1134,7 +1135,10 @@ class Applicazione(tk.Tk):
             return
         try:
             self.finestra_simulazione.aggiorna(
-                self.dati, self.soluzione, carri=self._carri_delle_zone()
+                self.dati,
+                self.soluzione,
+                carri=self._carri_delle_zone(),
+                avvio_t=self._t_avvio(),
             )
         except Exception:
             # un ciclogramma a meta' puo' non essere simulabile (per esempio
@@ -2097,6 +2101,11 @@ class Applicazione(tk.Tk):
             return None
         return self.avvii[self.indice_avvio % len(self.avvii)]
 
+    def _t_avvio(self) -> float | None:
+        """[s] l'istante del punto di avvio corrente, None se non ce n'e'."""
+        a = self._avvio_corrente()
+        return None if a is None else a.t
+
     def _prossimo_avvio(self):
         """Passa al punto di avvio successivo, e torna al primo dopo l'ultimo.
 
@@ -2113,9 +2122,12 @@ class Applicazione(tk.Tk):
         )
         # Non passa da _mostra_ciclogramma: gli istanti sono gli stessi, cambia
         # solo quale si guarda, e ricalcolarli azzererebbe l'indice appena
-        # mosso. La simulazione non la riguarda: il punto di avvio non cambia
-        # il ciclogramma, dice solo da dove lo si legge.
+        # mosso. La simulazione non va ricostruita -- il punto di avvio non
+        # cambia il ciclogramma, dice solo da dove lo si legge -- ma da li'
+        # deve ripartire.
         self._aggiorna_pulsante_avvio()
+        if self.finestra_simulazione is not None:
+            self.finestra_simulazione.imposta_avvio(a.t)
         if self.vista == "pettine":
             self._disegna_pettine()
         else:
