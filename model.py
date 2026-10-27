@@ -263,6 +263,22 @@ class HoistZone:
 
 
 @dataclass(frozen=True)
+class Portata:
+    """Fin dove un carroponte puo' arrivare lungo la rotaia: dalla vasca
+    `vasca_min` alla `vasca_max`, estremi compresi.
+
+    E' un LIMITE, non una zona: il carroponte puo' fermarsi prima, e le
+    portate di due carroponti vicini possono sovrapporsi -- le vasche in comune
+    le puo' servire l'uno o l'altro, e quale dei due lo sceglie il solutore.
+    Il tratto e' quello fra le POSIZIONI delle due vasche, quindi comprende
+    anche le vasche che ci stanno in mezzo senza essere nominate. In che ordine
+    si scrivono le due non conta."""
+
+    vasca_min: str
+    vasca_max: str
+
+
+@dataclass(frozen=True)
 class ZonaCambioQuota:
     """Il punto della rotaia in cui il carroponte cambia quota, per gli
     impianti in cui non puo' salire e scendere sopra il carico e lo scarico.
@@ -489,6 +505,12 @@ class ProblemData:
     # sicurezza, non la sostituisce: quella continua a proteggere i passaggi.
     # False: solo la distanza di sicurezza, come prima che esistesse.
     interblocco: bool = True
+    # Fin dove puo' arrivare ciascun carroponte (vedi `Portata`), uno per
+    # carroponte nell'ordine della linea: il primo e' quello che serve il
+    # carico. None = nessun limite, e il numero di carroponti lo sceglie la
+    # ricerca. Dichiarate, fissano anche QUANTI sono i carroponti: la ricerca
+    # prova solo le suddivisioni in cui ognuno resta dentro la propria.
+    portate: Optional[list[Portata]] = None
 
     def __post_init__(self):
         n_moves = len(self.route) - 1
@@ -506,6 +528,25 @@ class ProblemData:
         for s in self.route:
             if s.tank_id not in self.tanks:
                 raise ValueError(f"vasca '{s.tank_id}' non definita in tanks")
+        if self.portate is not None:
+            if not self.portate:
+                raise ValueError(
+                    "portate e' una lista vuota: None per nessun limite, "
+                    "altrimenti una portata per carroponte"
+                )
+            if len(self.portate) > n_moves:
+                raise ValueError(
+                    f"sono dichiarate le portate di {len(self.portate)} "
+                    f"carroponti, ma le mosse sono solo {n_moves}: ogni "
+                    f"carroponte deve fare almeno una mossa"
+                )
+            for h, p in enumerate(self.portate):
+                for v in (p.vasca_min, p.vasca_max):
+                    if v not in self.tanks:
+                        raise ValueError(
+                            f"la portata del carroponte {h + 1} nomina la vasca "
+                            f"'{v}', che non e' definita in tanks"
+                        )
             if s.dwell_min > s.dwell_max:
                 raise ValueError(f"dwell_min > dwell_max per vasca '{s.tank_id}'")
             if s.dwell_min < 0:
@@ -856,6 +897,26 @@ class ProblemData:
                 "per farlo scegliere automaticamente, oppure impostalo esplicitamente."
             )
         return len(self.zones)
+
+    def portata_mm(self, carro: int) -> Optional[tuple[float, float]]:
+        """Il tratto di rotaia [mm] che il carroponte `carro` (0-based) puo'
+        raggiungere, come (minimo, massimo). None = nessun limite: le portate
+        non sono dichiarate, oppure non lo sono per quel carroponte."""
+        if self.portate is None or carro >= len(self.portate):
+            return None
+        p = self.portate[carro]
+        a = self.tanks[p.vasca_min].position
+        b = self.tanks[p.vasca_max].position
+        return (min(a, b), max(a, b))
+
+    def raggiunge(self, carro: int, station_idx: int) -> bool:
+        """Se il carroponte `carro` (0-based) arriva alla tappa data. Vero
+        quando la sua portata non e' dichiarata."""
+        tratto = self.portata_mm(carro)
+        if tratto is None:
+            return True
+        x = self.station_position(station_idx)
+        return tratto[0] - 1e-6 <= x <= tratto[1] + 1e-6
 
     def station_position(self, idx: int) -> float:
         return self.tanks[self.route[idx].tank_id].position
@@ -2113,6 +2174,35 @@ def zone_layout_conflicts(
     return problemi
 
 
+def zone_fuori_portata(
+    data: ProblemData, zones: list[HoistZone]
+) -> list[str]:
+    """Le vasche che, con questa suddivisione, un carroponte dovrebbe servire
+    pur stando fuori dalla sua portata (vedi `Portata`). Lista vuota = ognuno
+    resta nel suo tratto, oppure le portate non sono dichiarate.
+
+    La zona h e' del carroponte h: la ricerca automatica numera le zone
+    nell'ordine della linea, come sono numerate le portate. Si guardano le
+    tappe della zona -- da `lo` a `hi + 1`, perche' l'ultima mossa consegna
+    li' -- e basta: i rientri a vuoto e le soste per strada stanno fra quelle,
+    e un punto di cambio quota sta fra la tappa che serve e la sua vicina."""
+    problemi = []
+    for h, z in enumerate(zones):
+        fuori = [
+            data.route[s].tank_id
+            for s in range(z.lo, z.hi + 2)
+            if not data.raggiunge(h, s)
+        ]
+        if fuori:
+            p = data.portate[h]
+            problemi.append(
+                f"il carroponte {h + 1} dovrebbe servire "
+                f"{', '.join(dict.fromkeys(fuori))}, fuori dalla sua portata "
+                f"({p.vasca_min} - {p.vasca_max})"
+            )
+    return problemi
+
+
 def solve(
     data: ProblemData,
     time_limit_s: float = 20.0,
@@ -2160,6 +2250,17 @@ def solve(
                 "la sequenza del percorso, oppure sposta il confine fra le zone "
                 "(solve_auto_zones scarta da solo le suddivisioni non valide)."
             )
+
+    # La portata non e' un'approssimazione del modello come la geometria qui
+    # sopra: e' la macchina, e non si salta nemmeno per studio.
+    fuori = zone_fuori_portata(data, data.zones)
+    if fuori:
+        raise ValueError(
+            "Questa suddivisione in zone manda un carroponte oltre la sua "
+            "portata (foglio Zone):\n  - "
+            + "\n  - ".join(fuori)
+            + "\n(solve_auto_zones scarta da solo le suddivisioni non valide)."
+        )
 
     if interruzione is not None and interruzione.richiesta:
         return _soluzione_interrotta()
@@ -4394,12 +4495,12 @@ def _scarto_prefiltro(
     """None se questa suddivisione va provata col solutore, altrimenti
     (motivo, spiegazione) per cui si scarta senza nemmeno costruire il modello.
 
-    I due prefiltri stanno QUI e non dentro solve_auto_zones perche' servono a
+    I prefiltri stanno QUI e non dentro solve_auto_zones perche' servono a
     due cose: scartare, e CONTARE quante risoluzioni si faranno prima di
     cominciare (vedi `tentativi_previsti`). Duplicarli vorrebbe dire che il
     conteggio e la ricerca possono dire numeri diversi.
 
-    Sono entrambi economici -- una somma e un confronto fra intervalli -- e
+    Sono economici -- una somma e qualche confronto fra intervalli -- e
     tolgono di mezzo moltissimo: su una linea di dieci vasche con il takt time
     stretto, 176 suddivisioni diventano 10.
     """
@@ -4416,6 +4517,12 @@ def _scarto_prefiltro(
     problemi = zone_layout_conflicts(data, zones)
     if problemi:
         return ("geometria", problemi[0])
+    # 3) un carroponte che dovrebbe servire una vasca oltre la sua portata
+    # (foglio Zone): non e' una suddivisione difficile, e' una che la macchina
+    # non puo' fare.
+    fuori = zone_fuori_portata(data, zones)
+    if fuori:
+        return ("portata", fuori[0])
     return None
 
 
@@ -4424,7 +4531,7 @@ def tentativi_previsti(data: ProblemData, n_hoists: int) -> int:
     in `n_hoists` zone.
 
     E' noto PRIMA di risolvere, e costa millisecondi: il numero di suddivisioni
-    e' combinatoria pura, e i due prefiltri sono deterministici. Serve a dare
+    e' combinatoria pura, e i prefiltri sono deterministici. Serve a dare
     un avanzamento vero invece di una barra che oscilla.
 
     Quello che NON si sa in anticipo e' a quale numero di carroponti la ricerca
@@ -4497,6 +4604,14 @@ def solve_auto_zones(
             f"n_hoists ({n_hoists}) non puo' superare il numero di mosse ({n_moves}): "
             f"ogni carroponte deve avere almeno una mossa."
         )
+    if data.portate is not None and n_hoists != len(data.portate):
+        raise ValueError(
+            f"il foglio Zone dichiara la portata di {len(data.portate)} "
+            f"carroponti, e la ricerca e' stata chiesta con {n_hoists}: con le "
+            f"portate dichiarate i carroponti sono quelli. Aggiungi o togli "
+            f"righe nel foglio Zone, oppure svuotalo per far scegliere il "
+            f"numero al programma."
+        )
 
     travel_loaded_seconds = [data.loaded_leg_seconds(k) for k in range(n_moves)]
 
@@ -4506,6 +4621,8 @@ def solve_auto_zones(
     n_skipped = 0
     n_skipped_layout = 0
     esempio_layout: Optional[str] = None
+    n_skipped_portata = 0
+    esempio_portata: Optional[str] = None
 
     # Prima si applicano i prefiltri a TUTTE le suddivisioni, poi si risolve.
     # Farlo in due tempi costa una lista di poche decine di elementi e in
@@ -4521,6 +4638,11 @@ def solve_auto_zones(
         motivo, spiegazione = scarto
         if motivo == "carico":
             n_skipped += 1
+            continue
+        if motivo == "portata":
+            n_skipped_portata += 1
+            if esempio_portata is None:
+                esempio_portata = spiegazione
             continue
         n_skipped_layout += 1
         if esempio_layout is None:
@@ -4550,7 +4672,7 @@ def solve_auto_zones(
             f"da provare (su {math.comb(n_moves - 1, n_hoists - 1)} possibili) "
             f"e il limite e' {max_candidates}. Alza max_candidates se accetti "
             f"di aspettare -- al peggio {len(da_provare)} risoluzioni -- "
-            f"oppure indica tu le zone nel foglio Zone e usa solve()."
+            f"oppure restringi le portate dei carroponti nel foglio Zone."
         )
 
     # Quante volte ciascun esito. Serve a distinguere due situazioni che
@@ -4610,6 +4732,8 @@ def solve_auto_zones(
         "n_skipped": n_skipped,
         "n_skipped_layout": n_skipped_layout,
         "layout_example": esempio_layout,
+        "n_skipped_portata": n_skipped_portata,
+        "portata_example": esempio_portata,
         "per_stato": per_stato,
         # la suddivisione col carico piu' equilibrato: e' quella su cui ha
         # senso indagare quando nessuna funziona (vedi `diagnosi_zone`)
@@ -5079,6 +5203,10 @@ def solve_auto_hoists(
     `raw["interrotto"]`.
     """
     n_moves = data.n_moves
+    if data.portate is not None:
+        # le portate dicono gia' quanti carroponti ci sono: non c'e' un
+        # numero da cercare, solo le suddivisioni che le rispettano
+        min_hoists = max_hoists = len(data.portate)
     max_hoists = min(max_hoists, n_moves)
     if min_hoists < 1:
         raise ValueError("min_hoists deve essere >= 1")
@@ -5124,6 +5252,10 @@ def solve_auto_hoists(
             "per_stato": sol.raw.get("per_stato", {}),
             "candidata_tipica": sol.raw.get("candidata_tipica"),
         }
+        n_portata = sol.raw.get("n_skipped_portata", 0)
+        if n_portata:
+            voce["n_skipped_portata"] = n_portata
+            voce["portata_example"] = sol.raw.get("portata_example")
         n_layout = sol.raw.get("n_skipped_layout", 0)
         if n_layout:
             voce["n_skipped_layout"] = n_layout

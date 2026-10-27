@@ -773,29 +773,65 @@ def test_sollevamento_incoerente():
         os.unlink(p)
 
 
-def test_zone_manuali():
-    print("\n[9] zone indicate a mano")
+def test_portate():
+    print("\n[9] portate dei carroponti (foglio Zone)")
+    from excel_io import scrivi_linea
+
     p = modello_temporaneo()
     try:
-        modifica(p, FOGLIO_ZONE, "A2", 0)
-        modifica(p, FOGLIO_ZONE, "B2", 2)
-        modifica(p, FOGLIO_ZONE, "A3", 3)
-        modifica(p, FOGLIO_ZONE, "B3", 5)
+        # sovrapposte su RISCIACQUO_1 e ZINCATURA, e la seconda scritta al
+        # contrario: l'ordine delle due vasche non conta
+        modifica(p, FOGLIO_ZONE, "A2", "CARICO")
+        modifica(p, FOGLIO_ZONE, "B2", "ZINCATURA")
+        modifica(p, FOGLIO_ZONE, "A3", "SCARICO")
+        modifica(p, FOGLIO_ZONE, "B3", "RISCIACQUO_1")
         cfg = leggi_problema(p)
+        d = cfg.data
         check(
-            cfg.data.zones is not None
-            and [(z.lo, z.hi) for z in cfg.data.zones] == [(0, 2), (3, 5)],
-            "zone lette correttamente",
+            d.portate is not None
+            and [(x.vasca_min, x.vasca_max) for x in d.portate]
+            == [("CARICO", "ZINCATURA"), ("SCARICO", "RISCIACQUO_1")],
+            "portate lette correttamente, anche sovrapposte",
         )
+        check(d.zones is None, "le zone restano da scegliere al solutore")
+        check(
+            d.portata_mm(1) == (5500.0, 20000.0),
+            f"il tratto non dipende dall'ordine delle due vasche: {d.portata_mm(1)}",
+        )
+        check(
+            d.raggiunge(0, 3) and not d.raggiunge(0, 4) and d.raggiunge(1, 2),
+            "il carroponte 1 arriva fino a ZINCATURA e non oltre; il 2 parte "
+            "da RISCIACQUO_1",
+        )
+
+        # riscritta, la linea porta con se' le portate
+        fd, copia = tempfile.mkstemp(suffix=".xlsx")
+        os.close(fd)
+        try:
+            scrivi_linea(copia, cfg)
+            check(
+                leggi_problema(copia).data.portate == d.portate,
+                "riscrivendo la linea le portate si conservano",
+            )
+        finally:
+            os.unlink(copia)
     finally:
         os.unlink(p)
 
     p = modello_temporaneo()
     try:
-        modifica(p, FOGLIO_ZONE, "A2", 0)
-        modifica(p, FOGLIO_ZONE, "B2", 2)  # manca la seconda zona
+        modifica(p, FOGLIO_ZONE, "A2", "CARICO")
+        modifica(p, FOGLIO_ZONE, "B2", "INESISTENTE")
+        modifica(p, FOGLIO_ZONE, "A3", "ZINCATURA")  # manca la massima
         msg = errore_leggendo(p)
-        check("contigu" in msg and FOGLIO_ZONE in msg, "copertura incompleta rilevata")
+        check(
+            "INESISTENTE" in msg and f"{FOGLIO_ZONE}!B2" in msg,
+            "vasca sconosciuta rilevata, con la cella",
+        )
+        check(
+            f"{FOGLIO_ZONE}!B3" in msg and "mancante" in msg,
+            "vasca massima mancante rilevata, con la cella",
+        )
     finally:
         os.unlink(p)
 
@@ -1939,7 +1975,7 @@ def main():
     test_parametro_sconosciuto()
     test_parametro_facoltativo_vuoto()
     test_sollevamento_incoerente()
-    test_zone_manuali()
+    test_portate()
     test_errori_multipli()
     test_foglio_mancante()
     test_dati_incoerenti()

@@ -1861,6 +1861,90 @@ def test_interblocco():
     )
 
 
+def test_portate():
+    """Le portate del foglio Zone: limiti, non zone.
+
+    Linea di cinque vasche ogni 6000 mm. Il carroponte 1 arriva da V0 a V2, il
+    2 da V1 a V4: V1 e V2 le possono servire tutti e due. Delle tre
+    suddivisioni in due zone, solo quella che manda il carroponte 1 fino a V3
+    e' vietata -- le altre due il solutore le deve provare entrambe."""
+    print("\n[27] portate dei carroponti")
+    import dataclasses
+
+    import manuale
+    from model import Portata, solve_auto_zones, tentativi_previsti
+
+    base = linea(4, 6000, None, dwell=(5, 60), takt_max=60.0)
+    d = dataclasses.replace(
+        base, portate=[Portata("V0", "V2"), Portata("V4", "V1")]
+    )
+    check(
+        tentativi_previsti(base, 2) == 3 and tentativi_previsti(d, 2) == 2,
+        f"le portate tolgono solo la suddivisione vietata: "
+        f"{tentativi_previsti(base, 2)} -> {tentativi_previsti(d, 2)}",
+    )
+
+    # max_hoists=1 non conta: i carroponti sono quelli delle portate
+    sol, zone, n = solve_auto_hoists(d, max_hoists=1, time_limit_per_candidate=30.0)
+    ammesse = ([(0, 0), (1, 3)], [(0, 1), (2, 3)])
+    trovate = [(z.lo, z.hi) for z in zone] if zone else None
+    check(
+        n == 2 and trovate in ammesse,
+        f"la ricerca usa i 2 carroponti dichiarati e una zona ammessa: "
+        f"{n} carroponti, zone {trovate}",
+    )
+    if zone:
+        r = verify_solution(dataclasses.replace(d, zones=zone), sol)
+        check(r.ok, _esito(sol, r, "e la soluzione passa la verifica"))
+
+        # la stessa soluzione, con una portata che non la contiene: il
+        # verificatore guarda la traiettoria e se ne accorge
+        stretta = dataclasses.replace(
+            d, zones=zone, portate=[Portata("V0", "V0"), Portata("V1", "V4")]
+        )
+        fuori = [v for v in verify_solution(stretta, sol).violations if v.kind == "reach"]
+        check(
+            len(fuori) == 1 and fuori[0].hoists == (0,) and fuori[0].severity == "error",
+            f"il verificatore segnala il carroponte fuori portata: "
+            f"{[str(v) for v in fuori]}",
+        )
+
+    try:
+        solve(dataclasses.replace(d, zones=[HoistZone(0, 2), HoistZone(3, 3)]))
+        check(False, "solve() rifiuta una suddivisione fuori portata")
+    except ValueError as e:
+        check(
+            "portata" in str(e) and "V3" in str(e),
+            "solve() rifiuta una suddivisione fuori portata, nominando la vasca",
+        )
+    try:
+        solve_auto_zones(d, n_hoists=3)
+        check(False, "con le portate il numero di carroponti e' fissato")
+    except ValueError as e:
+        check("foglio Zone" in str(e), "con le portate il numero di carroponti e' fissato")
+    try:
+        dataclasses.replace(base, portate=[Portata("V0", "NESSUNA")])
+        check(False, "una portata con una vasca sconosciuta e' rifiutata")
+    except ValueError as e:
+        check("NESSUNA" in str(e), "una portata con una vasca sconosciuta e' rifiutata")
+
+    # il disegno a mano non lascia dare una mossa fuori portata
+    check(
+        manuale.perche_non_va(d, {0: 0, 1: 0, 2: 1, 3: 1}) is None,
+        "a mano: una suddivisione ammessa passa",
+    )
+    motivo = manuale.perche_non_va(d, {2: 0})
+    check(
+        motivo is not None and "portata" in motivo and "V3" in motivo,
+        f"a mano: la mossa V2 -> V3 al carroponte 1 e' rifiutata: {motivo}",
+    )
+    motivo = manuale.perche_non_va(d, {0: 2})
+    check(
+        motivo is not None and "solo 2" in motivo,
+        f"a mano: un carroponte che il foglio non dichiara non esiste: {motivo}",
+    )
+
+
 def main():
     print("=" * 72)
     print("TEST END-TO-END DEL MODELLO (richiede OR-Tools)")
@@ -1892,6 +1976,7 @@ def main():
     test_takt_fisso_ricerca_zone()
     test_rifinitura_tempi_in_vasca()
     test_interblocco()
+    test_portate()
     print("\n" + "=" * 72)
     print(f"RISULTATO: {_n_pass} ok, {_n_fail} falliti  ({time.perf_counter() - t0:.0f}s)")
     print("=" * 72)

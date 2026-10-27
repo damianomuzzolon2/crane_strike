@@ -9,7 +9,8 @@ Il file ha quattro fogli:
   Vasche     id della vasca, posizione lungo la rotaia [mm], numero di posti
   Percorso   sequenza di vasche attraversate dal pezzo, con le permanenze
   Parametri  takt time, cinematiche, ingombri, tempi verticali, opzioni
-  Zone       (facoltativo) suddivisione manuale delle mosse fra i carroponti
+  Zone       (facoltativo) fin dove arriva ciascun carroponte: vasca minima e
+             massima raggiungibili
   Ciclogramma (facoltativo) il ciclogramma gia' composto, per riprenderlo
   Passaggi   (facoltativo) i punti di passaggio dei rientri a vuoto aggiunti
              a mano sul grafico
@@ -38,7 +39,7 @@ from model import (
     errore_pesato,
     scarti_dal_teorico,
     scarto_pesato,
-    HoistZone,
+    Portata,
     ProblemData,
     SostaIntermedia,
     StationSpec,
@@ -267,7 +268,8 @@ _PARAMETRI = {
         "-",
         False,
         6,
-        "limite superiore alla ricerca automatica del numero di carroponti",
+        "limite superiore alla ricerca automatica del numero di carroponti "
+        "(non conta se il foglio Zone dichiara le portate)",
     ),
     "tempo_limite_per_tentativo_s": (
         "s",
@@ -377,7 +379,6 @@ class Configurazione:
     data: ProblemData
     max_carroponti: int
     tempo_limite_s: float
-    zone_manuali: Optional[list[HoistZone]]
     percorso_file: str
     # Ciclogramma gia' composto, se il file lo porta con se': un dizionario con
     # `T`, `permanenze` (stazione -> secondi) e `assegnazione` (mossa ->
@@ -473,8 +474,8 @@ def leggi_problema(percorso_file: str) -> Configurazione:
     tanks = _leggi_vasche(wb[FOGLIO_VASCHE], errori)
     route = _leggi_percorso(wb[FOGLIO_PERCORSO], tanks, errori)
     par = _leggi_parametri(wb[FOGLIO_PARAMETRI], errori)
-    zone = (
-        _leggi_zone(wb[FOGLIO_ZONE], len(route) - 1, errori)
+    portate = (
+        _leggi_zone(wb[FOGLIO_ZONE], tanks, errori)
         if FOGLIO_ZONE in wb.sheetnames
         else None
     )
@@ -526,7 +527,6 @@ def leggi_problema(percorso_file: str) -> Configurazione:
             hoist_extent_pos=par["ingombro_lato_positivo_mm"],
             hoist_extent_neg=par["ingombro_lato_negativo_mm"],
             safety_distance=par["distanza_sicurezza_mm"],
-            zones=zone,
             time_scale=par["risoluzione_tick_per_s"],
 
             kin_lift_empty=_kin_sollevamento("vuoto"),
@@ -543,6 +543,7 @@ def leggi_problema(percorso_file: str) -> Configurazione:
             larghezza_pezzo=par["larghezza_pezzo_mm"],
             altezza_pezzo=par["altezza_pezzo_mm"],
             interblocco=bool(par["interblocco_vasche"]),
+            portate=portate,
         )
     except ValueError as e:
         # le validazioni di ProblemData sono gia' scritte per un umano:
@@ -553,7 +554,6 @@ def leggi_problema(percorso_file: str) -> Configurazione:
         data=data,
         max_carroponti=par["max_carroponti"],
         tempo_limite_s=par["tempo_limite_per_tentativo_s"],
-        zone_manuali=zone,
         percorso_file=percorso_file,
         ciclogramma=ciclogramma,
     )
@@ -1234,33 +1234,44 @@ def _controlla_takt(par: dict, grezzi: dict, errori: _Errori):
         )
 
 
-def _leggi_zone(ws, n_moves: int, errori: _Errori) -> Optional[list[HoistZone]]:
-    zone = []
+def _leggi_zone(
+    ws, tanks: dict[str, Tank], errori: _Errori
+) -> Optional[list[Portata]]:
+    """Le portate dei carroponti: una riga per carroponte, nell'ordine della
+    linea, con la vasca minima e la massima che puo' raggiungere.
+
+    Le portate possono sovrapporsi -- e' il caso normale, una vasca che puo'
+    servire l'uno o l'altro -- e quale carroponte serva cosa lo sceglie il
+    solutore. Qui si controlla solo che le vasche esistano."""
+    portate = []
     for riga in range(2, ws.max_row + 1):
-        a = ws.cell(riga, 1).value
-        b = ws.cell(riga, 2).value
-        if (a is None or not _testo(a)) and (b is None or not _testo(b)):
+        a = _testo(ws.cell(riga, 1).value)
+        b = _testo(ws.cell(riga, 2).value)
+        if not a and not b:
             continue
-        lo = _numero(a, FOGLIO_ZONE, f"A{riga}", "prima mossa", errori, intero=True)
-        hi = _numero(b, FOGLIO_ZONE, f"B{riga}", "ultima mossa", errori, intero=True)
-        if lo is None or hi is None:
-            continue
-        zone.append(HoistZone(lo=lo, hi=hi))
-    if not zone:
-        return None  # foglio presente ma vuoto: zone automatiche
-    coperte = []
-    for z in zone:
-        coperte.extend(range(z.lo, z.hi + 1))
-    if coperte != list(range(n_moves)):
-        errori.aggiungi(
-            FOGLIO_ZONE,
-            "A2",
-            f"le zone devono coprire in modo contiguo e senza sovrapposizioni "
-            f"le mosse da 0 a {n_moves - 1}; con quelle indicate si copre "
-            f"{coperte}. Lascia il foglio vuoto per farle scegliere "
-            f"automaticamente.",
-        )
-    return zone
+        buona = True
+        for valore, colonna, nome in ((a, "A", "vasca minima"), (b, "B", "vasca massima")):
+            if not valore:
+                errori.aggiungi(
+                    FOGLIO_ZONE,
+                    f"{colonna}{riga}",
+                    f"{nome}: valore mancante. Ogni riga e' un carroponte e "
+                    f"vuole tutte e due le vasche",
+                )
+                buona = False
+            elif valore not in tanks:
+                errori.aggiungi(
+                    FOGLIO_ZONE,
+                    f"{colonna}{riga}",
+                    f"{nome}: la vasca '{valore}' non e' definita nel foglio "
+                    f"{FOGLIO_VASCHE}. Il foglio indica fin dove arriva ogni "
+                    f"carroponte, con gli id delle vasche",
+                )
+                buona = False
+        if buona:
+            portate.append(Portata(vasca_min=a, vasca_max=b))
+    # foglio presente ma vuoto: nessun limite, carroponti scelti in automatico
+    return portate or None
 
 
 def _leggi_cambio_quota(
@@ -1466,8 +1477,8 @@ def _righe_da_configurazione(cfg: Configurazione):
     }
     zone = (
         None
-        if cfg.zone_manuali is None
-        else [(z.lo, z.hi) for z in cfg.zone_manuali]
+        if d.portate is None
+        else [(p.vasca_min, p.vasca_max) for p in d.portate]
     )
     cambio_quota = [
         (verso, z.position, z.intermediate1, z.intermediate2, z.corsa_totale)
@@ -1821,24 +1832,39 @@ def _aggiungi_fogli_linea(
         ("", None),
         (f"Foglio {FOGLIO_ZONE}", titolo_par),
         (
-            "LASCIALO VUOTO per far scegliere automaticamente sia il numero di "
-            "carroponti sia",
+            "LASCIALO VUOTO se i carroponti possono arrivare dappertutto: il "
+            "numero di carroponti",
             None,
         ),
-        ("le zone di competenza: e' il modo consigliato.", None),
+        ("e le zone di competenza li sceglie il programma.", None),
         (
-            "Se lo compili: una riga per carroponte, con indici di MOSSA. La mossa k "
-            "e' il trasporto",
-            None,
-        ),
-        (
-            "dalla stazione k alla k+1, quindi con 7 stazioni le mosse vanno da 0 a "
-            "5. Le zone devono",
+            "Se lo compili: una riga per carroponte, nell'ordine della linea (il "
+            "primo e' quello del",
             None,
         ),
         (
-            "essere contigue e coprire tutte le mosse esattamente una volta "
-            "(es. 0-2 e 3-5).",
+            "carico), con l'id della vasca MINIMA e della MASSIMA che quel "
+            "carroponte puo' raggiungere.",
+            None,
+        ),
+        (
+            "E' un limite, non una zona: il programma puo' fargli servire anche "
+            "solo una parte del",
+            None,
+        ),
+        (
+            "tratto, ma mai mandarlo oltre. I tratti di carroponti vicini possono "
+            "sovrapporsi: le",
+            None,
+        ),
+        (
+            "vasche in comune le servira' l'uno o l'altro, e quale lo sceglie il "
+            "solutore.",
+            None,
+        ),
+        (
+            "Il numero di righe e' il numero di carroponti (max_carroponti non "
+            "conta piu').",
             None,
         ),
         ("", None),
@@ -2075,15 +2101,16 @@ def _aggiungi_fogli_linea(
 
     # -- Zone (facoltativo) ----------------------------------------------
     ws = wb.create_sheet(FOGLIO_ZONE)
-    prepara(ws, ["prima_mossa", "ultima_mossa", "", "note"], [16, 16, 4, 80])
+    prepara(ws, ["vasca_min", "vasca_max", "", "note"], [16, 16, 4, 80])
     if zone:
         for lo, hi in zone:
             ws.append([lo, hi])
     else:
         # la nota va in colonna D, fuori dalle colonne lette
         ws.cell(2, 4).value = (
-            "Vuoto = numero di carroponti e zone scelti automaticamente "
-            "(consigliato). Vedi il foglio Istruzioni."
+            "Vuoto = nessun limite: numero di carroponti e zone scelti "
+            "automaticamente. Una riga per carroponte = fin dove puo' "
+            "arrivare. Vedi il foglio Istruzioni."
         )
         ws.cell(2, 4).font = nota
 
@@ -2467,7 +2494,7 @@ _COSA_CONTIENE = {
     FOGLIO_VASCHE: "le vasche: posizione, posti, corsa verticale, sgocciolamento",
     FOGLIO_PERCORSO: "la ricetta: in che ordine il pezzo visita le vasche, e per quanto",
     FOGLIO_PARAMETRI: "carroponti, tolleranze, distanze di sicurezza",
-    FOGLIO_ZONE: "quale carroponte serve quale tratto di linea (facoltativo)",
+    FOGLIO_ZONE: "fin dove puo' arrivare ciascun carroponte (facoltativo)",
     FOGLIO_CAMBIO_QUOTA: (
         "dove il carroponte cambia quota agli estremi della linea (facoltativo)"
     ),
@@ -2730,9 +2757,17 @@ def scrivi_risultati(
 
     sezione("Carroponti")
     ws.append(
-        ["carroponte", "mosse servite", "da vasca", "a vasca", "tratto rotaia [mm]", "utilizzo"]
+        [
+            "carroponte",
+            "mosse servite",
+            "da vasca",
+            "a vasca",
+            "tratto rotaia [mm]",
+            "utilizzo",
+            "portata (foglio Zone)",
+        ]
     )
-    for col in range(1, 7):
+    for col in range(1, 8):
         ws.cell(ws.max_row, col).font = grassetto
     ws.column_dimensions["D"].width = 22
     ws.column_dimensions["E"].width = 20
@@ -2748,6 +2783,9 @@ def scrivi_risultati(
                 data.route[z.hi + 1].tank_id,
                 f"{min(xs):.2f} - {max(xs):.2f}",
                 round(utilizzo[h], 3),
+                "nessun limite"
+                if data.portata_mm(h) is None
+                else f"{data.portate[h].vasca_min} - {data.portate[h].vasca_max}",
             ]
         )
         ws.cell(ws.max_row, 6).number_format = "0.0%"

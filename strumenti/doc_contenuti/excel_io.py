@@ -320,15 +320,18 @@ LETTURA = [
     ("h2", "6. I tre fogli facoltativi"),
     ("c", "excel_io._leggi_zone"),
     ("p",
-     "Un foglio Zone presente ma VUOTO vale come assente: zone automatiche. E' "
-     "la scelta giusta, perche' il foglio viene generato sempre dal modello, e "
-     "pretendere che l'utente lo cancelli per avere le zone automatiche "
-     "sarebbe assurdo."),
+     "Il foglio Zone non dice quali mosse fa ciascun carroponte, ma FIN DOVE "
+     "puo' arrivare: una riga per carroponte con la vasca minima e la massima "
+     "(model.Portata). E' un limite, non una zona: le portate di due "
+     "carroponti vicini possono sovrapporsi, e chi serve le vasche in comune "
+     "lo sceglie il solutore. Per questo qui non si controlla nessuna "
+     "copertura: solo che ogni riga abbia tutte e due le vasche e che "
+     "esistano nel foglio Vasche, con la cella in cui non tornano."),
     ("p",
-     "Se invece qualcosa e' scritto, deve coprire tutte le mosse in modo "
-     "contiguo e senza sovrapposizioni -- lo stesso confronto di LISTE che usa "
-     "il verificatore. Il messaggio si chiude ricordando la via d'uscita: "
-     "'Lascia il foglio vuoto per farle scegliere automaticamente'."),
+     "Un foglio Zone presente ma VUOTO vale come assente: nessun limite, "
+     "carroponti e zone automatici. E' la scelta giusta, perche' il foglio "
+     "viene generato sempre dal modello, e pretendere che l'utente lo cancelli "
+     "sarebbe assurdo."),
     ("c", "excel_io._leggi_cambio_quota"),
     ("p",
      "Solo due zone possibili, 'carico' e 'scarico', riconosciute "

@@ -132,7 +132,26 @@ def perche_non_va(
     assegna una mossa per volta, quindi un'assegnazione incompleta e' lo stato
     normale del lavoro in corso. Che manchi qualcosa lo dice `componi()` fra le
     incoerenze, dove serve -- non qui, che deve rispondere solo a "posso dare
-    questa mossa a questo carroponte?"."""
+    questa mossa a questo carroponte?".
+
+    L'altra cosa che la macchina non permette e' la PORTATA (foglio Zone): un
+    carroponte non arriva oltre le vasche che gli sono state dichiarate, e
+    uno che nel foglio non c'e' non esiste."""
+    for k, c in sorted(assegnazione.items()):
+        if data.portate is not None and c >= len(data.portate):
+            return (
+                f"il foglio Zone dichiara solo {len(data.portate)} carroponti: "
+                f"il carroponte {c + 1} non c'e'"
+            )
+        for s in (k, k + 1):
+            if not data.raggiunge(c, s):
+                p = data.portate[c]
+                return (
+                    f"la mossa {k} ({data.route[k].tank_id} -> "
+                    f"{data.route[k + 1].tank_id}) porta il carroponte {c + 1} "
+                    f"in {data.route[s].tank_id}, fuori dalla sua portata "
+                    f"({p.vasca_min} - {p.vasca_max})"
+                )
     assegnate = [(k, assegnazione[k]) for k in sorted(assegnazione)]
     for (k1, c1), (k2, c2) in zip(assegnate, assegnate[1:]):
         if c2 < c1:

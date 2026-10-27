@@ -87,7 +87,8 @@ class Violation:
 
     kind: str  # 'collision'|'dwell_min'|'dwell_max'|'periodicity'|'phase'|
     # 'segment_duration'|'continuity'|'zone_bounds'|'order'|
-    # 'takt_range'|'layout'|'transfer'|'tank_capacity'|'overlap'|'interlock'
+    # 'takt_range'|'layout'|'transfer'|'tank_capacity'|'overlap'|'interlock'|
+    # 'reach'
     severity: str  # 'error' | 'warning' | 'info'
     message: str
     hoists: tuple[int, ...] = ()
@@ -321,6 +322,7 @@ def verify_solution(
 
     _check_structure(data, solution, T, time_tol, add)
     _check_layout(data, required, add)
+    _check_reach(data, solution, space_tol, add)
     trajectories = _check_per_hoist(data, solution, plans, T, time_tol, add)
     _check_phase_and_dwell(data, solution, plans, T, time_tol, add)
     _check_transfers(data, plans, T, time_tol, add)
@@ -478,6 +480,47 @@ def _check_layout(data, required, add):
             problema + " -- il modello non vincola questa vicinanza",
             bound=required,
         )
+
+
+def _check_reach(data, solution, space_tol, add):
+    """Portata: nessun carroponte va oltre il tratto di rotaia che il foglio
+    Zone gli concede (vedi model.Portata).
+
+    Si guarda la TRAIETTORIA, non la suddivisione in zone: e' quella che la
+    macchina percorre davvero, svincoli e punti di passaggio compresi. Ogni
+    segmento e' un movimento solo, quindi i suoi estremi sono anche i suoi
+    punti piu' lontani.
+
+    La traiettoria h e' del carroponte h solo se ce ne sono tante quante le
+    portate: in un ciclogramma composto a mano con un carroponte ancora senza
+    mosse le zone sono di meno e la numerazione non torna. Li' il controllo
+    lo fa gia' il disegno, che non lascia dare una mossa fuori portata."""
+    if data.portate is None or len(solution.segments_per_hoist) != len(data.portate):
+        return
+    for h, segs in enumerate(solution.segments_per_hoist):
+        lo, hi = data.portata_mm(h)
+        for seg in segs:
+            fuori = [
+                x
+                for x in (seg.x_start, seg.x_end)
+                if x < lo - space_tol or x > hi + space_tol
+            ]
+            if not fuori:
+                continue
+            x = fuori[0]
+            p = data.portate[h]
+            add(
+                "reach",
+                "error",
+                f"arriva a {x:.0f} mm, fuori dalla sua portata "
+                f"({p.vasca_min} - {p.vasca_max}, cioe' {lo:.0f} - {hi:.0f} mm)",
+                hoists=(h,),
+                move=seg.move,
+                t=seg.t_start if x == seg.x_start else seg.t_end,
+                value=x,
+                bound=lo if x < lo else hi,
+            )
+            break  # una per carroponte: le altre sono lo stesso problema
 
 
 def _check_per_hoist(data, solution, plans, T, time_tol, add) -> list[_Trajectory]:

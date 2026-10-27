@@ -48,7 +48,6 @@ from model import (
     diagnosi_zone,
     errore_pesato,
     rifinisci_soluzione,
-    solve,
     solve_auto_hoists,
     solve_auto_zones,
 )
@@ -820,9 +819,13 @@ class Applicazione(tk.Tk):
             )
             + f"Vasche: {', '.join(d.tanks)}\n\n"
             + (
-                f"Zone indicate a mano: "
-                f"{[(z.lo, z.hi) for z in self.config_linea.zone_manuali]}\n"
-                if self.config_linea.zone_manuali
+                "Portate dei carroponti (foglio Zone): "
+                + ", ".join(
+                    f"{h + 1}: {p.vasca_min} - {p.vasca_max}"
+                    for h, p in enumerate(d.portate)
+                )
+                + "\nLe zone le sceglie il programma, dentro le portate\n"
+                if d.portate
                 else "Zone e numero di carroponti: da scegliere automaticamente\n"
             )
             + "\nScegli come costruire il ciclogramma."
@@ -950,17 +953,13 @@ class Applicazione(tk.Tk):
     def _risolvi(self, cfg, interruzione: Interruzione):
         """Gira nel thread di lavoro: niente widget qui dentro."""
         d = cfg.data
-        if cfg.zone_manuali is not None:
-            sol = solve(d, time_limit_s=cfg.tempo_limite_s, interruzione=interruzione)
-            zone = cfg.zone_manuali
-        else:
-            sol, zone, _ = solve_auto_hoists(
-                d,
-                max_hoists=cfg.max_carroponti,
-                time_limit_per_candidate=cfg.tempo_limite_s,
-                su_tentativo=self._segnala_tentativo,
-                interruzione=interruzione,
-            )
+        sol, zone, _ = solve_auto_hoists(
+            d,
+            max_hoists=cfg.max_carroponti,
+            time_limit_per_candidate=cfg.tempo_limite_s,
+            su_tentativo=self._segnala_tentativo,
+            interruzione=interruzione,
+        )
         if sol.status not in ("OPTIMAL", "FEASIBLE"):
             if interruzione.richiesta:
                 # Niente diagnosi: sono altre risoluzioni, e chi ha premuto
@@ -1205,10 +1204,10 @@ class Applicazione(tk.Tk):
         self._aggiorna_stato_pulsanti()
         self._stato(messaggio)
         # Barra indeterminata finche' non si sa quanti tentativi saranno: il
-        # primo `su_tentativo` la fa passare a determinata. Con le zone
-        # dichiarate a mano il solutore fa una chiamata sola e non segnala
-        # niente, quindi resta a oscillare -- ed e' giusto: li' non c'e' un
-        # avanzamento da mostrare, c'e' un'unica attesa.
+        # primo `su_tentativo` la fa passare a determinata. I lavori che non
+        # passano dalla ricerca non segnalano niente, e la barra resta a
+        # oscillare -- ed e' giusto: li' non c'e' un avanzamento da mostrare,
+        # c'e' un'unica attesa.
         self.avanzamento.configure(mode="indeterminate")
         self.avanzamento.start(12)
 
@@ -1361,15 +1360,25 @@ class Applicazione(tk.Tk):
             dettaglio = ", ".join(
                 f"{q} {s.lower()}" for s, q in sorted(per_stato.items())
             )
-            scartate = voce.get("n_skipped", 0) + voce.get("n_skipped_layout", 0)
+            scartate = (
+                voce.get("n_skipped", 0)
+                + voce.get("n_skipped_layout", 0)
+                + voce.get("n_skipped_portata", 0)
+            )
             riga = f"  {n} carroponti: {voce.get('n_tried', 0)} suddivisioni risolte"
             if dettaglio:
                 riga += f" ({dettaglio})"
             if scartate:
                 riga += f", {scartate} scartate senza risolverle"
             righe.append(riga)
+            if voce.get("n_skipped_portata"):
+                righe.append(
+                    f"    di cui {voce['n_skipped_portata']} perche' un carroponte "
+                    f"andrebbe oltre la portata del foglio Zone, ad esempio:"
+                )
+                righe.append(f"    {voce.get('portata_example')}")
         if not sweep:
-            righe.append("  (nessun registro: le zone erano dichiarate a mano)")
+            righe.append("  (nessun registro dei tentativi)")
 
         # UNKNOWN e INFEASIBLE vogliono due azioni opposte, e vanno separati.
         unknown = sum(
@@ -1394,7 +1403,15 @@ class Applicazione(tk.Tk):
             "COSA SI PUO' FARE",
             "  - allargare la tolleranza sul takt time "
             "(takt_delta_negativo_s / takt_delta_positivo_s)",
-            "  - aumentare max_carroponti",
+            *(
+                [
+                    "  - allargare le portate dei carroponti nel foglio Zone, o "
+                    "aggiungere",
+                    "    un carroponte (una riga)",
+                ]
+                if self.config_linea is not None and self.config_linea.data.portate
+                else ["  - aumentare max_carroponti"]
+            ),
             "  - aumentare i posti delle vasche piu' lente",
             "  - infittire passo_controllo_distanza_mm da 200 a 100: la distanza",
             "    fra i carroponti viene verificata ogni tot mm, e fra una verifica",
@@ -1635,7 +1652,9 @@ class Applicazione(tk.Tk):
         self._reimposta_grafico()
         self.T_corrente = d.takt_nominale
         self.permanenze = manuale.permanenze_iniziali(d)
-        self.n_carroponti = min(2, d.n_moves)
+        self.n_carroponti = (
+            len(d.portate) if d.portate is not None else min(2, d.n_moves)
+        )
         # NIENTE assegnato: il pettine parte tutto grigio ed e' l'utente a
         # darlo ai carroponti una mossa per volta, che e' il modo in cui un
         # ciclogramma si traccia. Partire da una suddivisione gia' fatta
@@ -1794,6 +1813,16 @@ class Applicazione(tk.Tk):
             return
         d = self.config_linea.data
         n = max(1, min(n, d.n_moves))
+        if d.portate is not None and n != len(d.portate):
+            # i carroponti sono quelli del foglio Zone: uno in piu' non ha una
+            # portata, e togliendone uno le sue mosse andrebbero a un vicino
+            # che magari non ci arriva
+            self.var_carroponti.set(str(self.n_carroponti))
+            self._stato(
+                f"Non si puo': il foglio Zone dichiara {len(d.portate)} "
+                f"carroponti. Per cambiarne il numero cambia le righe del foglio."
+            )
+            return
         if n == self.n_carroponti:
             return
         prima = self._istantanea()

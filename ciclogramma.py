@@ -33,7 +33,6 @@ from excel_io import leggi_problema, scrivi_modello, scrivi_risultati
 from model import (
     TEMPO_RIDUCI_SOSTE_S,
     rifinisci_soluzione,
-    solve,
     solve_auto_hoists,
 )
 from verify import verify_solution
@@ -105,22 +104,20 @@ def main(argv=None) -> int:
     )
 
     # -- risoluzione -------------------------------------------------------
-    if cfg.zone_manuali is not None:
+    if data.portate is not None:
         print(
-            f"  zone indicate a mano: "
-            f"{[(z.lo, z.hi) for z in cfg.zone_manuali]}"
+            f"  portate dal foglio Zone: "
+            f"{[(p.vasca_min, p.vasca_max) for p in data.portate]}"
         )
-        solution = solve(data, time_limit_s=cfg.tempo_limite_s, log_search=args.log)
-        zones = cfg.zone_manuali
-        n_hoists = len(zones)
+        print(f"  cerco le zone migliori per {len(data.portate)} carroponti...")
     else:
         print("  cerco numero di carroponti e zone migliori...")
-        solution, zones, n_hoists = solve_auto_hoists(
-            data,
-            max_hoists=cfg.max_carroponti,
-            time_limit_per_candidate=cfg.tempo_limite_s,
-            log_progress=args.log,
-        )
+    solution, zones, n_hoists = solve_auto_hoists(
+        data,
+        max_hoists=cfg.max_carroponti,
+        time_limit_per_candidate=cfg.tempo_limite_s,
+        log_progress=args.log,
+    )
 
     if solution.status not in ("OPTIMAL", "FEASIBLE"):
         print()
@@ -130,7 +127,13 @@ def main(argv=None) -> int:
             "  - allargare la tolleranza sul takt time "
             "(takt_delta_negativo_s / takt_delta_positivo_s)"
         )
-        print("  - aumentare max_carroponti")
+        if data.portate is not None:
+            print(
+                "  - allargare le portate dei carroponti nel foglio Zone, o "
+                "aggiungere un carroponte (una riga)"
+            )
+        else:
+            print("  - aumentare max_carroponti")
         print("  - aumentare i posti delle vasche piu' lente")
         print("  - allungare tempo_limite_per_tentativo_s")
         for voce in solution.raw.get("hoist_sweep", []):

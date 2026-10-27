@@ -233,8 +233,9 @@ tempo, e non si perde niente per strada: la ricerca si ferma al primo numero di
 carroponti che funziona, quindi se sta provando con tre vuol dire che con due
 non aveva trovato nulla.
 
-Se hai dichiarato tu le zone nel foglio *Zone*, non c'e' niente da provare: il
-calcolo e' uno solo e la barra si limita a oscillare.
+Se nel foglio *Zone* hai dichiarato le portate dei carroponti, il numero di
+carroponti e' quello delle righe e non si cerca: si provano solo le
+suddivisioni in cui ognuno resta dentro la sua portata, di solito molte meno.
 
 ### Dove il carroponte aspetta
 
@@ -1157,7 +1158,7 @@ fogli (sei se ci si salva dentro un ciclogramma):
 | `Vasche` | una riga per vasca: id, posizione lungo la rotaia **in millimetri**, numero di posti, corsa verticale, sgocciolamento. Corsa e sgocciolamento sono **obbligatori** (0 dove non servono) |
 | `Percorso` | sequenza di vasche attraversate, con le permanenze |
 | `Parametri` | quello che vale per tutta la linea: takt time (teorico piu' i due delta, come le permanenze), cinematiche del carroponte, ingombri, tempi di aggancio/sgancio, opzioni di calcolo |
-| `Zone` | facoltativo: suddivisione manuale delle mosse fra i carroponti. **Lasciandolo vuoto** numero di carroponti e zone vengono scelti automaticamente |
+| `Zone` | facoltativo: la **portata** di ciascun carroponte, cioe' la vasca minima e la massima che puo' raggiungere (colonne `vasca_min`, `vasca_max`, una riga per carroponte nell'ordine della linea, il primo e' quello del carico). E' un limite, non una zona: il solutore puo' fargli servire anche solo una parte del tratto, mai andare oltre. Le portate di carroponti vicini **possono sovrapporsi**: le vasche in comune le serve l'uno o l'altro, e quale lo sceglie il solutore. Il numero di righe fissa il numero di carroponti. **Lasciandolo vuoto** nessun limite: numero di carroponti e zone vengono scelti automaticamente |
 | `Ciclogramma` | facoltativo: il ciclogramma gia' composto. Lo scrive il programma quando salvi, e riaprendo il file si riprende da li' |
 
 ### Uso da Python
@@ -1437,6 +1438,14 @@ scrive nel Riepilogo.
    - **tutto manuale**: specifica `zones` (lista di `HoistZone`) e usa
      `solve(data)` direttamente, se hai gia' un'idea precisa di come
      dividere la linea.
+
+   Indipendentemente dal modo, `ProblemData.portate` (lista di `Portata`,
+   una per carroponte, dal foglio *Zone*) dice fin dove ciascuno puo'
+   arrivare: le due ricerche automatiche scartano le suddivisioni che lo
+   mandano oltre, `solve` le rifiuta, e il verificatore controlla che la
+   traiettoria ci resti dentro. Con le portate dichiarate i carroponti sono
+   quelli: `solve_auto_hoists` non cerca il numero, e `solve_auto_zones` va
+   chiamata con `n_hoists = len(portate)`.
 6. **Sicurezza**: `hoist_extent_pos`, `hoist_extent_neg` (ingombro del
    carrello, vedi sotto) e `safety_distance` (margine minimo aggiuntivo).
    In piu', l'**interblocco delle vasche** (`ProblemData.interblocco`, acceso
@@ -1930,7 +1939,7 @@ minore fra quelle fattibili. Il numero di suddivisioni possibili e'
 di mosse resta gestibile, ma cresce in fretta. Il parametro
 `max_candidates` (default **5000**) e' una rete contro il caso fuori scala,
 non un filtro: si applica alle suddivisioni che arrivano davvero al
-solutore, cioe' **dopo** i due prefiltri, e non alle combinazioni sulla
+solutore, cioe' **dopo** i prefiltri (carico, geometria, portata), e non alle combinazioni sulla
 carta. Il default e' alto di proposito — saltare una ricerca e' un danno
 peggiore di farla durare: una ricerca lunga si vede nella barra e si puo'
 interrompere, una saltata produce un «nessuna soluzione» che sembra un
@@ -1962,7 +1971,8 @@ Controlla:
 
 1. struttura (takt time nella banda, zone contigue e coprenti);
 2. **layout**: stazioni cosi' vicine a un confine di zona che il modello non
-   le vincola (vedi sotto);
+   le vincola (vedi sotto); e **portata**: nessun carroponte va oltre il
+   tratto che il foglio *Zone* gli concede;
 3. coerenza dei segmenti (continuita' nel tempo e nello spazio, ciclo di
    durata esattamente T, traiettoria che si richiude);
 4. copertura delle mosse e durate delle tratte contro la cinematica reale;

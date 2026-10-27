@@ -1123,7 +1123,7 @@ def test_ferma_il_calcolo(percorso_linea):
     from model import Solution
 
     app = Applicazione(percorso_linea)
-    originali = (interfaccia.solve_auto_hoists, interfaccia.solve)
+    originale = interfaccia.solve_auto_hoists
     ricevute = []
     try:
         for _ in range(50):
@@ -1155,11 +1155,7 @@ def test_ferma_il_calcolo(percorso_linea):
             sol, zone = aspetta_lo_stop(interruzione)
             return sol, zone, (len(zone) if zone else None)
 
-        def finto_solve(d, *a, interruzione=None, **k):
-            return aspetta_lo_stop(interruzione)[0]
-
         interfaccia.solve_auto_hoists = finto_auto
-        interfaccia.solve = finto_solve
 
         # -- fermato senza niente in mano -----------------------------------
         esito["soluzione"] = (
@@ -1223,7 +1219,7 @@ def test_ferma_il_calcolo(percorso_linea):
             "ferma quello dopo",
         )
     finally:
-        interfaccia.solve_auto_hoists, interfaccia.solve = originali
+        interfaccia.solve_auto_hoists = originale
         chiudi(app)
 
 
