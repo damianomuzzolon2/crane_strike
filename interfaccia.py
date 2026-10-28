@@ -42,6 +42,7 @@ from matplotlib.lines import Line2D
 from allinea_avvio import allinea_avvio, descrivi
 from avvio import righe_di_riepilogo, trova_avvii
 from excel_io import leggi_problema, scrivi_modello, scrivi_risultati
+from fattibilita import testo as testo_fattibilita, valuta as valuta_fattibilita
 from model import (
     TEMPO_RIDUCI_SOSTE_S,
     Interruzione,
@@ -356,6 +357,13 @@ class Applicazione(tk.Tk):
         # uno, e "Modifica" porta li' -- non sceglie fra una versione
         # automatica e una manuale, che dopo l'unificazione della pagina sono
         # lo stesso oggetto con gli stessi gradi di liberta'.
+        # Prima di "Calcola auto": dice in un istante se il takt richiesto e'
+        # irraggiungibile, cosi' non si aspetta mezz'ora un calcolo che non
+        # puo' trovare niente (vedi fattibilita).
+        self.btn_fattibilita = ttk.Button(
+            barra, text="Fattibilita'", command=self._mostra_fattibilita
+        )
+        self.btn_fattibilita.pack(side=tk.LEFT, padx=(0, 6))
         self.btn_auto = ttk.Button(
             barra, text="Calcola auto", command=self._calcola_automatico
         )
@@ -1002,6 +1010,36 @@ class Applicazione(tk.Tk):
         except Exception:  # un ritocco non deve mai far perdere il calcolo
             return sol
         return sol if allineato is None else allineato.soluzione
+
+    def _mostra_fattibilita(self):
+        """I limiti inferiori del takt time della linea caricata, in una
+        finestra a parte: col takt e il numero massimo di carroponti che
+        userebbe "Calcola auto", compreso il selettore Takt fisso."""
+        if not self._pronto_per_calcolare():
+            return
+        cfg = self.config_linea
+        try:
+            referto = testo_fattibilita(
+                valuta_fattibilita(cfg.data, cfg.max_carroponti)
+            )
+        except Exception as e:
+            self._errore("Controllo non riuscito", str(e))
+            return
+        finestra = tk.Toplevel(self)
+        finestra.title(f"{TITOLO} - fattibilita'")
+        finestra.transient(self)
+        testo = tk.Text(
+            finestra, width=86, height=34, wrap=tk.WORD, font=("Consolas", 10),
+            padx=10, pady=8,
+        )
+        testo.insert("1.0", referto)
+        testo.configure(state=tk.DISABLED)
+        testo.pack(fill=tk.BOTH, expand=True)
+        ttk.Button(finestra, text="Chiudi", command=finestra.destroy).pack(
+            pady=(0, 8)
+        )
+        prima = referto.splitlines()[0] if referto else ""
+        self._stato(prima)
 
     def _diagnostica(self, d, sol):
         """Perche' non si e' trovato niente. Gira nel thread di lavoro.
@@ -3020,6 +3058,7 @@ class Applicazione(tk.Tk):
                 self.schede.select(0)
             self.schede.tab(1, state=tk.DISABLED)
         self.btn_auto.configure(state=stato)
+        self.btn_fattibilita.configure(state=stato)
         self.chk_takt_fisso.configure(state=stato)
         # Ferma e' acceso solo mentre c'e' un calcolo da fermare, e si spegne
         # appena lo si preme: il calcolo non si ferma all'istante -- finisce la
