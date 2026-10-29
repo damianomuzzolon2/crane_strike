@@ -27,6 +27,7 @@ problema alla volta.
 from __future__ import annotations
 
 import dataclasses
+import math
 import sys
 from dataclasses import dataclass
 from typing import Optional
@@ -57,6 +58,40 @@ FOGLIO_CAMBIO_QUOTA = "CambioQuota"
 FOGLIO_CICLOGRAMMA = "Ciclogramma"
 FOGLIO_PASSAGGI = "Passaggi"
 FOGLIO_SEQUENZA_CARRI = "SequenzaCarri"
+
+# Le colonne LETTE dei fogli di ingresso, nell'ordine in cui stanno sul foglio.
+# Una definizione sola per chi scrive il file e per la finestra "Dati linea",
+# che mostra le stesse tabelle: un titolo diverso fra le due costringerebbe a
+# tradurre a mente passando dall'una all'altra. Il Percorso ha in testa anche
+# la colonna "n", che non e' un dato (vedi `_leggi_percorso`) e si riscrive.
+COLONNE_VASCHE = [
+    "id",
+    "posizione_mm",
+    "posti",
+    "corsa_verticale_mm",
+    "sgocciolamento_s",
+    "svincolo_negativo_mm",
+    "svincolo_positivo_mm",
+    "traslazione_con_gancio_basso",
+    "larghezza_mm",
+    "altezza_mm",
+]
+COLONNE_PERCORSO = [
+    "vasca",
+    "permanenza_teorica_s",
+    "delta_negativo_s",
+    "delta_positivo_s",
+    "peso_sotto",
+    "peso_sopra",
+]
+COLONNE_ZONE = ["vasca_min", "vasca_max"]
+COLONNE_CAMBIO_QUOTA = [
+    "zona",
+    "posizione_mm",
+    "intermediate1_mm",
+    "intermediate2_mm",
+    "corsa_totale_mm",
+]
 
 # Le colonne della tabella del foglio Ciclogramma, nell'ordine in cui si
 # scrivono. UNA definizione sola, usata da chi scrive e da chi rilegge: le
@@ -308,6 +343,12 @@ _INTERI = {
     "interblocco_vasche",
 }
 
+# Per chi mostra i parametri fuori dal file (la finestra "Dati linea"): nome ->
+# (unita', obbligatorio, default, descrizione), nell'ordine del foglio.
+PARAMETRI = _PARAMETRI
+# Le due zone che il foglio CambioQuota ammette, per chi le propone in elenco.
+VERSI_CAMBIO_QUOTA = _VERSI_CAMBIO_QUOTA
+
 # Come si chiamavano gli stessi parametri quando il progetto lavorava in metri.
 # Servono solo a riconoscere un file vecchio e dirlo chiaramente: leggerlo
 # com'e' vorrebbe dire interpretare 9.5 m come 9.5 mm.
@@ -395,8 +436,14 @@ class _Errori:
     """Accumula i problemi trovati invece di fermarsi al primo, cosi' chi
     compila il foglio li vede tutti insieme."""
 
-    def __init__(self, percorso_file: str):
+    def __init__(self, percorso_file: str, intestazione: Optional[str] = None):
         self.percorso_file = percorso_file
+        # La frase che apre l'elenco. Cambia solo per i dati scritti nella
+        # finestra "Dati linea", che un file non ce l'hanno: dire "il file
+        # 'xyz' non e' compilato" manderebbe a cercare un file che non c'e'.
+        self.intestazione = intestazione or (
+            f"Il file '{percorso_file}' non e' compilato correttamente"
+        )
         self.voci: list[str] = []
 
     def aggiungi(self, foglio: str, riferimento: str, messaggio: str):
@@ -405,8 +452,7 @@ class _Errori:
     def solleva_se_presenti(self):
         if self.voci:
             raise ValueError(
-                f"Il file '{self.percorso_file}' non e' compilato correttamente:\n  - "
-                + "\n  - ".join(self.voci)
+                f"{self.intestazione}:\n  - " + "\n  - ".join(self.voci)
             )
 
 
@@ -459,7 +505,17 @@ def leggi_problema(percorso_file: str) -> Configurazione:
         ) from e
 
     wb = load_workbook(percorso_file, data_only=True)
-    errori = _Errori(percorso_file)
+    return _leggi_libro(wb, percorso_file, _Errori(percorso_file))
+
+
+def _leggi_libro(wb, percorso_file: str, errori: _Errori) -> Configurazione:
+    """Il corpo di `leggi_problema`, su un libro gia' aperto.
+
+    Separato perche' il libro puo' anche non venire da un file: la finestra
+    "Dati linea" scrive le sue tabelle in un libro in memoria e lo fa leggere
+    da qui (vedi `leggi_righe`). Cosi' i dati inseriti a mano passano per gli
+    STESSI controlli di un file, con gli stessi messaggi -- non c'e' una
+    seconda validazione da tenere allineata."""
 
     for nome in (FOGLIO_VASCHE, FOGLIO_PERCORSO, FOGLIO_PARAMETRI):
         if nome not in wb.sheetnames:
@@ -1529,6 +1585,206 @@ def scrivi_linea(
     return percorso_file
 
 
+# --------------------------------------------------------------------------
+# La linea come tabelle, per la finestra "Dati linea"
+# --------------------------------------------------------------------------
+
+# Le colonne di testo, una per tabella: tutte le altre sono numeri. Servono a
+# sapere cosa NON convertire -- una vasca che si chiama "10" resta "10", e non
+# diventa il numero 10 con cui il Percorso non la ritroverebbe piu'.
+_COLONNE_DI_TESTO = {
+    "vasche": {0},
+    "percorso": {0},
+    "zone": {0, 1},
+    "cambio_quota": {0},
+}
+
+
+@dataclass
+class RigheLinea:
+    """La linea com'e' scritta sui fogli di ingresso: le tabelle, riga per
+    riga, prima di qualunque controllo.
+
+    E' quello che la finestra "Dati linea" mostra e modifica. Non e' una
+    `Configurazione`: deve poter contenere anche una linea SBAGLIATA -- una
+    cella vuota, una vasca che non esiste -- perche' e' li' che la si corregge.
+    Le colonne sono quelle di COLONNE_VASCHE, COLONNE_PERCORSO (senza "n"),
+    COLONNE_ZONE e COLONNE_CAMBIO_QUOTA; i parametri sono nome -> valore.
+    Una cella vuota e' None."""
+
+    vasche: list[list]
+    percorso: list[list]
+    parametri: dict
+    zone: list[list]
+    cambio_quota: list[list]
+
+    def normalizzata(self) -> "RigheLinea":
+        """Le stesse tabelle con i numeri scritti come testo ("2500", "2,5")
+        tornati numeri, e il testo vuoto tornato None.
+
+        Il lettore accetterebbe anche il testo, ma un file salvato cosi'
+        avrebbe i numeri come stringhe: Excel li segna con il triangolino
+        verde, e le formule che l'utente ci aggiungesse non li sommerebbero."""
+
+        def tabella(righe, quale):
+            testo = _COLONNE_DI_TESTO[quale]
+            return [
+                [
+                    _cella_da_testo(v, numero=c not in testo)
+                    for c, v in enumerate(riga)
+                ]
+                for riga in righe
+            ]
+
+        return RigheLinea(
+            vasche=tabella(self.vasche, "vasche"),
+            percorso=tabella(self.percorso, "percorso"),
+            # un parametro vuoto e uno assente sono la stessa cosa, per chi
+            # scrive il foglio come per chi confronta due linee
+            parametri={
+                nome: x
+                for nome, v in self.parametri.items()
+                if (x := _cella_da_testo(v, numero=True)) is not None
+            },
+            zone=tabella(self.zone, "zone"),
+            cambio_quota=tabella(self.cambio_quota, "cambio_quota"),
+        )
+
+    def _argomenti(self):
+        """Nell'ordine e nella forma di `_aggiungi_fogli_linea`."""
+        return (
+            self.vasche,
+            self.percorso,
+            self.parametri,
+            self.zone or None,
+            self.cambio_quota or None,
+        )
+
+
+def _cella_da_testo(valore, numero: bool):
+    if isinstance(valore, str):
+        valore = valore.strip()
+        if not valore:
+            return None
+        if numero:
+            try:
+                x = float(valore.replace(",", "."))
+            except ValueError:
+                return valore  # resta testo: sara' il lettore a dire cosa non va
+            if not math.isfinite(x):
+                return valore
+            return int(x) if x == int(x) else x
+    return valore
+
+
+def _righe(vasche, percorso, parametri, zone, cambio_quota) -> RigheLinea:
+    return RigheLinea(
+        vasche=[list(r) for r in vasche],
+        percorso=[list(r) for r in percorso],
+        parametri=dict(parametri),
+        zone=[list(r) for r in zone or []],
+        cambio_quota=[list(r) for r in cambio_quota or []],
+    )
+
+
+def righe_esempio() -> RigheLinea:
+    """La linea d'esempio, la stessa del modello che si genera."""
+    return _righe(*_righe_esempio())
+
+
+def righe_da_configurazione(cfg: Configurazione) -> RigheLinea:
+    """Le tabelle di una linea gia' letta e controllata."""
+    return _righe(*_righe_da_configurazione(cfg))
+
+
+def righe_da_file(percorso_file: str) -> Optional[RigheLinea]:
+    """Le tabelle di un file di ingresso COSI' COME SONO SCRITTE, senza
+    controllarle.
+
+    E' diverso da `leggi_problema` + `righe_da_configurazione`: quello passa
+    per i controlli e restituisce i valori gia' interpretati (una cella
+    "posti" vuota diventa 1), questo restituisce le celle. Serve per due
+    motivi: mostrare all'utente il SUO file, e poter aprire nella finestra
+    anche un file che non si legge, per correggerlo li'.
+
+    None per un file del vecchio formato del Percorso (permanenza minima e
+    massima invece di teorico e delta): le sue colonne vogliono dire un'altra
+    cosa, e messe nelle tabelle di adesso sarebbero lette male."""
+    from openpyxl import load_workbook
+
+    wb = load_workbook(percorso_file, data_only=True)
+
+    def tabella(nome, prima_colonna, n_colonne):
+        if nome not in wb.sheetnames:
+            return []
+        ws = wb[nome]
+        righe = [
+            [ws.cell(r, c).value for c in range(prima_colonna, prima_colonna + n_colonne)]
+            for r in range(2, ws.max_row + 1)
+        ]
+        # Le righe vuote si tolgono: sul foglio servono a lasciare spazio, in
+        # una tabella sarebbero solo righe da scorrere.
+        return [r for r in righe if any(_testo(v) for v in r)]
+
+    if FOGLIO_PERCORSO in wb.sheetnames and _percorso_vecchio_formato(
+        wb[FOGLIO_PERCORSO]
+    ):
+        return None
+    parametri = {}
+    if FOGLIO_PARAMETRI in wb.sheetnames:
+        ws = wb[FOGLIO_PARAMETRI]
+        for r in range(2, ws.max_row + 1):
+            nome = _testo(ws.cell(r, 1).value)
+            # Solo i nomi che esistono, e la prima volta che compaiono: un
+            # nome sconosciuto o ripetuto non ha una riga dove stare nella
+            # tabella dei parametri, che ne ha una per parametro.
+            if nome in _PARAMETRI and nome not in parametri:
+                parametri[nome] = ws.cell(r, 2).value
+    return RigheLinea(
+        vasche=tabella(FOGLIO_VASCHE, 1, len(COLONNE_VASCHE)),
+        # dalla colonna B: la "n" in A non e' un dato
+        percorso=tabella(FOGLIO_PERCORSO, 2, len(COLONNE_PERCORSO)),
+        parametri=parametri,
+        zone=tabella(FOGLIO_ZONE, 1, len(COLONNE_ZONE)),
+        cambio_quota=tabella(FOGLIO_CAMBIO_QUOTA, 1, len(COLONNE_CAMBIO_QUOTA)),
+    )
+
+
+# Come si chiamano, nei messaggi d'errore, i dati che vengono dalla finestra.
+ORIGINE_FINESTRA = "finestra Dati linea"
+
+
+def leggi_righe(righe: RigheLinea, origine: str = ORIGINE_FINESTRA) -> Configurazione:
+    """Interpreta le tabelle come se fossero un file: stessi controlli, stessi
+    messaggi, con foglio e cella.
+
+    Le tabelle si scrivono in un libro in memoria esattamente come le
+    scriverebbe "Salva", e il libro si legge con il lettore dei file. Le righe
+    finiscono sul foglio una dopo l'altra a partire dalla 2, quindi la cella di
+    un errore indica la riga della tabella: riga del foglio - 2."""
+    from openpyxl import Workbook
+
+    wb = Workbook()
+    wb.remove(wb.active)
+    _aggiungi_fogli_linea(wb, *righe.normalizzata()._argomenti())
+    errori = _Errori(
+        origine, intestazione="I dati della linea non sono compilati correttamente"
+    )
+    return _leggi_libro(wb, origine, errori)
+
+
+def scrivi_righe(percorso_file: str, righe: RigheLinea) -> str:
+    """Salva le tabelle come file di ingresso, anche se contengono errori: si
+    salva il lavoro, e i controlli li fa chi lo riapre."""
+    from openpyxl import Workbook
+
+    wb = Workbook()
+    wb.remove(wb.active)
+    _aggiungi_fogli_linea(wb, *righe.normalizzata()._argomenti())
+    wb.save(percorso_file)
+    return percorso_file
+
+
 def _aggiungi_fogli_linea(
     wb,
     vasche,
@@ -2055,40 +2311,13 @@ def _aggiungi_fogli_linea(
 
     # -- Vasche ----------------------------------------------------------
     ws = wb.create_sheet(FOGLIO_VASCHE)
-    prepara(
-        ws,
-        [
-            "id",
-            "posizione_mm",
-            "posti",
-            "corsa_verticale_mm",
-            "sgocciolamento_s",
-            "svincolo_negativo_mm",
-            "svincolo_positivo_mm",
-            "traslazione_con_gancio_basso",
-            "larghezza_mm",
-            "altezza_mm",
-        ],
-        [22, 14, 8, 20, 20, 22, 22, 28, 14, 14],
-    )
+    prepara(ws, COLONNE_VASCHE, [22, 14, 8, 20, 20, 22, 22, 28, 14, 14])
     for riga in vasche:
         ws.append(list(riga))
 
     # -- Percorso --------------------------------------------------------
     ws = wb.create_sheet(FOGLIO_PERCORSO)
-    prepara(
-        ws,
-        [
-            "n",
-            "vasca",
-            "permanenza_teorica_s",
-            "delta_negativo_s",
-            "delta_positivo_s",
-            "peso_sotto",
-            "peso_sopra",
-        ],
-        [6, 22, 22, 20, 20, 14, 14],
-    )
+    prepara(ws, ["n", *COLONNE_PERCORSO], [6, 22, 22, 20, 20, 14, 14])
     for n, riga in enumerate(percorso, start=1):
         ws.append([n, *riga])
 
@@ -2101,7 +2330,7 @@ def _aggiungi_fogli_linea(
 
     # -- Zone (facoltativo) ----------------------------------------------
     ws = wb.create_sheet(FOGLIO_ZONE)
-    prepara(ws, ["vasca_min", "vasca_max", "", "note"], [16, 16, 4, 80])
+    prepara(ws, [*COLONNE_ZONE, "", "note"], [16, 16, 4, 80])
     if zone:
         for lo, hi in zone:
             ws.append([lo, hi])
@@ -2117,17 +2346,7 @@ def _aggiungi_fogli_linea(
     # -- CambioQuota (facoltativo) ---------------------------------------
     ws = wb.create_sheet(FOGLIO_CAMBIO_QUOTA)
     prepara(
-        ws,
-        [
-            "zona",
-            "posizione_mm",
-            "intermediate1_mm",
-            "intermediate2_mm",
-            "corsa_totale_mm",
-            "",
-            "note",
-        ],
-        [12, 14, 18, 18, 18, 4, 80],
+        ws, [*COLONNE_CAMBIO_QUOTA, "", "note"], [12, 14, 18, 18, 18, 4, 80]
     )
     if cambio_quota:
         for riga in cambio_quota:

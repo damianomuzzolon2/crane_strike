@@ -99,6 +99,21 @@ Le dipendenze vanno **in una direzione sola** ed e' un vincolo, non un caso:
   `avvio.py`: usa `avvio` per sapere cosa sistemare, CP-SAT (in modo pigro,
   come `model.py`) per scegliere gli spostamenti, e `verify` per decidere se
   tenerli. Sta sopra tutti e tre, e lo chiamano solo i programmi.
+- `editor_linea.py` (la finestra "Dati linea") sta fra `interfaccia.py` e
+  `excel_io.py`, e importa **solo** `excel_io`. Non ha controlli suoi: le
+  tabelle sono `excel_io.RigheLinea`, e "Applica" le passa a
+  `excel_io.leggi_righe`, che le scrive in un libro openpyxl **in memoria** e
+  lo legge con `_leggi_libro` -- lo stesso corpo di `leggi_problema`. Cosi' i
+  dati inseriti a mano e quelli di un file passano per gli stessi controlli e
+  danno gli stessi messaggi `[Foglio!Cella]`; le righe finiscono sul foglio a
+  partire dalla 2 e senza buchi, quindi la cella di un errore e' anche la
+  riga della tabella (riga del foglio - 2, e nel Percorso una colonna in meno
+  per la "n"). Chi aggiunge una colonna ai fogli di ingresso la aggiunge a
+  `COLONNE_*` e alla lettura, e la finestra la mostra da sola; chi aggiunge un
+  parametro lo aggiunge a `_PARAMETRI`, che e' anche l'elenco delle righe della
+  scheda Parametri. La finestra non conosce `Applicazione`: riceve due funzioni
+  (`applica`, `salvato`), e la finestra principale decide cosa voglia dire
+  applicare -- scartare il ciclogramma, segnare la linea come modificata.
 
 Chi rompe questa direzione rompe la testabilita' del progetto.
 

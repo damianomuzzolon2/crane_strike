@@ -137,6 +137,7 @@ nascosti += [
 # esplicitamente evita sorprese se un import diventasse condizionale.
 nascosti += [
     "avvio",
+    "editor_linea",
     "excel_io",
     "kinematics",
     "manuale",

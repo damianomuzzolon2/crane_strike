@@ -167,7 +167,7 @@ LETTURA = [
 
     # ==================================================================
     ("h2", "2. leggi_problema -- il giro della lettura"),
-    ("c", "excel_io.leggi_problema", None, "    tanks = _leggi_vasche"),
+    ("c", "excel_io.leggi_problema"),
     ("p",
      "openpyxl viene importato dentro la funzione, con un messaggio che dice "
      "come installarlo. E' l'unica dipendenza del modulo, e chi usa solo il "
@@ -180,10 +180,18 @@ LETTURA = [
      "mai aperto con Excel, i valori delle formule non sono ancora stati "
      "calcolati e risultano None."),
     ("p",
+     "Il lavoro vero lo fa _leggi_libro, su un libro gia' aperto. La "
+     "separazione serve alla finestra 'Dati linea': le sue tabelle si "
+     "scrivono in un libro IN MEMORIA e si fanno leggere da qui (vedi "
+     "leggi_righe nel secondo documento). Cosi' i dati inseriti a mano passano "
+     "per gli stessi controlli di un file, con gli stessi messaggi, e non c'e' "
+     "una seconda validazione da tenere allineata."),
+    ("c", "excel_io._leggi_libro", None, "    tanks = _leggi_vasche"),
+    ("p",
      "Il controllo sui fogli mancanti elenca quelli PRESENTI. E' il modo piu' "
      "rapido per accorgersi di un foglio rinominato o di un file sbagliato, e "
      "costa una riga."),
-    ("c", "excel_io.leggi_problema", "    tanks = _leggi_vasche", "    def _kin_sollevamento"),
+    ("c", "excel_io._leggi_libro", "    tanks = _leggi_vasche", "    def _kin_sollevamento"),
     ("p",
      "L'ordine e' quello delle dipendenze: le vasche prima del percorso, "
      "perche' il percorso le nomina. I tre fogli facoltativi -- Zone, "
@@ -193,7 +201,7 @@ LETTURA = [
      "Poi un solleva_se_presenti: da qui in avanti si costruiscono gli "
      "oggetti, e costruirli con dati mancanti darebbe eccezioni tecniche al "
      "posto dei messaggi utili gia' raccolti."),
-    ("c", "excel_io.leggi_problema", "    def _kin_sollevamento", None),
+    ("c", "excel_io._leggi_libro", "    def _kin_sollevamento", None),
     ("p",
      "_kin_sollevamento restituisce None se manca uno dei due valori. Le "
      "cinematiche di sollevamento sono facoltative: una linea senza "
@@ -496,6 +504,43 @@ MODELLO = [
      "Il `wb.remove(wb.active)` in entrambe toglie il foglio vuoto che "
      "openpyxl crea da solo alla nascita del libro. Senza, ogni file avrebbe "
      "un 'Sheet' vuoto in testa."),
+
+    # ==================================================================
+    ("h2", "La linea come tabelle, per la finestra 'Dati linea'"),
+    ("p",
+     "La finestra 'Dati linea' mostra le stesse tabelle del file e permette di "
+     "modificarle. Non ha un formato suo e non ha controlli suoi: tutto passa "
+     "di qui."),
+    ("c", "excel_io.RigheLinea", None, "    def normalizzata"),
+    ("p",
+     "Non e' una Configurazione, e il docstring dice perche': deve poter "
+     "contenere anche una linea SBAGLIATA, perche' e' li' che la si corregge. "
+     "Una Configurazione esiste solo dopo che i controlli sono passati."),
+    ("c", "excel_io.RigheLinea.normalizzata"),
+    ("c", "excel_io._cella_da_testo"),
+    ("p",
+     "La finestra lavora con stringhe. Il lettore le accetterebbe, ma un file "
+     "salvato cosi' avrebbe i numeri come testo. Le colonne di testo "
+     "(_COLONNE_DI_TESTO) restano testo: una vasca che si chiama '10' non deve "
+     "diventare il numero 10."),
+    ("h3", "Da dove arrivano le tabelle"),
+    ("c", "excel_io.righe_da_file"),
+    ("p",
+     "Legge le CELLE, non i valori interpretati: una cella 'posti' vuota resta "
+     "vuota invece di diventare 1. E' quello che serve per mostrare all'utente "
+     "il suo file, e per aprire nella finestra anche un file che non passa i "
+     "controlli. Un Percorso del vecchio formato (minimo e massimo) restituisce "
+     "None: le sue colonne vogliono dire un'altra cosa, e l'interfaccia ripiega "
+     "su righe_da_configurazione."),
+    ("h3", "Dove tornano"),
+    ("c", "excel_io.leggi_righe"),
+    ("p",
+     "Il cuore dell'idea: le tabelle si scrivono in un libro in memoria con "
+     "_aggiungi_fogli_linea, come le scriverebbe 'Salva', e il libro si legge "
+     "con _leggi_libro. Le righe finiscono sul foglio una dopo l'altra dalla "
+     "2, quindi la cella di ogni errore indica la riga della tabella: e' cosi' "
+     "che la finestra colora le righe sbagliate e ci porta con un clic."),
+    ("c", "excel_io.scrivi_righe"),
 
     # ==================================================================
     ("h2", "_aggiungi_fogli_linea"),

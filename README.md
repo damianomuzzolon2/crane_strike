@@ -94,6 +94,7 @@ OR-Tools installato.
 | file | righe | contenuto |
 | --- | ---: | --- |
 | `excel_io.py` | 1742 | Tutto l'Excel: `scrivi_modello()` genera il file da compilare, `leggi_problema()` lo rilegge raccogliendo **tutti** gli errori di compilazione con foglio e cella, `scrivi_risultati()` produce il file dei risultati -- che e' anche un file di ingresso, col ciclogramma dentro, per poterlo riaprire, diviso in due meta' (`Input` e `Output`) dietro due cartelli colorati. |
+| `editor_linea.py` | 1007 | La finestra **Dati linea**: le tabelle del file di ingresso (Vasche, Percorso, Parametri, Zone, Cambio quota) da guardare e modificare senza Excel. Non ha controlli suoi: `Applica` passa le tabelle a `excel_io.leggi_righe`, che le legge con lo stesso lettore dei file, e gli errori tornano con foglio e cella -- la finestra li colora sulla riga giusta. Vedi *Inserire o modificare i dati senza Excel*. |
 | `plotting.py` | 470 | `plot_cyclogram()`: disegna il ciclogramma (posizione lungo la rotaia contro tempo) con il profilo cinematico vero, non con segmenti diritti, i punti sugli istanti in cui succede qualcosa (aggancio, sgancio, partenza, arrivo), le frecce su e giu' sulle corse verticali del gancio e il pezzo fermo in vasca come linea grigia. |
 | `avvio.py` | 572 | Il **punto di avvio**: `trova_avvii()` cerca nel ciclogramma gli istanti in cui tutti i carroponti sono fermi, col gancio in basso, e non stanno ne' al carico ne' allo scarico — quelli da cui la linea si puo' mettere in marcia. Ce n'e' quasi sempre piu' d'uno e sono equivalenti: si restituiscono tutti, e nella finestra si scorrono col pulsante `Avvio`. Se un istante del genere non esiste sceglie quello che sbaglia di meno, e dice di quanto. Non calcola niente di nuovo: legge i segmenti del ciclogramma. Il risultato si vede come linea nera verticale sul grafico, nel foglio Riepilogo, nel pannello della finestra e in fondo al comando da terminale. |
 | `allinea_avvio.py` | 359 | Rende **esatto** un punto di avvio approssimato: `allinea_avvio()` sposta rigidamente nel tempo il giro di qualche carroponte (tutte le sue mosse insieme, con attese e soste) finche' esiste un istante in cui sono tutti a riposo. Cambiano solo i bagni di confine fra un carroponte e l'altro, dentro le tolleranze, e le distanze fra carroponti restano rispettate. Gli spostamenti li sceglie un piccolo modello CP-SAT; il risultato si tiene solo se la verifica indipendente lo passa. Vedi *Il punto di avvio: la linea nera*. |
@@ -163,6 +164,10 @@ programma.
    compilato con una linea di esempio.
 2. Compili il file (vedi *Come modellare il tuo caso*, piu' sotto).
 3. `Apri linea...` — lo carichi.
+
+   In alternativa ai punti 1-3: `Dati linea...` apre le stesse tabelle in una
+   finestra del programma, le compili li' e premi `Applica alla linea` (vedi
+   *Inserire o modificare i dati senza Excel*).
 4. `Calcola auto` oppure `Calcola man`.
 5. Guardi il verdetto, eventualmente ritocchi.
 6. `Salva risultati...` — esce l'Excel dei risultati e l'immagine.
@@ -171,8 +176,9 @@ programma.
 
 | pulsante | cosa fa |
 | --- | --- |
-| `Apri linea...` | Carica un file Excel con la definizione della linea. Se il file e' compilato male non succede nulla di brutto: compare una finestra con **tutti** gli errori trovati, con foglio e cella. |
+| `Apri linea...` | Carica un file Excel con la definizione della linea. Se il file e' compilato male non succede nulla di brutto: compare una finestra con **tutti** gli errori trovati, con foglio e cella, che propone di aprire i dati in `Dati linea` per correggerli li'. |
 | `Nuovo modello Excel...` | Crea il file da compilare, gia' pieno con una linea di zincatura d'esempio, e chiede se aprirlo subito. E' il modo consigliato di cominciare: si parte da qualcosa che funziona e lo si modifica. |
+| `Dati linea...` | Apre una finestra con le **tabelle della linea** -- le stesse dei fogli dell'Excel -- per guardarle e modificarle senza uscire dal programma. Senza una linea aperta parte dalla linea d'esempio. Vedi *Inserire o modificare i dati senza Excel*. |
 | `Calcola auto` | Cerca il numero minimo di carroponti, la suddivisione migliore della linea e il takt time piu' basso. Puo' durare da qualche secondo a qualche minuto: i pulsanti si spengono e la scheda *Ciclogramma* si chiude finche' non ha finito, ma la finestra **non si blocca**. In basso a destra la barra dice a che punto e' e cosa ha gia' in mano: `2 carroponti: tentativo 3 di 5 - ancora circa 3 s - 2 soluzioni trovate, migliore T = 122.14 s: fermando ora resta quella` (vedi *Quanto durera' il calcolo*). |
 | `Ferma` | Interrompe `Calcola auto` (e `Ottimizza con questi carroponti`). E' acceso solo mentre il calcolo gira, e il calcolo si ferma entro mezzo secondo. Se fino a quel momento era gia' stata trovata una soluzione valida la mostra e la verifica, dicendo nel Riepilogo che **non e' dimostrata ottima**: e' la migliore fra le suddivisioni provate, e le altre non lo sono state. Se non era stato trovato niente, il ciclogramma che avevi a schermo **resta com'era**, e la barra in basso scrive `Calcolo interrotto`. Uno stop non e' mai un «nessuna soluzione»: la linea non e' stata dimostrata impossibile. |
 | `Calcola man` | Butta via il ciclogramma corrente e riparte dai tempi teorici di processo, con **nessun trasporto assegnato**, per comporlo a mano (vedi sotto). |
@@ -187,6 +193,56 @@ non solo il nome, perche' dello stesso file girano di solito piu' copie (la
 scrivania, la cartella di commessa, la rete) e serve sapere quale si sta
 guardando. Lo stesso percorso compare nel titolo della finestra e in cima alla
 scheda *Riepilogo*: se la barra e' troppo stretta per contenerlo, si legge li'.
+
+### Inserire o modificare i dati senza Excel
+
+`Dati linea...` apre una finestra con una scheda per ogni foglio del file di
+ingresso: **Vasche**, **Percorso**, **Parametri**, **Zone** e **Cambio quota**.
+Le colonne sono le stesse del file e hanno lo stesso nome, quindi tutto quello
+che *Come modellare il tuo caso* dice dei fogli vale anche qui.
+
+- Con una linea aperta la finestra mostra **il file com'e' scritto**: una
+  cella lasciata vuota resta vuota, non diventa il valore che il programma ne
+  ricava.
+- Senza una linea aperta parte dalla **linea d'esempio**, come
+  `Nuovo modello Excel...`: si modifica quella.
+
+**Modificare una cella**: doppio clic, oppure selezionala e premi Invio o
+comincia semplicemente a scrivere, come in Excel. Invio conferma e scende, Tab
+conferma e va a destra, Esc annulla, Canc svuota. La cella corrente e' quella
+con la cornice arancione; le frecce sinistra e destra la spostano. Dove i
+valori ammessi sono pochi (le vasche del Percorso e delle Zone, `carico` /
+`scarico`, gli 0/1) la cella si compila da un elenco a discesa, ma si puo'
+anche scrivere.
+
+**Righe**: `Aggiungi riga`, `Inserisci sopra`, `Elimina righe` (anche piu'
+d'una, selezionate con Ctrl o Maiusc), `Su` e `Giu'`. Nel Percorso e nelle Zone
+l'ordine delle righe e' il dato, e si cambia con `Su` e `Giu'`. La scheda
+Parametri ha una riga fissa per parametro: in grassetto gli obbligatori,
+selezionandone uno sotto compare la sua spiegazione.
+
+**Copia e incolla**: Ctrl+C copia le righe selezionate, Ctrl+V incolla a
+partire dalla cella corrente, aggiungendo le righe che mancano. Funziona anche
+fra la finestra ed Excel, nei due versi: una tabella gia' scritta altrove si
+porta dentro con un copia e incolla.
+
+**`Applica alla linea`** rende le tabelle la linea in uso. I controlli sono
+**gli stessi** di un file: se qualcosa non va, in basso compare l'elenco
+*Da correggere*, le righe sbagliate diventano rosse, e un clic su un errore
+porta alla scheda e alla riga. Finche' non si applica la linea in uso non
+cambia. Se c'era gia' un ciclogramma il programma chiede conferma: era calcolato
+sui dati di prima e va rifatto. La barra in alto, il titolo e il foglio
+*Riepilogo* dei risultati dicono `(modificata in Dati linea)` accanto al
+percorso del file: la linea non e' piu' quella scritta li'.
+
+**`Salva come Excel...`** scrive le tabelle in un file di ingresso normale, da
+riaprire con `Apri linea...`. Si puo' salvare anche una linea non ancora
+corretta: si salva il lavoro, e gli errori li si ritrova riaprendola.
+`Annulla modifiche` torna alla linea in uso, `Chiudi` chiede se applicare
+quello che non e' ancora stato applicato.
+
+Il selettore `Takt fisso` della barra e il parametro `takt_fisso` sono la
+stessa cosa: cambiando l'uno cambia anche l'altro.
 
 ### Quanto durera' il calcolo
 

@@ -1588,6 +1588,151 @@ def test_punti_di_avvio(percorso_linea):
         chiudi(app)
 
 
+def test_dati_linea(percorso_linea):
+    print("\n[17] la finestra Dati linea: le tabelle del file, modificabili")
+    from tkinter import messagebox
+
+    from excel_io import FOGLIO_PERCORSO, FOGLIO_VASCHE, righe_da_file
+    from interfaccia import Applicazione
+
+    domande = []
+    originali = messagebox.askyesno, messagebox.askyesnocancel
+    messagebox.askyesno = lambda *a, **k: (domande.append(a[1]), True)[1]
+    messagebox.askyesnocancel = lambda *a, **k: False
+    app = Applicazione()
+    copia = None
+    try:
+        app.update()
+        # senza una linea aperta si parte dalla linea d'esempio
+        app._apri_dati_linea()
+        app.update()
+        f = app.finestra_dati
+        check(
+            str(f.btn_applica.cget("state")) == "normal",
+            "senza linea: l'esempio si puo' applicare subito",
+        )
+        check(f.applica(), "e applicato diventa la linea in uso")
+        check(
+            app.config_linea is not None and app.percorso_file is None,
+            "una linea senza file",
+        )
+        check(
+            "non salvata" in app.etichetta_file.cget("text"),
+            "e la barra lo dice",
+        )
+
+        # aprendo un file, la finestra mostra quello
+        app._carica(percorso_linea)
+        app.update()
+        check(not f.da_applicare(), "aperto un file, non c'e' niente da applicare")
+        vasche = f.griglie[FOGLIO_VASCHE]
+
+        # una cella modificata come la modifica l'utente: si scrive e Invio
+        vasche.vai_a(1, 1)
+        app.update()
+        vasche._inizia_modifica("abc")
+        app.update()
+        vasche._conferma_e_vai(1, 0)
+        app.update()
+        check(vasche.righe()[1][1] == "abc", "la cella prende il testo scritto")
+        check(f.da_applicare(), "e c'e' una modifica da applicare")
+        check(not f.applica(), "un valore sbagliato non si applica")
+        check(vasche._errori == {1}, "la riga sbagliata e' segnata")
+        check(
+            app.config_linea.data.tanks["SGRASSO"].position == 2500,
+            "e la linea in uso non cambia",
+        )
+
+        vasche.imposta_cella(1, 1, "2600")
+        f._cambiato()
+        check(f.applica(), "corretta, si applica")
+        check(
+            app.config_linea.data.tanks["SGRASSO"].position == 2600,
+            "e la linea in uso e' quella nuova",
+        )
+        check(
+            app.linea_modificata and "modificata" in app.etichetta_file.cget("text"),
+            "la barra dice che non e' piu' il file",
+        )
+
+        # incollare un blocco copiato da Excel
+        percorso = f.griglie[FOGLIO_PERCORSO]
+        n = len(percorso.righe())
+        app.clipboard_clear()
+        app.clipboard_append("SGRASSO\t20\t2\t2\nPIPPO\t10\t1\t1\n")
+        percorso.vai_a(n - 1, 0)
+        percorso.incolla()
+        app.update()
+        check(
+            len(percorso.righe()) == n + 1 and percorso.righe()[-1][0] == "PIPPO",
+            "un blocco incollato sovrascrive e aggiunge le righe che mancano",
+        )
+        f.applica()
+        app.update()
+        check(percorso._errori == {n}, "la vasca inesistente e' segnata")
+        f.lista_errori.selection_set(f.lista_errori.get_children()[0])
+        app.update()
+        check(
+            f.schede.index(f.schede.select()) == 1
+            and percorso.albero.focus() == str(n),
+            "un clic sull'errore porta alla scheda e alla riga",
+        )
+        f.ripristina()
+        app.update()
+        check(
+            len(percorso.righe()) == n and not f.da_applicare(),
+            "Annulla modifiche torna alla linea in uso",
+        )
+
+        # salvate, le tabelle sono il file
+        fd, copia = tempfile.mkstemp(suffix=".xlsx")
+        os.close(fd)
+        f.salva_in(copia)
+        app.update()
+        check(
+            not app.linea_modificata and app.percorso_file == os.path.normpath(copia),
+            "salvata, la linea in uso e' il file nuovo",
+        )
+        check(righe_da_file(copia).vasche[1][1] == 2600, "con dentro la modifica")
+
+        # il selettore Takt fisso si vede anche nelle tabelle
+        app.var_takt_fisso.set(True)
+        app._cambia_takt_fisso()
+        app.update()
+        check(
+            f.righe().parametri["takt_fisso"] == "1" and not f.da_applicare(),
+            "Takt fisso aggiorna la tabella senza farne una modifica",
+        )
+
+        # un file che non passa i controlli si apre nella finestra
+        from openpyxl import load_workbook
+
+        wb = load_workbook(copia)
+        wb[FOGLIO_VASCHE]["B4"] = "xx"
+        wb.save(copia)
+        # con una modifica in sospeso nella finestra, che va persa
+        vasche.imposta_cella(0, 1, "5")
+        f._cambiato()
+        domande.clear()
+        app._carica(copia)
+        app.update()
+        check(
+            len(domande) == 2 and "andrebbero perse" in domande[0],
+            "prima si chiede se perdere le modifiche, poi se correggere il file",
+        )
+        check(vasche._errori == {2}, "e la finestra mostra dove")
+        check(
+            f.da_applicare() and app.config_linea.data.tanks["SGRASSO"].position == 2600,
+            "senza toccare la linea in uso",
+        )
+        f.destroy()
+    finally:
+        messagebox.askyesno, messagebox.askyesnocancel = originali
+        chiudi(app)
+        if copia:
+            os.unlink(copia)
+
+
 def test_file_illeggibile():
     print("\n[3] file non valido: messaggio, non schianto")
     from interfaccia import Applicazione
@@ -1717,6 +1862,7 @@ def main():
         test_simulazione_dal_pulsante(linea)
         test_punti_di_avvio(linea)
         test_takt_fisso(linea)
+        test_dati_linea(linea)
         test_file_illeggibile()
     finally:
         os.unlink(linea)

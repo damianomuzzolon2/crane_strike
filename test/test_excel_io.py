@@ -30,7 +30,12 @@ from excel_io import (
     FOGLIO_ZONE,
     FOGLIO_CAMBIO_QUOTA,
     leggi_problema,
+    leggi_righe,
+    righe_da_configurazione,
+    righe_da_file,
+    righe_esempio,
     scrivi_modello,
+    scrivi_righe,
 )
 
 _n_pass = 0
@@ -163,6 +168,73 @@ def test_andata_e_ritorno():
         check(
             (cfg.max_carroponti, cfg.tempo_limite_s) == (4, 15.0),
             "opzioni di risoluzione",
+        )
+    finally:
+        os.unlink(p)
+
+
+def test_tabelle_della_finestra():
+    print("\n[1b] le tabelle della finestra Dati linea")
+    p = modello_temporaneo()
+    try:
+        dal_file = leggi_problema(p)
+        grezze = righe_da_file(p)
+        check(
+            leggi_righe(grezze).data.route == dal_file.data.route
+            and leggi_righe(grezze).data.tanks == dal_file.data.tanks,
+            "le celle del file, rilette come tabelle, danno la stessa linea",
+        )
+        check(
+            leggi_righe(righe_da_configurazione(dal_file)).data.tanks
+            == dal_file.data.tanks,
+            "anche passando dalla linea gia' letta",
+        )
+        check(
+            grezze.vasche[0][5] is None,
+            "una cella vuota resta vuota: si vede il file, non la sua lettura",
+        )
+
+        # come le scrive la finestra: tutto testo, anche con la virgola
+        r = righe_esempio()
+        r.vasche = [
+            ["" if v is None else str(v).replace(".", ",") for v in riga]
+            for riga in r.vasche
+        ]
+        r.vasche[1][4] = "2,5"
+        check(
+            leggi_righe(r).data.tanks["SGRASSO"].drain_time == 2.5,
+            "numeri scritti come testo, con la virgola decimale",
+        )
+        scrivi_righe(p, r)
+        check(
+            valore(p, FOGLIO_VASCHE, "B3") == 2500
+            and valore(p, FOGLIO_VASCHE, "E3") == 2.5
+            and valore(p, FOGLIO_VASCHE, "A3") == "SGRASSO",
+            "salvate, i numeri tornano numeri e gli id restano testo",
+        )
+
+        # gli errori indicano la riga della TABELLA: riga del foglio - 2
+        r = righe_esempio()
+        r.vasche[3][1] = "abc"
+        r.percorso[4][0] = "INESISTENTE"
+        r.parametri["takt_teorico_s"] = None
+        try:
+            leggi_righe(r)
+            messaggio = ""
+        except ValueError as e:
+            messaggio = str(e)
+        check(
+            messaggio.startswith("I dati della linea non sono compilati"),
+            "il messaggio non parla di un file che non c'e'",
+        )
+        check(
+            f"[{FOGLIO_VASCHE}!B5]" in messaggio
+            and f"[{FOGLIO_PERCORSO}!B6]" in messaggio,
+            "la cella dell'errore porta alla riga della tabella",
+        )
+        check(
+            f"[{FOGLIO_PARAMETRI}!B2]" in messaggio,
+            "un parametro obbligatorio vuoto si segnala sulla sua riga",
         )
     finally:
         os.unlink(p)
@@ -1962,6 +2034,7 @@ def main():
     print("TEST DI LETTURA E SCRITTURA EXCEL (richiede openpyxl, non OR-Tools)")
     print("=" * 72)
     test_andata_e_ritorno()
+    test_tabelle_della_finestra()
     test_foglio_ciclogramma()
     test_valori_mancanti_e_sbagliati()
     test_corsa_e_scolo_obbligatori()

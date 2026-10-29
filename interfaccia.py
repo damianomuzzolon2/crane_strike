@@ -41,7 +41,16 @@ from matplotlib.lines import Line2D
 
 from allinea_avvio import allinea_avvio, descrivi
 from avvio import righe_di_riepilogo, trova_avvii
-from excel_io import leggi_problema, scrivi_modello, scrivi_risultati
+from editor_linea import FinestraDatiLinea
+from excel_io import (
+    leggi_problema,
+    leggi_righe,
+    righe_da_configurazione,
+    righe_da_file,
+    righe_esempio,
+    scrivi_modello,
+    scrivi_risultati,
+)
 from fattibilita import testo as testo_fattibilita, valuta as valuta_fattibilita
 from model import (
     TEMPO_RIDUCI_SOSTE_S,
@@ -221,6 +230,18 @@ class Applicazione(tk.Tk):
         # -- stato ---------------------------------------------------------
         self.percorso_file: str | None = None
         self.config_linea = None  # Configurazione letta dall'Excel
+        # La linea come tabelle (excel_io.RigheLinea), cioe' com'e' scritta:
+        # e' quello che mostra la finestra "Dati linea". Si tiene accanto alla
+        # Configurazione perche' quella ha i valori gia' interpretati -- una
+        # cella "posti" vuota ci diventa 1 -- e la finestra deve mostrare il
+        # file dell'utente, non la nostra lettura.
+        self.righe_linea = None
+        # Vero quando la linea in uso viene dalla finestra "Dati linea" e non
+        # e' piu' quella scritta in `percorso_file`: lo si dice in barra e nel
+        # file dei risultati, che altrimenti indicherebbe come origine un file
+        # che dice un'altra cosa.
+        self.linea_modificata = False
+        self.finestra_dati: FinestraDatiLinea | None = None
         self.dati = None  # ProblemData con le zone valorizzate
         self.soluzione = None
         self.report = None
@@ -345,6 +366,12 @@ class Applicazione(tk.Tk):
         )
         ttk.Button(
             barra, text="Nuovo modello Excel...", command=self._crea_modello
+        ).pack(side=tk.LEFT, padx=(6, 0))
+        # Le stesse tabelle del file, da guardare e modificare qui. Sempre
+        # acceso: senza una linea aperta parte dalla linea d'esempio, ed e' un
+        # modo di scriverne una nuova senza passare da Excel.
+        ttk.Button(
+            barra, text="Dati linea...", command=self._apri_dati_linea
         ).pack(side=tk.LEFT, padx=(6, 0))
 
         ttk.Separator(barra, orient=tk.VERTICAL).pack(
@@ -769,16 +796,33 @@ class Applicazione(tk.Tk):
             self._carica(percorso)
 
     def _carica(self, percorso: str):
+        if not self._dati_linea_scartabili():
+            return
         try:
-            self.config_linea = leggi_problema(percorso)
+            cfg = leggi_problema(percorso)
         except Exception as e:
-            self._errore("Il file non puo' essere letto", str(e))
+            self._file_illeggibile(percorso, e)
             return
         # Assoluto e normalizzato: la finestra di dialogo di Tk restituisce le
         # barre al contrario ("C:/..."), e dalla riga di comando puo' arrivare
         # un percorso relativo. Cosi' quello che si legge e' un percorso vero,
         # copiabile e incollabile in Esplora risorse.
         percorso = os.path.normpath(os.path.abspath(percorso))
+        try:
+            righe = righe_da_file(percorso)
+        except Exception:
+            righe = None
+        # un file del vecchio formato si mostra come lo si e' letto
+        self._usa_linea(cfg, percorso, righe or righe_da_configurazione(cfg))
+        if self.finestra_dati is not None:
+            self.finestra_dati.carica(self.righe_linea, percorso)
+
+    def _usa_linea(self, cfg, percorso: str | None, righe, modificata=False):
+        """Rende `cfg` la linea in uso, da un file o dalla finestra "Dati
+        linea": tutto quello che dipendeva dalla linea di prima si azzera."""
+        self.config_linea = cfg
+        self.righe_linea = righe
+        self.linea_modificata = modificata
         self.percorso_file = percorso
         self.dati = None
         self.soluzione = None
@@ -813,7 +857,7 @@ class Applicazione(tk.Tk):
         self.var_takt_fisso.set(d.takt_fisso)
         self._mostra_percorso(percorso)
         self._scrivi_riepilogo(
-            f"Linea: {percorso}\n"
+            f"Linea: {self._descrizione_linea()}\n"
             f"Stazioni: {d.n_stations}   Mosse: {d.n_moves}\n"
             f"Takt time teorico: {d.takt_nominale:.1f} s "
             f"(-{d.takt_delta_neg:.1f} / +{d.takt_delta_pos:.1f}), "
@@ -900,6 +944,133 @@ class Applicazione(tk.Tk):
         ):
             self._carica(percorso)
 
+    # ------------------------------------------------------------------
+    # La finestra "Dati linea"
+    # ------------------------------------------------------------------
+
+    def _finestra_dati_aperta(self) -> bool:
+        f = self.finestra_dati
+        return f is not None and bool(f.winfo_exists())
+
+    def _apri_dati_linea(self, righe=None, origine=None, errori=None):
+        """Apre (o porta davanti) la finestra con le tabelle della linea.
+
+        Senza argomenti mostra la linea in uso, o quella d'esempio se non ce
+        n'e' una. Con `righe` mostra quelle -- un file che non si e' riusciti
+        a leggere, da correggere -- che non sono la linea in uso."""
+        # righe passate da chi chiama: ha gia' chiesto se buttare le modifiche
+        # della finestra (vedi `_carica`), e qui vanno mostrate comunque
+        esplicite = righe is not None
+        if righe is None:
+            if self.righe_linea is not None:
+                righe, origine, applicate = self.righe_linea, self.percorso_file, True
+            else:
+                righe, origine, applicate = righe_esempio(), None, False
+        else:
+            applicate = False
+        if self._finestra_dati_aperta():
+            if esplicite or not self.finestra_dati.modificata():
+                self.finestra_dati.carica(righe, origine, applicate, errori)
+            self.finestra_dati.deiconify()
+            self.finestra_dati.lift()
+            return
+        self.finestra_dati = FinestraDatiLinea(
+            self,
+            righe,
+            origine,
+            applica=self._applica_dati_linea,
+            salvato=self._dati_linea_salvati,
+            applicate=applicate,
+            errori=errori,
+        )
+
+    def _applica_dati_linea(self, righe, origine) -> bool:
+        """Rende le tabelle della finestra la linea in uso. Solleva ValueError
+        (con foglio e cella) se non sono compilate bene: e' la finestra a
+        mostrarli."""
+        finestra = self.finestra_dati
+        if self._lavoro_in_corso:
+            messagebox.showwarning(
+                TITOLO,
+                "C'e' un calcolo in corso: aspetta che finisca, o fermalo, "
+                "prima di cambiare la linea.",
+                parent=finestra,
+            )
+            return False
+        cfg = leggi_righe(righe)
+        # Come per un file nuovo: il ciclogramma era della linea di prima, con
+        # altre vasche o altri tempi, e tenerlo vorrebbe dire mostrare
+        # traiettorie che i dati non giustificano piu'.
+        if (self.soluzione is not None or self.permanenze) and not messagebox.askyesno(
+            TITOLO,
+            "Applicando i dati il ciclogramma attuale viene scartato: andra' "
+            "ricalcolato (o ricomposto) sulla linea nuova.\n\nProcedere?",
+            parent=finestra,
+        ):
+            return False
+        if origine is not None:
+            origine = os.path.normpath(os.path.abspath(origine))
+        # Modificata solo se c'e' un file a cui non corrisponde piu'. Le
+        # tabelle appena salvate in quel file gli corrispondono, e lo dice
+        # `_dati_linea_salvati`.
+        self._usa_linea(cfg, origine, righe, modificata=origine is not None)
+        self._stato("Linea aggiornata dai Dati linea")
+        return True
+
+    def _dati_linea_salvati(self, percorso: str, righe):
+        """La finestra ha scritto le sue tabelle in un file. Se sono quelle
+        della linea in uso, adesso la linea e' quel file e non e' piu'
+        "modificata"."""
+        if self.righe_linea is not None and (
+            righe.normalizzata() == self.righe_linea.normalizzata()
+        ):
+            self.percorso_file = percorso
+            self.linea_modificata = False
+            self._mostra_percorso(percorso)
+
+    def _dati_linea_scartabili(self) -> bool:
+        """Prima di aprire un altro file: le modifiche non applicate della
+        finestra andrebbero perse, e si chiede."""
+        if not self._finestra_dati_aperta() or not self.finestra_dati.modificata():
+            return True
+        return messagebox.askyesno(
+            TITOLO,
+            "La finestra Dati linea ha modifiche non applicate, che aprendo "
+            "un'altra linea andrebbero perse.\n\nProcedere?",
+        )
+
+    def _file_illeggibile(self, percorso: str, errore: Exception):
+        """Un file che non passa i controlli si puo' correggere nella finestra
+        "Dati linea" invece che in Excel. Un file che non e' nemmeno un Excel
+        valido no: si dice perche' e basta."""
+        righe = None
+        if isinstance(errore, ValueError):
+            try:
+                righe = righe_da_file(percorso)
+            except Exception:
+                righe = None
+        if righe is None:
+            self._errore("Il file non puo' essere letto", str(errore))
+            return
+        # Gli errori si ricalcolano sulle tabelle invece di riusare quelli del
+        # file: le tabelle non hanno le righe vuote del foglio, e le celle del
+        # file indicherebbero righe sbagliate.
+        try:
+            leggi_righe(righe)
+            errori = str(errore)
+        except ValueError as e:
+            errori = str(e)
+        self._stato("Il file non puo' essere letto")
+        if messagebox.askyesno(
+            f"{TITOLO} - Il file non puo' essere letto",
+            f"{errore}\n\nAprire i dati nella finestra 'Dati linea' per "
+            f"correggerli?",
+            icon=messagebox.ERROR,
+        ):
+            self._apri_dati_linea(
+                righe, os.path.normpath(os.path.abspath(percorso)), errori
+            )
+
     def _cambia_takt_fisso(self):
         """Il selettore "Takt fisso": cambia l'obiettivo della linea caricata.
 
@@ -920,6 +1091,12 @@ class Applicazione(tk.Tk):
             self._errore("Takt fisso non applicabile", str(e))
             return
         self.config_linea = dataclasses.replace(self.config_linea, data=data)
+        # Anche nelle tabelle, se no la finestra "Dati linea" mostrerebbe il
+        # valore di prima, e applicarla rimetterebbe l'obiettivo vecchio.
+        if self.righe_linea is not None:
+            self.righe_linea.parametri["takt_fisso"] = int(fisso)
+        if self._finestra_dati_aperta():
+            self.finestra_dati.imposta_parametro("takt_fisso", int(fisso))
         if self.dati is not None:
             self.dati = dataclasses.replace(self.dati, takt_fisso=fisso)
         self._stato(
@@ -1090,7 +1267,7 @@ class Applicazione(tk.Tk):
                 self.dati,
                 self.soluzione,
                 self.report,
-                sorgente=self.percorso_file,
+                sorgente=self._descrizione_linea(),
                 cfg=self.config_linea,
                 ciclogramma={
                     "T": self.T_corrente,
@@ -3177,12 +3354,22 @@ class Applicazione(tk.Tk):
         Nel titolo perche' la barra dei comandi ha spazio limitato: se il
         percorso e' lunghissimo li' viene tagliato, mentre il titolo lo mostra
         comunque (e resta leggibile anche con la finestra ridotta a icona)."""
-        if not percorso:
+        if not percorso and self.config_linea is None:
             self.etichetta_file.configure(text="Nessuna linea caricata")
             self.title(TITOLO)
             return
-        self.etichetta_file.configure(text=percorso)
-        self.title(f"{TITOLO} - {percorso}")
+        testo = self._descrizione_linea()
+        self.etichetta_file.configure(text=testo)
+        self.title(f"{TITOLO} - {testo}")
+
+    def _descrizione_linea(self) -> str:
+        """Da dove viene la linea in uso, detto in modo che non inganni: un
+        file modificato nella finestra non e' piu' quel file."""
+        if self.percorso_file is None:
+            return "linea inserita in Dati linea (non salvata)"
+        if self.linea_modificata:
+            return f"{self.percorso_file} (modificata in Dati linea)"
+        return self.percorso_file
 
     def _scrivi_riepilogo(self, testo: str):
         self.testo_riepilogo.configure(state=tk.NORMAL)
