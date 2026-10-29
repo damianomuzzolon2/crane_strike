@@ -12,7 +12,9 @@ I comandi sono quelli del PLC:
     Transfer Outlet   come Transfer, verso lo svincolo POSITIVO della vasca, o
                       verso il punto di cambio quota del carico
     Transfer Inlet    come Transfer, verso lo svincolo NEGATIVO della vasca, o
-                      verso il punto di cambio quota dello scarico
+                      verso il punto di cambio quota dello scarico (un
+                      punto di cambio quota che cade su una vasca e' un
+                      Transfer semplice a quella vasca)
     Dripping          param1 = secondi di sgocciolamento
     Pause             param1 = secondi di attesa
     External Request  prima di andare al carico o allo scarico
@@ -124,6 +126,9 @@ def nome_posizione(
       - Transfer Inlet: lo svincolo negativo, o il punto di cambio quota dello
         scarico (che sta dalla parte negativa dello scarico).
 
+    Un punto di cambio quota che cade proprio su una vasca si raggiunge invece
+    con un Transfer semplice, col nome di quella vasca.
+
     Un punto di passaggio messo a mano in mezzo alla rotaia non ha nome, e si
     scrive in millimetri."""
     del_percorso = {s.tank_id for s in data.route}
@@ -132,9 +137,13 @@ def nome_posizione(
         (data.n_stations - 1, data.cambio_quota_scarico, TRANSFER_INLET),
     ):
         # il carro sul punto di cambio quota e' gia' al carico (o allo
-        # scarico): e' da li' che comincia la presa
+        # scarico): e' da li' che comincia la presa, anche se il punto cade
+        # su un'altra vasca -- per le fermate e l'interblocco non la lascia
         if zona is not None and abs(zona.position - x) < _TOLLERANZA_MM:
             vasca = data.route[stazione].tank_id
+            for t in data.tanks.values():
+                if abs(t.position - x) < _TOLLERANZA_MM:
+                    return TRANSFER, f"Pos.{t.id}", vasca
             return comando, f"Pos.{vasca}", vasca
     for t in data.tanks.values():
         if abs(t.position - x) < _TOLLERANZA_MM:

@@ -471,6 +471,30 @@ def test_cambio_quota():
         "e quella al carico prima del rientro",
     )
 
+    # Un punto di cambio quota che cade su una vasca e' un Transfer semplice a
+    # quella vasca, non un Outlet/Inlet del carico o dello scarico.
+    data = dataclasses.replace(
+        linea_verticale(),
+        cambio_quota_carico=ZonaCambioQuota(5000, 350, 1650, 2400),
+        cambio_quota_scarico=ZonaCambioQuota(15000, 350, 1650, 2400),
+    )
+    sol = giro_unico(data)
+    (passi,) = programma_carri(data, sol).programmi
+    righe = [(p.comando, p.param1, p.param2) for p in passi]
+    i = righe.index((LIFTING, "Pos.Int2", 9))
+    check(
+        righe[i + 1] == (TRANSFER, "Pos.V1", 9),
+        f"al carico: il punto di cambio quota su V1 e' Transfer Pos.V1 ({righe[i + 1]})",
+    )
+    check(
+        (TRANSFER, "Pos.V3", 9) in righe and (TRANSFER, "Pos.V3", 10) in righe,
+        "allo scarico: il punto di cambio quota su V3 e' Transfer Pos.V3",
+    )
+    check(
+        not any(c in (TRANSFER_OUTLET, TRANSFER_INLET) for c, _, _ in righe),
+        f"nessun Transfer Outlet/Inlet ({righe})",
+    )
+
 
 def test_foglio():
     print("\n[8] il foglio SequenzaCarri nel file dei risultati")
