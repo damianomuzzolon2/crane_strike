@@ -2151,7 +2151,7 @@ def _aggiungi_fogli_linea(
             "cadere FRA la",
             None,
         ),
-        ("                stazione servita e quella accanto", None),
+        ("                stazione servita e quella accanto (estremi compresi)", None),
         (
             "Le tre quote si misurano DAL BASSO: 0 e' la posizione piu' bassa del "
             "carroponte,",

@@ -1920,7 +1920,8 @@ le due traslazioni del giro compaiono come `traslazione di cambio quota`, e nel
 foglio `TempiVerticali` il loro tempo sta nella colonna `cambio quota`.
 
 Il punto di cambio quota deve cadere **fra la stazione servita e quella
-accanto**, e il programma lo controlla. Non e' un capriccio: e' quel vincolo a
+accanto** (puo' anche coincidere con una delle due), e il programma lo
+controlla. Non e' un capriccio: e' quel vincolo a
 garantire che il carroponte, andando e tornando, si allontani dal resto della
 linea invece di avvicinarsi al vicino — oltre a evitare che scavalchi un'altra
 stazione per andare a cambiare quota.

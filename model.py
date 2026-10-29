@@ -713,13 +713,15 @@ class ProblemData:
             x_st = self.station_position(stazione)
             x_vic = self.station_position(vicina)
             lo, hi = (x_st, x_vic) if x_st <= x_vic else (x_vic, x_st)
-            if not (lo < zona.position < hi):
+            # Gli estremi valgono: sulla stazione stessa o su quella accanto il
+            # carroponte non scavalca nessuno, e il vai-e-torna resta dentro.
+            if not (lo <= zona.position <= hi):
                 raise ValueError(
                     f"la zona di cambio quota del {verso} e' a "
                     f"{zona.position:.0f} mm: deve stare fra "
                     f"'{self.route[stazione].tank_id}' ({x_st:.0f} mm) e "
-                    f"'{self.route[vicina].tank_id}' ({x_vic:.0f} mm), "
-                    f"altrimenti il carroponte dovrebbe scavalcare un'altra "
+                    f"'{self.route[vicina].tank_id}' ({x_vic:.0f} mm), estremi "
+                    f"compresi, altrimenti il carroponte dovrebbe scavalcare un'altra "
                     f"stazione per andare a cambiare quota."
                 )
             corsa_dichiarata = self.tanks[self.route[stazione].tank_id].lift_height

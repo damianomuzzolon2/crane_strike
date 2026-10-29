@@ -1455,6 +1455,20 @@ def test_cambio_quota_validazione():
         except ValueError as e:
             check(atteso in str(e), f"{descrizione}: segnalato ({atteso})")
 
+    # Gli estremi valgono: il punto di cambio quota puo' coincidere con la
+    # stazione servita o con quella accanto.
+    for pos, descrizione in (
+        (0, "punto di cambio quota sulla stazione servita"),
+        (5000, "punto di cambio quota sulla vasca accanto"),
+    ):
+        try:
+            _linea_cambio_quota(
+                cambio_quota_carico=ZonaCambioQuota(pos, 400, 1600, 2500)
+            )
+            check(True, f"{descrizione}: accettato")
+        except ValueError as e:
+            check(False, f"{descrizione}: respinto ({e})")
+
     # La corsa dichiarata sulla vasca di carico sarebbe un secondo valore per
     # la stessa grandezza: uno dei due verrebbe ignorato in silenzio.
     base = _linea_cambio_quota()

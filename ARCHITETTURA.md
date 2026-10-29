@@ -481,7 +481,7 @@ Ne discendono tre conseguenze, tutte da tenere presenti:
 3. La presa non e' piu' un tratto solo: `_segmenti_fasi` la spezza in soste
    (`pick` / `release`) e traslazioni (`quota`).
 
-La posizione dichiarata deve cadere **fra la stazione servita e quella accanto**,
+La posizione dichiarata deve cadere **fra la stazione servita e quella accanto** (estremi compresi),
 e `__post_init__` lo verifica. Porta due garanzie, non una: il carroponte non
 scavalca nessun'altra stazione per andarci, e il vai-e-torna dentro la presa si
 allontana dal resto della linea — quindi non lo avvicina a nessun confine di
