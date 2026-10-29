@@ -12,7 +12,9 @@ I comandi sono quelli del PLC:
     Transfer Outlet   come Transfer, verso lo svincolo POSITIVO della vasca, o
                       verso il punto di cambio quota del carico
     Transfer Inlet    come Transfer, verso lo svincolo NEGATIVO della vasca, o
-                      verso il punto di cambio quota dello scarico
+                      verso il punto di cambio quota dello scarico (un
+                      punto di cambio quota che cade su una vasca e' un
+                      Transfer semplice a quella vasca)
     Dripping          param1 = secondi di sgocciolamento
     Pause             param1 = secondi di attesa
     External Request  prima di andare al carico o allo scarico
@@ -110,7 +112,7 @@ class ProgrammaCarri:
 
 
 def nome_posizione(
-    data: ProblemData, x: float
+    data: ProblemData, x: float, stazione: Optional[int] = None
 ) -> tuple[str, str, Optional[str]]:
     """Come il PLC raggiunge il punto `x` della rotaia: il comando, la
     posizione, e la vasca del percorso che ci sta (None se non e' una vasca).
@@ -124,17 +126,34 @@ def nome_posizione(
       - Transfer Inlet: lo svincolo negativo, o il punto di cambio quota dello
         scarico (che sta dalla parte negativa dello scarico).
 
+    Un punto di cambio quota che cade proprio su una vasca si raggiunge invece
+    con un Transfer semplice, col nome di quella vasca.
+
+    `stazione` e' la tappa del percorso per cui il carro e' in `x` (None se
+    non lo e' per nessuna). Serve quando il punto di cambio quota cade su una
+    vasca di processo: li' il carro ci va per il processo (stazione di quella
+    vasca) e poi di nuovo per il cambio quota (stazione del carico o dello
+    scarico), e solo la stazione dice quale delle due.
+
     Un punto di passaggio messo a mano in mezzo alla rotaia non ha nome, e si
     scrive in millimetri."""
     del_percorso = {s.tank_id for s in data.route}
-    for stazione, zona, comando in (
+    for stazione_zona, zona, comando in (
         (0, data.cambio_quota_carico, TRANSFER_OUTLET),
         (data.n_stations - 1, data.cambio_quota_scarico, TRANSFER_INLET),
     ):
         # il carro sul punto di cambio quota e' gia' al carico (o allo
-        # scarico): e' da li' che comincia la presa
-        if zona is not None and abs(zona.position - x) < _TOLLERANZA_MM:
-            vasca = data.route[stazione].tank_id
+        # scarico): e' da li' che comincia la presa, anche se il punto cade
+        # su un'altra vasca -- per le fermate e l'interblocco non la lascia
+        if (
+            zona is not None
+            and stazione == stazione_zona
+            and abs(zona.position - x) < _TOLLERANZA_MM
+        ):
+            vasca = data.route[stazione_zona].tank_id
+            for t in data.tanks.values():
+                if abs(t.position - x) < _TOLLERANZA_MM:
+                    return TRANSFER, f"Pos.{t.id}", vasca
             return comando, f"Pos.{vasca}", vasca
     for t in data.tanks.values():
         if abs(t.position - x) < _TOLLERANZA_MM:
@@ -190,7 +209,7 @@ def _passi_fasi(
     for f in fasi:
         if f.duration > 0:
             if f.trasla:
-                comando, nome, vasca = nome_posizione(data, f.x_end)
+                comando, nome, vasca = nome_posizione(data, f.x_end, stazione)
                 passi.append(
                     Passo(comando, nome, _velocita(f.loaded), t=t,
                           durata=f.duration, vasca=vasca)
@@ -210,17 +229,72 @@ def _passi_fasi(
     return passi
 
 
+def _stazione_quota(data: ProblemData, segs: list[Segment], i: int) -> int:
+    """La tappa servita da una traslazione di cambio quota: il carico se e'
+    della presa, lo scarico se e' del rilascio. Le zone ci sono solo li', e
+    basta il trasporto per saperlo -- tranne con due tappe sole, dove il
+    trasporto 0 prende al carico e lascia allo scarico."""
+    s = segs[i]
+    ultima = data.n_stations - 1
+    if s.move != 0:
+        return s.move + 1
+    if ultima != 1:
+        return 0
+    dopo = [q.kind for q in segs[i + 1 :] if q.move == s.move and q.kind != "quota"]
+    return 0 if dopo and dopo[0] in ("pick", "loaded") else ultima
+
+
+def _stazione_alla_fine(
+    data: ProblemData, segs: list[Segment], i: int
+) -> Optional[int]:
+    """Per quale tappa del percorso il carro e' dove finisce il segmento `i`
+    (None: per nessuna, e' strada). Serve a `nome_posizione` per distinguere
+    il punto di cambio quota da una vasca di processo che sta li'.
+
+    Un'attesa o un movimento verticale non spostano il carro: vale il
+    segmento prima. Una corsa a vuoto e' per la presa che la segue, se la
+    segue subito; altrimenti finisce su un punto di passaggio."""
+    n = len(segs)
+    for indietro in range(n):
+        s = segs[(i - indietro) % n]
+        if s.kind not in ("wait", "lift_empty"):
+            i = (i - indietro) % n
+            break
+    else:
+        return None
+    if s.kind == "loaded":
+        return s.move + 1
+    if s.kind == "pick":
+        return s.move
+    if s.kind == "release":
+        return s.move + 1
+    if s.kind == "quota":
+        return _stazione_quota(data, segs, i)
+    # corsa a vuoto: la prossima cosa che il carro fa, attese a parte
+    for avanti in range(1, n):
+        j = (i + avanti) % n
+        q = segs[j]
+        if q.kind in ("wait", "lift_empty"):
+            continue
+        if q.kind == "pick":
+            return q.move
+        if q.kind == "quota":
+            return _stazione_quota(data, segs, j)
+        return None
+    return None
+
+
 def _passi_base(data: ProblemData, segs: list[Segment]) -> list[Passo]:
     """I passi di un carro in un periodo, nell'ordine dei suoi segmenti, senza
     ancora le richieste e le sincronizzazioni."""
     passi: list[Passo] = []
     fatti: set[tuple[int, str]] = set()
     trasportati: set[int] = set()
-    for s in segs:
+    for i, s in enumerate(segs):
         durata = s.t_end - s.t_start
         if s.kind == "loaded":
             trasportati.add(s.move)
-            comando, nome, vasca = nome_posizione(data, s.x_end)
+            comando, nome, vasca = nome_posizione(data, s.x_end, s.move + 1)
             passi.append(
                 Passo(comando, nome, VELOCITA_CARICO, t=s.t_start,
                       durata=durata, vasca=vasca)
@@ -243,7 +317,9 @@ def _passi_base(data: ProblemData, segs: list[Segment]) -> list[Passo]:
         elif s.kind == "empty":
             if abs(s.x_end - s.x_start) < 1e-9:
                 continue
-            comando, nome, vasca = nome_posizione(data, s.x_end)
+            comando, nome, vasca = nome_posizione(
+                data, s.x_end, _stazione_alla_fine(data, segs, i)
+            )
             passi.append(
                 Passo(comando, nome, VELOCITA_VUOTO, t=s.t_start,
                       durata=durata, vasca=vasca)
@@ -418,7 +494,12 @@ def programma_carri(
     for segs in solution.segments_per_hoist:
         passi = _passi_base(data, segs)
         basi.append(passi)
-        iniziale = nome_posizione(data, segs[0].x_start)[2] if segs else None
+        # dove comincia il periodo e' dove finisce l'ultimo segmento
+        iniziale = (
+            nome_posizione(data, segs[0].x_start, _stazione_alla_fine(data, segs, -1))[2]
+            if segs
+            else None
+        )
         fermate.append(_fermate(passi, iniziale, T))
 
     # -- chi deve aspettare chi --------------------------------------------
