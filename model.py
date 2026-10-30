@@ -111,11 +111,18 @@ from __future__ import annotations
 import dataclasses
 import itertools
 import math
+import os
 import threading
 from dataclasses import dataclass, field
 from typing import Optional
 
 from kinematics import Kinematics, travel_time as _travel_time_seconds
+
+# Strategie che CP-SAT fa lavorare in parallelo: otto, ma mai piu' dei
+# processori della macchina. Su un PC da 12 resta otto; sul runner della CI,
+# che ne ha 4, otto thread si contendevano quattro processori e il calcolo
+# andava piu' di tre volte piu' piano, anziche' due.
+NUM_WORKERS = min(8, os.cpu_count() or 1)
 
 # --------------------------------------------------------------------------
 # Strutture dati di input
@@ -3207,7 +3214,7 @@ def solve(
     solver = cp_model.CpSolver()
     solver.parameters.max_time_in_seconds = time_limit_s
     solver.parameters.log_search_progress = log_search
-    solver.parameters.num_workers = 8
+    solver.parameters.num_workers = NUM_WORKERS
     if _rifinisci is not None:
         for nome, valore in PARAMETRI_RIFINITURA.items():
             if isinstance(valore, list):

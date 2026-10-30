@@ -60,6 +60,7 @@ import numpy as np
 
 from avvio import _nel_periodo, finestre_di_riposo, posizione_a, trova_avvio
 from model import (
+    NUM_WORKERS,
     SCALA_PESI,
     ProblemData,
     Solution,
@@ -310,7 +311,7 @@ def allinea_avvio(
     # piu' piccolo, lo scarto dai teorici piu' piccolo, il margine piu' largo.
     solver = cp_model.CpSolver()
     solver.parameters.max_time_in_seconds = tempo_limite_s
-    solver.parameters.num_workers = 8
+    solver.parameters.num_workers = NUM_WORKERS
     for verso, obiettivo in (
         (+1, sum(costo)),
         (+1, sum(w_scarto)),
