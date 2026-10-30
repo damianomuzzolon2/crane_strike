@@ -5,8 +5,14 @@
 # tkinter, e su Windows un ambiente grafico c'e' sempre, come sul PC di chi
 # sviluppa.
 #
+# Il solutore gira in modalita' deterministica (CRANESTRIKE_DETERMINISTICO, vedi
+# model.configura_solutore): la stessa linea da' la stessa soluzione qui e sul
+# PC, quindi un test che passa in locale passa anche qui. Costa circa tre volte
+# il tempo, e per questo i test girano su tre runner in parallelo.
+#
 # Attenzione: GitHub legge i workflow "issue_comment" solo dal ramo
-# principale. Finche' questo file non e' su master, il commento non fa nulla.
+# principale. Finche' questo file non e' su master, il commento non fa nulla,
+# e le sue modifiche contano solo dopo essere arrivate su master.
 
 name: check
 
@@ -20,8 +26,19 @@ permissions:
   pull-requests: write
   issues: write          # reazioni e commento col risultato
 
+# Un nuovo "check" sulla stessa PR annulla quello in corso. La condizione sta
+# anche nel nome del gruppo: un commento qualsiasi finisce in un altro gruppo e
+# non interrompe un check che sta girando.
+concurrency:
+  group: >-
+    check-pr-${{ github.event.issue.number }}-${{
+      github.event.comment.body == 'check' &&
+      contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.comment.author_association)
+    }}
+  cancel-in-progress: true
+
 jobs:
-  test:
+  avvio:
     # Solo sulle PR (non sulle issue), solo col commento esatto "check", e
     # solo da chi ha accesso al repository: altrimenti chiunque potrebbe far
     # girare codice sui nostri runner.
@@ -29,12 +46,9 @@ jobs:
       github.event.issue.pull_request &&
       github.event.comment.body == 'check' &&
       contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.comment.author_association)
-    runs-on: windows-latest
-    timeout-minutes: 60
-    concurrency:
-      group: check-pr-${{ github.event.issue.number }}
-      cancel-in-progress: true
-
+    runs-on: ubuntu-latest
+    outputs:
+      sha: ${{ steps.pr.outputs.sha }}
     steps:
       - name: Leggi la PR
         id: pr
@@ -63,9 +77,25 @@ jobs:
               target_url: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
             });
 
+  test:
+    needs: avvio
+    runs-on: windows-latest
+    timeout-minutes: 180
+    strategy:
+      # tutti i gruppi vanno fino in fondo: un fallimento non deve nascondere
+      # gli altri
+      fail-fast: false
+      matrix:
+        # I due file lunghi da soli, tutto il resto insieme. "altri" prende
+        # ogni test/test_*.py che non sta in un altro gruppo, quindi un test
+        # nuovo gira senza toccare questo file.
+        gruppo: [modello, interfaccia, altri]
+    name: test (${{ matrix.gruppo }})
+
+    steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ steps.pr.outputs.sha }}
+          ref: ${{ needs.avvio.outputs.sha }}
 
       - uses: actions/setup-python@v5
         with:
@@ -82,35 +112,94 @@ jobs:
         env:
           PYTHONIOENCODING: utf-8
           MPLBACKEND: Agg
+          CRANESTRIKE_DETERMINISTICO: "1"
+          GRUPPO: ${{ matrix.gruppo }}
         run: |
+          case "$GRUPPO" in
+            modello)     file=(test/test_model.py) ;;
+            interfaccia) file=(test/test_interfaccia.py) ;;
+            altri)
+              file=(kinematics.py)
+              for t in test/test_*.py; do
+                case "$t" in
+                  test/test_model.py|test/test_interfaccia.py) ;;
+                  *) file+=("$t") ;;
+                esac
+              done
+              file+=(test/esempio.py)
+              ;;
+          esac
+
+          # Il riepilogo finisce nel commento sulla PR: per ogni test fallito le
+          # righe FAIL/ERROR con il dettaglio che le segue, o il traceback se il
+          # test e' morto prima di arrivare in fondo.
+          riepilogo="$RUNNER_TEMP/riepilogo-$GRUPPO.md"
+          : > "$riepilogo"
           falliti=()
-          for t in kinematics.py test/test_*.py test/esempio.py; do
+          for t in "${file[@]}"; do
             echo "::group::$t"
-            if python "$t"; then
-              echo "::endgroup::"
-              echo "OK      $t"
+            inizio=$SECONDS
+            python -u "$t" 2>&1 | tee "$RUNNER_TEMP/out.txt"
+            rc=${PIPESTATUS[0]}
+            durata=$((SECONDS - inizio))
+            echo "::endgroup::"
+            if [ "$rc" -eq 0 ]; then
+              echo "OK      $t (${durata}s)"
             else
-              echo "::endgroup::"
               echo "::error::FALLITO $t"
               falliti+=("$t")
+              {
+                echo "#### \`$t\` (${durata}s)"
+                echo '```'
+                if grep -q "Traceback" "$RUNNER_TEMP/out.txt"; then
+                  tail -n 30 "$RUNNER_TEMP/out.txt"
+                else
+                  grep -E -A3 "^\s*(FAIL|ERROR)\b" "$RUNNER_TEMP/out.txt" | grep -v "RISULTATO" | head -n 60
+                  grep -E "RISULTATO" "$RUNNER_TEMP/out.txt"
+                fi
+                echo '```'
+              } >> "$riepilogo"
             fi
           done
+          cat "$riepilogo" >> "$GITHUB_STEP_SUMMARY"
           echo
           if [ ${#falliti[@]} -ne 0 ]; then
             echo "Test falliti: ${falliti[*]}"
             exit 1
           fi
-          echo "Tutti i test sono passati."
+          echo "Tutti i test del gruppo sono passati."
+
+      - name: Conserva il riepilogo
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: riepilogo-${{ matrix.gruppo }}
+          path: ${{ runner.temp }}/riepilogo-${{ matrix.gruppo }}.md
+          if-no-files-found: ignore
+          retention-days: 1
+
+  esito:
+    # Gira anche se i test falliscono o vengono annullati: lo stato sul
+    # commit non deve restare "in corso" per sempre.
+    needs: [avvio, test]
+    if: always() && needs.avvio.result == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Raccogli i riepiloghi
+        uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          pattern: riepilogo-*
+          path: riepiloghi
+          merge-multiple: true
 
       - name: Riporta il risultato sulla PR
-        if: always()
         uses: actions/github-script@v7
         env:
-          SHA: ${{ steps.pr.outputs.sha }}
-          ESITO: ${{ job.status }}
+          SHA: ${{ needs.avvio.outputs.sha }}
+          ESITO: ${{ needs.test.result }}
         with:
           script: |
-            if (!process.env.SHA) return;
             const ok = process.env.ESITO === 'success';
             const url = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
             await github.rest.repos.createCommitStatus({
@@ -128,10 +217,24 @@ jobs:
               comment_id: context.payload.comment.id,
               content: ok ? '+1' : '-1',
             });
+            const fs = require('fs');
+            let dettaglio = '';
+            if (fs.existsSync('riepiloghi')) {
+              dettaglio = fs.readdirSync('riepiloghi').sort()
+                .map(f => fs.readFileSync(`riepiloghi/${f}`, 'utf8').trim())
+                .filter(Boolean)
+                .join('\n\n');
+            }
+            // un commento GitHub non supera 65536 caratteri
+            if (dettaglio.length > 60000) dettaglio = dettaglio.slice(0, 60000) + '\n```\n…(tagliato, vedi il log)';
+            const perche = ok ? 'tutti i test passano'
+              : process.env.ESITO === 'cancelled' ? 'check annullato'
+              : 'ci sono test falliti';
             await github.rest.issues.createComment({
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: context.issue.number,
               body: `${ok ? '✅' : '❌'} **check** su \`${process.env.SHA.slice(0, 7)}\`: ` +
-                    `${ok ? 'tutti i test passano' : 'ci sono test falliti'} — [log](${url})`,
+                    `${perche} — [log](${url})` +
+                    (dettaglio ? `\n\n${dettaglio}` : ''),
             });
