@@ -1,0 +1,137 @@
+# CI lanciata a mano: si scrive "check" come commento in una pull request e
+# parte l'intera suite di test, la stessa che si lancia in locale.
+#
+# Gira su Windows apposta: test_interfaccia e test_simulazione aprono finestre
+# tkinter, e su Windows un ambiente grafico c'e' sempre, come sul PC di chi
+# sviluppa.
+#
+# Attenzione: GitHub legge i workflow "issue_comment" solo dal ramo
+# principale. Finche' questo file non e' su master, il commento non fa nulla.
+
+name: check
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+  statuses: write        # lo stato "check" sul commit della PR
+  pull-requests: write
+  issues: write          # reazioni e commento col risultato
+
+jobs:
+  test:
+    # Solo sulle PR (non sulle issue), solo col commento esatto "check", e
+    # solo da chi ha accesso al repository: altrimenti chiunque potrebbe far
+    # girare codice sui nostri runner.
+    if: >-
+      github.event.issue.pull_request &&
+      github.event.comment.body == 'check' &&
+      contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.comment.author_association)
+    runs-on: windows-latest
+    timeout-minutes: 60
+    concurrency:
+      group: check-pr-${{ github.event.issue.number }}
+      cancel-in-progress: true
+
+    steps:
+      - name: Leggi la PR
+        id: pr
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { data: pr } = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: context.issue.number,
+            });
+            core.setOutput('sha', pr.head.sha);
+            await github.rest.reactions.createForIssueComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              comment_id: context.payload.comment.id,
+              content: 'eyes',
+            });
+            await github.rest.repos.createCommitStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              sha: pr.head.sha,
+              state: 'pending',
+              context: 'check',
+              description: 'Test in corso',
+              target_url: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
+            });
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.pr.outputs.sha }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Installa le dipendenze
+        run: |
+          python -m pip install --upgrade pip
+          pip install ortools matplotlib openpyxl
+
+      - name: Esegui i test
+        shell: bash
+        env:
+          PYTHONIOENCODING: utf-8
+          MPLBACKEND: Agg
+        run: |
+          falliti=()
+          for t in kinematics.py test/test_*.py test/esempio.py; do
+            echo "::group::$t"
+            if python "$t"; then
+              echo "::endgroup::"
+              echo "OK      $t"
+            else
+              echo "::endgroup::"
+              echo "::error::FALLITO $t"
+              falliti+=("$t")
+            fi
+          done
+          echo
+          if [ ${#falliti[@]} -ne 0 ]; then
+            echo "Test falliti: ${falliti[*]}"
+            exit 1
+          fi
+          echo "Tutti i test sono passati."
+
+      - name: Riporta il risultato sulla PR
+        if: always()
+        uses: actions/github-script@v7
+        env:
+          SHA: ${{ steps.pr.outputs.sha }}
+          ESITO: ${{ job.status }}
+        with:
+          script: |
+            if (!process.env.SHA) return;
+            const ok = process.env.ESITO === 'success';
+            const url = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            await github.rest.repos.createCommitStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              sha: process.env.SHA,
+              state: ok ? 'success' : 'failure',
+              context: 'check',
+              description: ok ? 'Tutti i test passano' : 'Ci sono test falliti',
+              target_url: url,
+            });
+            await github.rest.reactions.createForIssueComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              comment_id: context.payload.comment.id,
+              content: ok ? '+1' : '-1',
+            });
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: `${ok ? '✅' : '❌'} **check** su \`${process.env.SHA.slice(0, 7)}\`: ` +
+                    `${ok ? 'tutti i test passano' : 'ci sono test falliti'} — [log](${url})`,
+            });
