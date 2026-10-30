@@ -202,8 +202,16 @@ def test_calcolo_automatico(percorso_linea):
             time.sleep(0.02)
         check(app.config_linea is not None, "il file passato all'avvio viene caricato")
 
+        # Il modello d'esempio da' 15 s per tentativo: su un PC bastano e
+        # avanzano, ma il runner della CI e' tre volte e mezzo piu' lento, e la
+        # suddivisione migliore ([0-2], [3-5]) restava senza soluzione -- vinceva
+        # la seconda, con T = 132.18 s. Qui si prova l'interfaccia, non la
+        # velocita' della macchina: il limite si allarga, e il solutore si
+        # ferma comunque appena dimostra l'ottimo.
+        if app.config_linea is not None:
+            app.config_linea.tempo_limite_s = 60.0
         app._calcola_automatico()
-        check(pompa(app), "il calcolo termina")
+        check(pompa(app, secondi_max=600.0), "il calcolo termina")
         check(
             app.soluzione is not None
             and app.soluzione.status in ("OPTIMAL", "FEASIBLE"),
