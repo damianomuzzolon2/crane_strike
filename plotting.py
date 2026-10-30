@@ -101,6 +101,26 @@ def _aggancio_dall_inizio_presa(data: ProblemData, stazione: int) -> float:
     return t
 
 
+def inizio_sgocciolamento(
+    data: ProblemData, stazione: int, inizio_presa: float
+) -> tuple[float, float] | None:
+    """Quando e dove finisce il sollevamento del telaio e comincia lo
+    sgocciolamento, nella presa alla stazione data. None se la vasca non
+    sgocciola: il punto cadrebbe sulla partenza, o a meta' di una salita.
+
+    La posizione e' quella della fase: con una zona di cambio quota il telaio
+    sgocciola sopra la stazione, non sul punto di cambio quota."""
+    t = inizio_presa
+    for f in data.pick_phases(stazione):
+        if f.name == "sgocciolamento":
+            if f.duration <= 0:
+                return None
+            x = f.x_start if f.x_start is not None else data.station_position(stazione)
+            return t, x
+        t += f.duration
+    return None
+
+
 def _immersione_dall_inizio_rilascio(data: ProblemData, stazione: int) -> float:
     """Quando il telaio torna in vasca, contato dall'INIZIO del rilascio."""
     t = 0.0
@@ -353,8 +373,10 @@ def plot_cyclogram(
     # guardandola. Si e' provato: era peggio.
     #
     # Marcare invece OGNI cambio di fase avrebbe riempito la linea di punti --
-    # fine discesa, fine aggancio, fine sollevamento, fine sgocciolamento -- e
-    # a quel punto non si sarebbe piu' visto niente.
+    # fine discesa, fine aggancio, fine sgocciolamento -- e a quel punto non si
+    # sarebbe piu' visto niente. L'unica eccezione e' la FINE DEL SOLLEVAMENTO:
+    # sul tratto piatto della presa separa la salita (quella con la freccia)
+    # dallo sgocciolamento, che altrimenti non si distinguerebbero.
     sopra = offset_copy(ax.transData, fig=ax.figure, y=9.0, units="points")
     for h, segs in enumerate(solution.segments_per_hoist):
         color = _HOIST_COLORS[h % len(_HOIST_COLORS)]
@@ -367,15 +389,20 @@ def plot_cyclogram(
                 # zona di cambio quota, e prenderli uno per uno
                 # moltiplicherebbe i punti.
                 k = seg.move
+                inizio_presa = seg.t_start - data.pick_time_at(k)
                 for t, x in eventi_del_trasporto(
                     data,
                     k,
-                    seg.t_start - data.pick_time_at(k),
+                    inizio_presa,
                     seg.x_start,
                     seg.x_end,
                 ):
                     eventi_t.append(t)
                     eventi_x.append(x)
+                sgocciolamento = inizio_sgocciolamento(data, k, inizio_presa)
+                if sgocciolamento is not None:
+                    eventi_t.append(sgocciolamento[0])
+                    eventi_x.append(sgocciolamento[1])
             elif seg.kind in _KINEMATIC_KINDS and seg.x_end != seg.x_start:
                 # una traslazione vera che non sia il trasporto -- il rientro a
                 # vuoto, o un vai-e-torna di cambio quota: si parte da una parte
