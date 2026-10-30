@@ -75,6 +75,7 @@ COLONNE_VASCHE = [
     "traslazione_con_gancio_basso",
     "larghezza_mm",
     "altezza_mm",
+    "cover_presente",
 ]
 COLONNE_PERCORSO = [
     "vasca",
@@ -736,9 +737,19 @@ def _leggi_vasche(ws, errori: _Errori) -> dict[str, Tank]:
             ingombro[quale] = _numero(
                 cella, FOGLIO_VASCHE, f"{lettera}{riga}", f"{quale} della vasca", errori
             )
+        # Se la vasca ha un coperchio. Vuoto = 0: la colonna si compila solo
+        # sulle vasche coperte, e un file scritto prima che ci fosse si legge
+        # com'era.
+        cella = ws.cell(riga, 11).value
+        if cella is None or (isinstance(cella, str) and not cella.strip()):
+            cover = 0
+        else:
+            cover = _numero(
+                cella, FOGLIO_VASCHE, f"K{riga}", "cover presente", errori, intero=True
+            )
         if pos is None or posti is None or corsa is None or sgocciolamento is None:
             continue
-        if basso is None:
+        if basso is None or cover is None:
             continue
         tanks[tid] = Tank(
             id=tid,
@@ -751,6 +762,7 @@ def _leggi_vasche(ws, errori: _Errori) -> dict[str, Tank]:
             gancio_basso=bool(basso),
             larghezza=ingombro["larghezza"],
             altezza=ingombro["altezza"],
+            cover_presente=bool(cover),
         )
     if not tanks:
         errori.aggiungi(FOGLIO_VASCHE, "A2", "nessuna vasca definita")
@@ -1402,20 +1414,20 @@ def _righe_esempio():
     fogli. E' la linea con cui si comincia: si lancia subito e la si modifica
     pezzo per pezzo."""
     # id, posizione, posti, corsa, sgocciolamento, i due svincoli, gancio
-    # basso, e infine larghezza e altezza della vasca. Le tre colonne di mezzo
+    # basso, larghezza e altezza della vasca, e il coperchio. Le tre colonne di mezzo
     # restano vuote: la linea d'esempio non ha ostacoli. Larghezza e altezza
     # ci sono perche' servono solo a disegnare, e vederle compilate dice a chi
     # apre il modello che si possono compilare -- carico e scarico no, che non
-    # sono vasche.
+    # sono vasche. Il coperchio resta vuoto: nessuna vasca coperta.
     vasche = [
         # carico e scarico non sono bagni: nessuna corsa, nessuno scolo
-        ("CARICO", 0, 1, 0, 0, None, None, None, None, None),
-        ("SGRASSO", 2500, 1, 800, 2, None, None, None, 1800, 1200),
-        ("RISCIACQUO_1", 5500, 1, 800, 2, None, None, None, 1800, 1200),
-        ("ZINCATURA", 9500, 2, 1100, 8, None, None, None, 2600, 1600),
-        ("RISCIACQUO_2", 13000, 1, 800, 2, None, None, None, 1800, 1200),
-        ("PASSIVAZIONE", 16500, 1, 800, 3, None, None, None, 1800, 1200),
-        ("SCARICO", 20000, 1, 0, 0, None, None, None, None, None),
+        ("CARICO", 0, 1, 0, 0, None, None, None, None, None, None),
+        ("SGRASSO", 2500, 1, 800, 2, None, None, None, 1800, 1200, None),
+        ("RISCIACQUO_1", 5500, 1, 800, 2, None, None, None, 1800, 1200, None),
+        ("ZINCATURA", 9500, 2, 1100, 8, None, None, None, 2600, 1600, None),
+        ("RISCIACQUO_2", 13000, 1, 800, 2, None, None, None, 1800, 1200, None),
+        ("PASSIVAZIONE", 16500, 1, 800, 3, None, None, None, 1800, 1200, None),
+        ("SCARICO", 20000, 1, 0, 0, None, None, None, None, None, None),
     ]
     # vasca, tempo teorico, delta negativo, delta positivo: le soglie sono
     # teorico-delta_negativo e teorico+delta_positivo
@@ -1491,6 +1503,7 @@ def _righe_da_configurazione(cfg: Configurazione):
             1 if t.gancio_basso else 0,
             t.larghezza,
             t.altezza,
+            1 if t.cover_presente else 0,
         )
         for t in d.tanks.values()
     ]
@@ -1871,6 +1884,21 @@ def _aggiungi_fogli_linea(
         (
             "                      nessun ostacolo resta basso e non paga "
             "nessuna corsa verticale.",
+            None,
+        ),
+        (
+            "  cover_presente  1 se la vasca ha un COPERCHIO, 0 (o vuoto) se "
+            "no. Non cambia il ciclogramma:",
+            None,
+        ),
+        (
+            "                nella SequenzaCarri il carro, arrivato sulla "
+            "vasca, lo apre (Cover Syncro",
+            None,
+        ),
+        (
+            "                Cover Open) prima di scendere e lo richiude "
+            "(Cover Close) una volta risalito.",
             None,
         ),
         (
@@ -2311,7 +2339,7 @@ def _aggiungi_fogli_linea(
 
     # -- Vasche ----------------------------------------------------------
     ws = wb.create_sheet(FOGLIO_VASCHE)
-    prepara(ws, COLONNE_VASCHE, [22, 14, 8, 20, 20, 22, 22, 28, 14, 14])
+    prepara(ws, COLONNE_VASCHE, [22, 14, 8, 20, 20, 22, 22, 28, 14, 14, 16])
     for riga in vasche:
         ws.append(list(riga))
 

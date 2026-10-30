@@ -98,7 +98,7 @@ OR-Tools installato.
 | `plotting.py` | 470 | `plot_cyclogram()`: disegna il ciclogramma (posizione lungo la rotaia contro tempo) con il profilo cinematico vero, non con segmenti diritti, i punti sugli istanti in cui succede qualcosa (aggancio, sgancio, partenza, arrivo), le frecce su e giu' sulle corse verticali del gancio e il pezzo fermo in vasca come linea grigia. |
 | `avvio.py` | 572 | Il **punto di avvio**: `trova_avvii()` cerca nel ciclogramma gli istanti in cui tutti i carroponti sono fermi, col gancio in basso, e non stanno ne' al carico ne' allo scarico — quelli da cui la linea si puo' mettere in marcia. Ce n'e' quasi sempre piu' d'uno e sono equivalenti: si restituiscono tutti, e nella finestra si scorrono col pulsante `Avvio`. Se un istante del genere non esiste sceglie quello che sbaglia di meno, e dice di quanto. Non calcola niente di nuovo: legge i segmenti del ciclogramma. Il risultato si vede come linea nera verticale sul grafico, nel foglio Riepilogo, nel pannello della finestra e in fondo al comando da terminale. |
 | `allinea_avvio.py` | 359 | Rende **esatto** un punto di avvio approssimato: `allinea_avvio()` sposta rigidamente nel tempo il giro di qualche carroponte (tutte le sue mosse insieme, con attese e soste) finche' esiste un istante in cui sono tutti a riposo. Cambiano solo i bagni di confine fra un carroponte e l'altro, dentro le tolleranze, e le distanze fra carroponti restano rispettate. Gli spostamenti li sceglie un piccolo modello CP-SAT; il risultato si tiene solo se la verifica indipendente lo passa. Vedi *Il punto di avvio: la linea nera*. |
-| `programma_carri.py` | 473 | Il **programma dei carri**: `programma_carri()` traduce il ciclogramma nei passi che ogni carro esegue sul PLC (`Lifting`, `Transfer`, `Dripping`, `Pause`, `External Request`, `Crane Syncro`, `End Program`). Non calcola niente di nuovo: legge i segmenti, e presa e rilascio dalle loro fasi. Il programma comincia dall'istante di avvio, e i `Crane Syncro` vengono dall'interblocco delle vasche. Lo scrive `excel_io` nel foglio `SequenzaCarri`. |
+| `programma_carri.py` | 473 | Il **programma dei carri**: `programma_carri()` traduce il ciclogramma nei passi che ogni carro esegue sul PLC (`Lifting`, `Transfer`, `Dripping`, `Pause`, `External Request`, `Crane Syncro`, `Cover Syncro`, `End Program`). Non calcola niente di nuovo: legge i segmenti, e presa e rilascio dalle loro fasi. Il programma comincia dall'istante di avvio, e i `Crane Syncro` vengono dall'interblocco delle vasche. Lo scrive `excel_io` nel foglio `SequenzaCarri`. |
 | `fattibilita.py` | 290 | Il **controllo preventivo**: `valuta()` calcola in pochi millisecondi dei *limiti inferiori* del takt time -- per vasca (permanenza minima, presa, arrivo del pezzo successivo, ingombro dei carri vicini) e per numero di carroponti (mosse a carico piu' un rientro, con la zona migliore) -- e `testo()` li scrive come referto. Se il limite supera il takt richiesto la linea e' certamente impossibile e il calcolo si puo' risparmiare; se non lo supera, decide il solutore. In finestra e' il pulsante `Fattibilita'`; da terminale `python fattibilita.py linea.xlsx`. |
 | `simulazione.py` | 1388 | La **simulazione**: la linea vista di fronte, in movimento. `Simulazione` e' la parte che conta e non importa tkinter — dato un istante dice dove sta ogni carroponte (posizione, quota del gancio, cosa sta facendo) e ogni pezzo; `FinestraSimulazione` e' solo la finestra che la anima. Non calcola niente di nuovo: legge `segments_per_hoist` e `actual_time` della soluzione, cioe' gli stessi oggetti che disegnano il ciclogramma. |
 
@@ -1136,6 +1136,7 @@ ingresso:
   | `Pause` | secondi di attesa | — |
   | `External Request` | — | — |
   | `Crane Syncro` | il carro da aspettare | il passo di quel carro in cui si e' tolto di mezzo |
+  | `Cover Syncro` | `Cover Open` o `Cover Close` | `Pos.` e la vasca coperta (param3 = 0) |
   | `End Program` | — | — |
 
   - **Il passo 1** e' quello dell'istante di avvio del Riepilogo se in
@@ -1155,6 +1156,13 @@ ingresso:
     un'attesa in piu'. Se il ciclogramma non lo rispetta (composto a mano,
     per esempio) sotto le tabelle c'e' una nota: li' il PLC fara' aspettare.
     Con l'interblocco spento non ci sono Crane Syncro.
+  - **`Cover Syncro`** c'e' solo sulle vasche con `cover_presente = 1` (foglio
+    `Vasche`). Il carro trasla sulla vasca, fa `Cover Open`, scende/sale, e
+    fa `Cover Close` dopo il primo `Lifting` che lo riporta a `Pos.Top` e
+    dopo il `Dripping` che lo segue, se c'e' -- anche se ci risale su uno
+    svincolo o sul punto di cambio quota. Un carro che sulla vasca si ferma senza muovere il gancio il
+    coperchio non lo tocca. Il ciclogramma non ne sa niente: il tempo di
+    apertura e chiusura e' in piu', lo aggiunge il PLC.
   - **Aggancio e sgancio** non sono passi: il PLC li fa dentro il `Lifting`.
     Una corsa verticale lunga zero (il carico, di solito) non produce niente.
   - **Le pause sono in secondi interi**, e l'arrotondamento si porta dietro il

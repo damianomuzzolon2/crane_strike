@@ -1670,7 +1670,7 @@ def test_interblocco():
     try:
         check(leggi_problema(p).data.interblocco, "nel modello e' acceso")
         check(
-            valore(p, FOGLIO_VASCHE, "K1") is None,
+            valore(p, FOGLIO_VASCHE, "L1") is None,
             "il foglio Vasche non ha colonne per l'interblocco",
         )
         riga = riga_parametro(p, "interblocco_vasche")

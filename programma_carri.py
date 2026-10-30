@@ -24,6 +24,13 @@ I comandi sono quelli del PLC:
                       primo: si aspetta un carro solo se, nel giro, e' gia'
                       passato sulla vasca comune (o c'era all'avvio); chi ci
                       va per primo non aspetta nessuno
+    Cover Syncro      param1 = Cover Open o Cover Close, param2 = "Pos." +
+                      vasca: apre o chiude il coperchio di una vasca coperta
+                      (`Tank.cover_presente`). Il carro che arriva su quella
+                      vasca e ci deve scendere la apre dopo il Transfer, e la
+                      richiude dopo il primo Lifting che lo riporta a Pos.Top
+                      e dopo lo sgocciolamento che lo segue.
+                      Non e' nel ciclogramma: e' tempo che il PLC aggiunge.
     End Program       chiude il giro, che ricomincia dal passo 1
 
 La velocita' e' `VELOCITA_CARICO` col telaio appeso e `VELOCITA_VUOTO` senza.
@@ -62,6 +69,9 @@ DRIPPING = "Dripping"
 PAUSE = "Pause"
 EXTERNAL_REQUEST = "External Request"
 CRANE_SYNCRO = "Crane Syncro"
+COVER_SYNCRO = "Cover Syncro"
+COVER_OPEN = "Cover Open"
+COVER_CLOSE = "Cover Close"
 END_PROGRAM = "End Program"
 
 # Tolleranza [mm] con cui una posizione della rotaia si riconosce come quella
@@ -395,6 +405,78 @@ def _fermate(passi: list[Passo], vasca_iniziale: Optional[str], T: float) -> lis
     return fermate
 
 
+def _vasca_coperta(data: ProblemData, p: Passo) -> Optional[str]:
+    """La vasca coperta su cui il Transfer `p` arriva, o None. Vale anche per
+    una vasca fuori dal percorso: il coperchio e' della vasca fisica."""
+    if p.comando != TRANSFER:
+        return None
+    for t in data.tanks.values():
+        if t.cover_presente and p.param1 == f"Pos.{t.id}":
+            return t.id
+    return None
+
+
+def _aggiungi_coperchi(data: ProblemData, passi: list[Passo], note: list[str], h: int):
+    """Apre e chiude i coperchi delle vasche coperte: Cover Open dopo il
+    Transfer che porta il carro sulla vasca, se li' poi il gancio si muove,
+    e Cover Close dopo il primo Lifting che lo riporta a Pos.Top -- e dopo lo
+    sgocciolamento, se c'e' -- anche se ci risale su uno svincolo, o sul punto
+    di cambio quota. Il giro e' un
+    ciclo: la risalita puo' stare all'inizio della lista.
+
+    Un carro che sulla vasca si ferma soltanto, senza muovere il gancio, il
+    coperchio non lo tocca."""
+    n = len(passi)
+    aperture: list[tuple[Passo, str]] = []
+    for i, p in enumerate(passi):
+        vasca = _vasca_coperta(data, p)
+        if vasca is None:
+            continue
+        for j in range(1, n):
+            q = passi[(i + j) % n]
+            if q.comando in TRASFERIMENTI:
+                break
+            if q.comando == LIFTING:
+                aperture.append((p, vasca))
+                break
+    chiusure: list[tuple[Passo, Passo]] = []
+    for p, vasca in aperture:
+        nome = f"Pos.{vasca}"
+        i = next(k for k, q in enumerate(passi) if q is p)
+        passi.insert(
+            i + 1,
+            Passo(COVER_SYNCRO, COVER_OPEN, nome, 0, t=p.t + p.durata),
+        )
+        n = len(passi)
+        for j in range(2, n):
+            q = passi[(i + j) % n]
+            if q.comando == LIFTING and q.param1 == "Pos.Top":
+                # lo sgocciolamento che segue si fa a coperchio aperto: il
+                # bagno che cola deve finire nella vasca
+                while passi[(i + j + 1) % n].comando == DRIPPING:
+                    j += 1
+                    q = passi[(i + j) % n]
+                chiusure.append(
+                    (q, Passo(COVER_SYNCRO, COVER_CLOSE, nome, 0, t=q.t + q.durata))
+                )
+                break
+            if q.comando in TRASFERIMENTI and q.vasca not in (None, p.vasca):
+                # il gancio non risale prima di andare a un'altra vasca: si
+                # chiude prima di partire, perche' aperto non resti
+                chiusure.append(
+                    (passi[(i + j - 1) % n], Passo(COVER_SYNCRO, COVER_CLOSE, nome, 0, t=q.t))
+                )
+                note.append(
+                    f"Carro {h + 1}, vasca {vasca}: il gancio non torna a "
+                    f"Pos.Top prima di lasciarla, e il Cover Close e' messo "
+                    f"subito prima che parta verso {q.param1}."
+                )
+                break
+    for dopo, chiusura in chiusure:
+        k = next(k for k, q in enumerate(passi) if q is dopo)
+        passi.insert(k + 1, chiusura)
+
+
 def _inserisci_prima(passi: list[Passo], riferimento: Passo, nuovi: list[Passo]):
     i = next(j for j, p in enumerate(passi) if p is riferimento)
     for p in nuovi:
@@ -493,6 +575,7 @@ def programma_carri(
     fermate: list[list[_Fermata]] = []
     for segs in solution.segments_per_hoist:
         passi = _passi_base(data, segs)
+        _aggiungi_coperchi(data, passi, note, len(basi))
         basi.append(passi)
         # dove comincia il periodo e' dove finisce l'ultimo segmento
         iniziale = (

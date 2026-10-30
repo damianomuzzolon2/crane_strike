@@ -183,6 +183,11 @@ class Tank:
     # cui le vasche sono davvero diverse fra loro si vede male.
     larghezza: Optional[float] = field(default=None, kw_only=True)
     altezza: Optional[float] = field(default=None, kw_only=True)
+    # Se la vasca ha un COPERCHIO. Non cambia niente del ciclogramma -- il
+    # modello non lo guarda -- ma il programma dei carri si': il carro che ci
+    # arriva lo apre prima di scendere e lo richiude una volta risalito, coi
+    # due Cover Syncro (vedi `programma_carri`).
+    cover_presente: bool = field(default=False, kw_only=True)
 
 
 @dataclass(frozen=True)
@@ -4170,6 +4175,11 @@ def _rientro_via_passaggi(
     dice fra le incoerenze e lo si raggiunge appena si puo', come per ogni
     altra cosa composta a mano."""
     EPS = data.eps_seconds
+    # Un'attesa si disegna da mezzo tick in su: quelle del solutore sono tick
+    # interi, e anche una di un tick e' vera. Con EPS come soglia un'attesa
+    # lunga proprio EPS spariva, e lasciava un buco nella traiettoria che il
+    # verificatore -- con la stessa tolleranza -- vedeva per un soffio.
+    MEZZO_TICK = 0.5 / data.time_scale
     gambe = gambe_via_passaggi(data, k + 1, nxt_k, [x for _, x in punti])
     t = t_libero
     x = data.approach_position(k + 1)
@@ -4186,7 +4196,7 @@ def _rientro_via_passaggi(
                 raise ValueError(f"Valori incoerenti: {messaggio}")
             incoerenze.append(messaggio)
         via = max(via, t)
-        if via > t + EPS:
+        if via > t + MEZZO_TICK:
             segs.append(Segment("wait", t, via, x, x, None))
         segs.extend(_segmenti_gamba(data, gamba, via))
         t, x = via + durata, xi
@@ -4265,6 +4275,8 @@ def _build_zone_trajectory(
     # mobile -- le due cose possono differire di qualche tick per puro
     # arrotondamento, senza che ci sia un'incoerenza reale nel modello.
     EPS = data.eps_seconds
+    # soglia sotto cui un'attesa non si disegna: vedi `_rientro_via_passaggi`
+    MEZZO_TICK = 0.5 / data.time_scale
     segs: list[Segment] = []
     n = len(order)
 
@@ -4394,7 +4406,7 @@ def _build_zone_trajectory(
                 depart_t = t1  # si disegna comunque, a partire da quando e' libero
             elif depart_t < t1:
                 depart_t = t1  # scarto minuscolo di arrotondamento, non un errore reale
-            if depart_t > t1 + EPS:
+            if depart_t > t1 + MEZZO_TICK:
                 segs.append(Segment("wait", t1, depart_t, x1, x1, None))
             if sosta is not None:
                 # rientro in due pezzi, con la sosta nella vasca in mezzo. La sosta
@@ -4408,7 +4420,7 @@ def _build_zone_trajectory(
                         data, k + 1, sosta.stazione, depart_t, t_arrivo_sosta
                     )
                 )
-                if t_ripartenza > t_arrivo_sosta + EPS:
+                if t_ripartenza > t_arrivo_sosta + MEZZO_TICK:
                     segs.append(
                         Segment(
                             "wait", t_arrivo_sosta, t_ripartenza,
@@ -4424,7 +4436,7 @@ def _build_zone_trajectory(
                 segs.extend(
                     _segmenti_rientro(data, k + 1, nxt_k, depart_t, arrive_t)
                 )
-            elif arrive_t > depart_t + EPS:
+            elif arrive_t > depart_t + MEZZO_TICK:
                 # stessa stazione: non c'e' nessuno spostamento a vuoto, il
                 # carroponte resta fermo. Emettere un 'empty' di lunghezza nulla
                 # creerebbe un segmento degenere che, con lo scarto di
@@ -4455,7 +4467,7 @@ def _build_zone_trajectory(
             target_pick = (
                 arrive_t  # scarto minuscolo di arrotondamento, non un errore reale
             )
-        if target_pick > arrive_t + EPS:
+        if target_pick > arrive_t + MEZZO_TICK:
             segs.append(Segment("wait", arrive_t, target_pick, x1_next, x1_next, None))
 
     return segs

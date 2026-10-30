@@ -25,6 +25,9 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from avvio import Avvio, finestre_di_riposo, trova_avvio
 from model import HoistZone, ZonaCambioQuota, build_solution
 from programma_carri import (
+    COVER_CLOSE,
+    COVER_OPEN,
+    COVER_SYNCRO,
     CRANE_SYNCRO,
     DRIPPING,
     END_PROGRAM,
@@ -143,7 +146,10 @@ def test_formato():
     check(verify_solution(data, sol).ok, "il caso di partenza supera la verifica")
     pc = programma_carri(data, sol, trova_avvio(data, sol))
     check(len(pc.programmi) == 2, "un programma per carro")
-    noti = {LIFTING, *TRASFERIMENTI, DRIPPING, PAUSE, EXTERNAL_REQUEST, CRANE_SYNCRO, END_PROGRAM}
+    noti = {
+        LIFTING, *TRASFERIMENTI, DRIPPING, PAUSE, EXTERNAL_REQUEST, CRANE_SYNCRO,
+        COVER_SYNCRO, END_PROGRAM,
+    }
     for h, passi in enumerate(pc.programmi):
         check(
             comandi(passi).count(END_PROGRAM) == 1 and passi[-1].comando == END_PROGRAM,
@@ -513,8 +519,72 @@ def test_cambio_quota():
     )
 
 
+def _coperte(data, *vasche):
+    tanks = dict(data.tanks)
+    for v in vasche:
+        tanks[v] = dataclasses.replace(tanks[v], cover_presente=True)
+    return dataclasses.replace(data, tanks=tanks)
+
+
+def test_coperchi():
+    print("\n[8] vasche coperte: Cover Open prima di scendere, Cover Close dopo lo sgocciolamento")
+    data = linea_verticale()
+    senza = programma_carri(data, giro_unico(data)).programmi[0]
+    data = _coperte(data, "V2")
+    sol = giro_unico(data)
+    (passi,) = programma_carri(data, sol).programmi
+    righe = [tuple(p.riga()) for p in passi]
+    i = righe.index((TRANSFER, "Pos.V2", 9, 0))
+    check(
+        righe[i : i + 7]
+        == [
+            (TRANSFER, "Pos.V2", 9, 0),
+            (COVER_SYNCRO, COVER_OPEN, "Pos.V2", 0),
+            (LIFTING, "Pos.Btm", 9, 0),
+            (PAUSE, 40, 0, 0),
+            (LIFTING, "Pos.Top", 9, 0),
+            (DRIPPING, 5, 0, 0),
+            (COVER_SYNCRO, COVER_CLOSE, "Pos.V2", 0),
+        ],
+        f"il carro arriva, apre, scende, sale, sgocciola e richiude "
+        f"({righe[i:i + 7]})",
+    )
+    check(
+        [p.riga() for p in passi if p.comando != COVER_SYNCRO]
+        == [p.riga() for p in senza],
+        "il resto del programma e' quello di prima",
+    )
+
+    # il rilascio allo scarico, coperto, con l'uscita alta dallo svincolo: il
+    # gancio risale sullo svincolo, ed e' li' che il coperchio si richiude
+    data = _con_ostacoli(linea_verticale())
+    tanks = dict(data.tanks)
+    for v in ("V0", "V4"):
+        tanks[v] = dataclasses.replace(tanks[v], lift_height=1000)
+    data = _coperte(dataclasses.replace(data, tanks=tanks), "V4")
+    (passi,) = programma_carri(data, giro_unico(data)).programmi
+    righe = [tuple(p.riga()[:3]) for p in passi if p.comando != EXTERNAL_REQUEST]
+    i = righe.index((COVER_SYNCRO, COVER_OPEN, "Pos.V4"))
+    check(
+        righe[i - 1 : i + 5]
+        == [
+            (TRANSFER, "Pos.V4", 9),
+            (COVER_SYNCRO, COVER_OPEN, "Pos.V4"),
+            (LIFTING, "Pos.Btm", 9),
+            (TRANSFER_INLET, "Pos.V4", 10),
+            (LIFTING, "Pos.Top", 10),
+            (COVER_SYNCRO, COVER_CLOSE, "Pos.V4"),
+        ],
+        f"allo scarico si chiude dopo la risalita sullo svincolo ({righe[i - 1:i + 5]})",
+    )
+    check(
+        comandi(passi).count(COVER_SYNCRO) == 2,
+        "una sola apertura e una sola chiusura per giro",
+    )
+
+
 def test_foglio():
-    print("\n[8] il foglio SequenzaCarri nel file dei risultati")
+    print("\n[9] il foglio SequenzaCarri nel file dei risultati")
     from openpyxl import load_workbook
 
     from excel_io import FOGLIO_SEQUENZA_CARRI, scrivi_risultati
@@ -566,6 +636,7 @@ def main():
     test_avvio()
     test_svincoli()
     test_cambio_quota()
+    test_coperchi()
     test_foglio()
     print("\n" + "=" * 72)
     print(f"RISULTATO: {_n_pass} ok, {_n_fail} falliti")

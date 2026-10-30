@@ -529,8 +529,8 @@ _SCHEDE = [
         "Vasche",
         "Una riga per vasca fisica. Posizione lungo la rotaia in mm. Corsa "
         "verticale e sgocciolamento sono obbligatori: 0 dove non servono "
-        "(carico, scarico). Posti vuoto = 1; svincoli, gancio basso, larghezza "
-        "e altezza si possono lasciare vuoti.",
+        "(carico, scarico). Posti vuoto = 1; svincoli, gancio basso, larghezza, "
+        "altezza e cover presente (vuoto = 0) si possono lasciare vuoti.",
     ),
     (
         FOGLIO_PERCORSO,
@@ -688,10 +688,12 @@ class FinestraDatiLinea(tk.Toplevel):
             return _Griglia(
                 pagina,
                 COLONNE_VASCHE,
-                [150, 100, 60, 130, 120, 150, 150, 190, 100, 100],
+                [150, 100, 60, 130, 120, 150, 150, 190, 100, 100, 120],
                 self._cambiato,
                 numerazione="n",
-                scelte=lambda r, c: ["", "1", "0"] if c == 7 else None,
+                scelte=lambda r, c: (
+                    ["", "1", "0"] if c == 7 else ["", "0", "1"] if c == 10 else None
+                ),
             )
         if foglio == FOGLIO_PERCORSO:
             return _Griglia(

@@ -869,6 +869,32 @@ def test_ricostruzione_fedele():
         )
 
 
+def test_attesa_lunga_un_eps():
+    print("\n[9-attesa] un'attesa lunga esattamente EPS si disegna")
+    import dataclasses
+
+    # Il caso trovato dal solutore sotto carico, nel test del takt fisso: dopo
+    # la mossa 1 il carro aspetta 10 tick (= eps_seconds) dove ha consegnato,
+    # e riparte dalla stessa vasca. L'attesa non si disegnava, e la
+    # traiettoria aveva un buco di 0,1 s che il verificatore respingeva.
+    d = linea(4, 1000, [HoistZone(0, 3)], takt_min=25.0, takt_max=35.0)
+    route = (
+        [d.route[0]]
+        + [StationSpec.da_teorico(f"V{i}", 40, 30, 30, 1, 1) for i in range(1, 4)]
+        + [d.route[-1]]
+    )
+    d = dataclasses.replace(d, route=route, takt_nominal=30.0, takt_fisso=True)
+    sol = build_solution(
+        d,
+        30.0,
+        local_pick={0: 0.0, 1: 13.16, 2: 23.19, 3: 6.35},
+        status="OPTIMAL",
+        attese={0: 0.0, 1: d.eps_seconds, 2: 0.0, 3: 0.0},
+    )
+    r = verify_solution(d, sol)
+    check(r.ok, f"la traiettoria e' continua ({[str(e) for e in r.errors]})")
+
+
 def test_dove_sosta_il_carro():
     print()
     print("[9-bis] dove il carroponte passa il tempo morto e' un dato,"
@@ -1966,6 +1992,7 @@ def main():
     test_diagnosi()
     test_vasca_ripetuta()
     test_ricostruzione_fedele()
+    test_attesa_lunga_un_eps()
     test_dove_sosta_il_carro()
     test_dove_va_ad_aspettare_il_carro()
     test_riduci_soste()
