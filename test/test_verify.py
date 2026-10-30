@@ -41,7 +41,7 @@ from model import (
     zone_layout_conflicts,
 )
 from model import build_solution as costruisci
-from verify import prenotazioni, verify_solution
+from verify import _max_sovrapposizioni, prenotazioni, verify_solution
 
 KIN_EMPTY = Kinematics(v_max=1600, a_max=900)
 KIN_LOADED = Kinematics(v_max=1000, a_max=400)
@@ -1641,6 +1641,33 @@ def test_interblocco():
     )
 
 
+def test_capienza_su_multiplo_esatto():
+    """Un pezzo che occupa il posto per ESATTAMENTE capacity * T.
+
+    Il modello lo ammette (occupazione <= capacity * T), e il pezzo esce nello
+    stesso istante in cui entra quello di `capacity` periodi dopo: i posti
+    bastano. Ma gli istanti si replicano sommando k * T in virgola mobile, e
+    per circa meta' delle fasi l'entrata cadeva 1e-13 prima dell'uscita: un
+    posto in piu' che non esiste. Si vedeva solo quando il solutore sceglieva
+    proprio quella fase, cioe' a seconda della macchina."""
+    print("\n[26] capienza: occupazione pari a capacity * T in ogni fase")
+    T = 19.8
+    falsi = [
+        i * 0.01
+        for i in range(int(T * 100))
+        if _max_sovrapposizioni([((i * 0.01) - 20 * T, i * 0.01)], T) > 20
+    ]
+    check(
+        not falsi,
+        f"con 396 s di occupazione e takt 19.8 s bastano 20 posti in ogni fase "
+        f"({len(falsi)} fasi su {int(T * 100)} ne contano 21)",
+    )
+    check(
+        _max_sovrapposizioni([(5.0 - 20 * T - 0.01, 5.0)], T) == 21,
+        "un centesimo di secondo in piu' e il ventunesimo posto serve davvero",
+    )
+
+
 def main():
     print("=" * 72)
     print("TEST DEL VERIFICATORE (verify.py) -- non richiede OR-Tools")
@@ -1659,6 +1686,7 @@ def main():
     test_takt_fuori_banda()
     test_capienza_vasca()
     test_capienza_validazione()
+    test_capienza_su_multiplo_esatto()
     test_vasca_ripetuta()
     test_fasi_verticali()
     test_svincoli()

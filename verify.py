@@ -1205,8 +1205,14 @@ def _max_sovrapposizioni(intervalli: list[tuple[float, float]], T: float) -> int
     eventi = []
     for inizio, fine in intervalli:
         for k in range(-n_rip, n_rip + 1):
-            eventi.append((inizio + k * T, 1))
-            eventi.append((fine + k * T, -1))
+            # Arrotondati al microsecondo: un pezzo che occupa il posto per
+            # esattamente capacity * T -- e il modello lo ammette -- esce
+            # nello stesso istante in cui entra quello di n periodi dopo, ma
+            # sommando k * T in virgola mobile i due istanti differiscono di
+            # 1e-13 e l'entrata puo' finire prima dell'uscita: un posto in piu'
+            # che non esiste.
+            eventi.append((round(inizio + k * T, 6), 1))
+            eventi.append((round(fine + k * T, 6), -1))
     # a parita' di istante prima le uscite: un posto liberato nello stesso
     # istante in cui ne serve un altro puo' essere riusato
     eventi.sort(key=lambda e: (e[0], e[1]))
