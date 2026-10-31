@@ -124,6 +124,42 @@ from kinematics import Kinematics, travel_time as _travel_time_seconds
 # andava piu' di tre volte piu' piano, anziche' due.
 NUM_WORKERS = min(8, os.cpu_count() or 1)
 
+# Modalita' deterministica, SOLO per i test: la accende la variabile
+# d'ambiente CRANESTRIKE_DETERMINISTICO=1, e chi usa il programma non la vede
+# mai. Le strategie in parallelo corrono ciascuna per conto suo e il limite si
+# misura con l'orologio: quale soluzione esce dipende dalla macchina e dal
+# caso, e un test che passa sul PC puo' fallire sulla CI. Qui invece le
+# strategie si alternano a turni fissi (`interleave_search`), sempre otto, e il
+# limite e' una quantita' di LAVORO (`max_deterministic_time`): la stessa
+# linea da' la stessa soluzione su qualunque macchina, solo in piu' o meno
+# secondi. Costa: a parita' di risultato circa tre volte il tempo.
+VARIABILE_DETERMINISTICO = "CRANESTRIKE_DETERMINISTICO"
+STRATEGIE_DETERMINISTICO = 8
+# Unita' di lavoro per ogni secondo di limite. Misurato su un PC a 12
+# processori: la ricerca deterministica ne fa circa 0.13 al secondo, quindi un
+# limite di 60 s resta piu' o meno un minuto anche qui.
+LAVORO_PER_SECONDO = 0.15
+
+
+def deterministico() -> bool:
+    """True se i test hanno chiesto la modalita' deterministica."""
+    return os.environ.get(VARIABILE_DETERMINISTICO, "") not in ("", "0")
+
+
+def configura_solutore(solver, time_limit_s: float) -> None:
+    """Il limite di tempo e i thread di un CpSolver, nell'unico punto in cui si
+    decide fra la modalita' normale e quella deterministica dei test."""
+    if not deterministico():
+        solver.parameters.max_time_in_seconds = time_limit_s
+        solver.parameters.num_workers = NUM_WORKERS
+        return
+    solver.parameters.num_workers = STRATEGIE_DETERMINISTICO
+    solver.parameters.interleave_search = True
+    solver.parameters.max_deterministic_time = time_limit_s * LAVORO_PER_SECONDO
+    # Solo una rete di sicurezza contro una macchina lentissima: se scattasse
+    # lei, il risultato tornerebbe a dipendere dalla macchina.
+    solver.parameters.max_time_in_seconds = 30.0 * time_limit_s + 60.0
+
 # --------------------------------------------------------------------------
 # Strutture dati di input
 # --------------------------------------------------------------------------
@@ -3212,9 +3248,8 @@ def solve(
         _suggerisci_per_nome(model, _suggerimento_per_nome)
 
     solver = cp_model.CpSolver()
-    solver.parameters.max_time_in_seconds = time_limit_s
+    configura_solutore(solver, time_limit_s)
     solver.parameters.log_search_progress = log_search
-    solver.parameters.num_workers = NUM_WORKERS
     if _rifinisci is not None:
         for nome, valore in PARAMETRI_RIFINITURA.items():
             if isinstance(valore, list):

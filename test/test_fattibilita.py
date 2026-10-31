@@ -26,6 +26,10 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+# Il solutore in modalita' deterministica (vedi model.configura_solutore): la
+# stessa linea da' la stessa soluzione su questo PC e sul runner della CI.
+os.environ.setdefault("CRANESTRIKE_DETERMINISTICO", "1")
+
 from fattibilita import testo, valuta
 from model import HoistZone, solve
 from test_avvio import dati_prova

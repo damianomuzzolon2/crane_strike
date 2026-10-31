@@ -22,6 +22,10 @@ import time
 # fra i percorsi di ricerca, lanciare il test da qui non li troverebbe.
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+# Il solutore in modalita' deterministica (vedi model.configura_solutore): la
+# stessa linea da' la stessa soluzione su questo PC e sul runner della CI.
+os.environ.setdefault("CRANESTRIKE_DETERMINISTICO", "1")
+
 from kinematics import Kinematics
 from model import (
     HoistZone,

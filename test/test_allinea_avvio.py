@@ -29,6 +29,10 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+# Il solutore in modalita' deterministica (vedi model.configura_solutore): la
+# stessa linea da' la stessa soluzione su questo PC e sul runner della CI.
+os.environ.setdefault("CRANESTRIKE_DETERMINISTICO", "1")
+
 from allinea_avvio import MARGINE_MINIMO_S, allinea_avvio, descrivi
 from avvio import trova_avvio
 from model import HoistZone, solve

@@ -122,6 +122,16 @@ d'uscita diverso da zero se qualcosa non va. Non serve pytest. Le prime righe
 di ogni test aggiungono la cartella sopra ai percorsi di ricerca, cosi' i
 moduli si trovano comunque.
 
+I test che risolvono davvero (`test_model`, `test_allinea_avvio`,
+`test_fattibilita`, `test_interfaccia`) accendono da soli la **modalita'
+deterministica** del solutore, con la variabile d'ambiente
+`CRANESTRIKE_DETERMINISTICO=1` (vedi `configura_solutore` in `model.py`): le
+strategie di CP-SAT si alternano a turni fissi e il limite e' una quantita' di
+lavoro, non di secondi. La stessa linea da' cosi' la stessa soluzione su
+qualunque macchina, e un test che passa qui passa anche nella CI di GitHub. Il
+prezzo e' circa tre volte il tempo. Il programma e l'eseguibile non la usano
+mai.
+
 | file | righe | cosa verifica |
 | --- | ---: | --- |
 | `test/test_verify.py` | 999 | **Il verificatore.** Risponde a "chi verifica il verificatore?": venti casi, di cui uno solo corretto e tutti gli altri rotti di proposito (collisioni, permanenze fuori tolleranza, periodicita' incoerente, geometrie patologiche, capienze). Un controllore che non segnala mai nulla e' inutile, quindi ogni controllo ha un caso che DEVE farlo scattare. Non richiede OR-Tools: le soluzioni sono costruite a mano. |
