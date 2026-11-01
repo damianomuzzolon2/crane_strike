@@ -27,6 +27,10 @@ import tkinter as tk
 # fra i percorsi di ricerca, lanciare il test da qui non li troverebbe.
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+# Il solutore in modalita' deterministica (vedi model.configura_solutore): la
+# stessa linea da' la stessa soluzione su questo PC e sul runner della CI.
+os.environ.setdefault("CRANESTRIKE_DETERMINISTICO", "1")
+
 from excel_io import scrivi_modello
 
 _n_pass = 0
@@ -66,9 +70,14 @@ class Clic:
         self.xdata = xdata
 
 
-def pompa(app, secondi_max=180.0):
+def pompa(app, secondi_max=1800.0):
     """Fa girare il ciclo degli eventi finche' il lavoro in background non e'
-    finito (o scade il tempo). Sostituisce mainloop() nei test."""
+    finito (o scade il tempo). Sostituisce mainloop() nei test.
+
+    Il tempo massimo e' solo una rete contro un calcolo che non finisce mai:
+    col solutore deterministico il risultato non dipende piu' dai secondi, ma
+    i secondi si' dalla macchina -- il calcolo automatico dell'esempio dura
+    piu' di cinque minuti su un PC carico, e di piu' sul runner della CI."""
     scadenza = time.time() + secondi_max
     while app._lavoro_in_corso and time.time() < scadenza:
         app.update()
@@ -202,6 +211,13 @@ def test_calcolo_automatico(percorso_linea):
             time.sleep(0.02)
         check(app.config_linea is not None, "il file passato all'avvio viene caricato")
 
+        # Il modello d'esempio da' 15 s per tentativo, e con quel limite la
+        # suddivisione migliore ([0-2], [3-5]) puo' restare senza soluzione:
+        # vince la seconda, con T = 132.18 s. Qui si prova l'interfaccia, non
+        # quanto lontano arriva il solutore: il limite si allarga, e il
+        # solutore si ferma comunque appena dimostra l'ottimo.
+        if app.config_linea is not None:
+            app.config_linea.tempo_limite_s = 60.0
         app._calcola_automatico()
         check(pompa(app), "il calcolo termina")
         check(
@@ -1775,7 +1791,7 @@ def test_takt_fisso(percorso_linea):
         check(d.takt_fisso, "il selettore arriva alla linea")
 
         app._calcola_automatico()
-        check(pompa(app, 600.0), "il calcolo termina")
+        check(pompa(app), "il calcolo termina")
         sol = app.soluzione
         check(
             sol is not None and sol.status in ("OPTIMAL", "FEASIBLE"),

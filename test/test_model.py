@@ -22,6 +22,10 @@ import time
 # fra i percorsi di ricerca, lanciare il test da qui non li troverebbe.
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+# Il solutore in modalita' deterministica (vedi model.configura_solutore): la
+# stessa linea da' la stessa soluzione su questo PC e sul runner della CI.
+os.environ.setdefault("CRANESTRIKE_DETERMINISTICO", "1")
+
 from kinematics import Kinematics
 from model import (
     HoistZone,
@@ -403,7 +407,9 @@ def test_confine_con_corse_a_vuoto():
             )
         if svincoli:
             data = con_ostacoli(data, svincolo=1800.0)
-        sol, r = risolvi_e_verifica(data, f"confine, {etichetta}", time_limit=30.0)
+        # Qui serve solo UNA soluzione da verificare, non l'ottimo; ma in 30 s
+        # il runner della CI a 4 core non ne trovava nessuna.
+        sol, r = risolvi_e_verifica(data, f"confine, {etichetta}", time_limit=120.0)
         check(
             r is not None and r.ok,
             _esito(sol, r, f"{etichetta}: soluzione valida"),
@@ -466,21 +472,27 @@ def test_cambio_quota_end_to_end():
         cambio_quota_scarico=ZonaCambioQuota(9600, 400, 1400, 2200),
     )
 
-    senza_sol, senza_r = risolvi_e_verifica(senza, "senza cambio quota", 60.0)
-    con_sol, con_r = risolvi_e_verifica(con, "con cambio quota", 60.0)
+    senza_sol, senza_r = risolvi_e_verifica(senza, "senza cambio quota", 120.0)
+    con_sol, con_r = risolvi_e_verifica(con, "con cambio quota", 120.0)
     check(
         con_r is not None and con_r.ok,
         _esito(con_sol, con_r, "con cambio quota: soluzione valida"),
     )
-    check(
-        senza_sol.T is not None
-        and con_sol.T is not None
-        and con_sol.T >= senza_sol.T - 1e-9,
-        f"il giro di cambio quota non puo' accorciare il ciclo "
-        f"(T={con_sol.T:.2f}s contro {senza_sol.T:.2f}s)"
-        if con_sol.T and senza_sol.T
-        else f"stati: {con_sol.status} / {senza_sol.status}",
-    )
+    # Il giro di cambio quota non puo' accorciare il ciclo OTTIMO. Fra due
+    # soluzioni FEASIBLE non dice niente: quella senza cambio quota, lasciata
+    # a meta', puo' benissimo essere peggiore -- e quale delle due lo sia
+    # dipende dalla macchina. Il confronto vale solo contro l'ottimo dimostrato.
+    if senza_sol.status == "OPTIMAL" and con_sol.T is not None:
+        check(
+            con_sol.T >= senza_sol.T - 1e-9,
+            f"il giro di cambio quota non puo' accorciare il ciclo ottimo "
+            f"(T={con_sol.T:.2f}s contro {senza_sol.T:.2f}s)",
+        )
+    else:
+        print(
+            f"       (senza cambio quota il solutore si ferma a "
+            f"{senza_sol.status}: niente ottimo con cui confrontare)"
+        )
     if con_r is not None:
         check(
             con_r.min_separation >= con_r.required_separation - 1.0,
@@ -1269,9 +1281,18 @@ def test_riduci_soste():
         return sum(len(p.soste_intermedie) for p in sol.plans)
 
     # -- 1) una soluzione OPTIMAL non si tocca ------------------------------
-    ottima = solve(d, time_limit_s=120.0)
+    # Qui serve l'ottimo DIMOSTRATO, e dimostrarlo costa: 30-60 s su un PC a
+    # 12 core, oltre 120 s sul runner della CI a 4 core. Il solutore si ferma
+    # appena lo dimostra, quindi il limite largo non rallenta chi lo trova
+    # prima.
+    ottima = solve(d, time_limit_s=300.0)
     if ottima.status != "OPTIMAL":
-        check(False, f"la linea stretta non si e' risolta ({ottima.status})")
+        check(
+            False,
+            f"la linea stretta non arriva all'ottimo dimostrato in 300 s "
+            f"({ottima.status}, T = {ottima.T:.2f} s): se FEASIBLE e' il tempo, "
+            f"non un errore",
+        )
         return
     check(
         ottima.raw.get("n_soste") == soste(ottima),

@@ -29,6 +29,10 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+# Il solutore in modalita' deterministica (vedi model.configura_solutore): la
+# stessa linea da' la stessa soluzione su questo PC e sul runner della CI.
+os.environ.setdefault("CRANESTRIKE_DETERMINISTICO", "1")
+
 from allinea_avvio import MARGINE_MINIMO_S, allinea_avvio, descrivi
 from avvio import trova_avvio
 from model import HoistZone, solve
@@ -49,11 +53,26 @@ def check(condition: bool, description: str):
         print(f"  FAIL {description}")
 
 
+_risolte: dict = {}
+
+
 def risolta(zone: list[HoistZone]):
-    d = dataclasses.replace(dati_prova(), zones=zone)
-    sol = solve(d, time_limit_s=20)
-    assert sol.status in ("OPTIMAL", "FEASIBLE"), sol.status
-    return d, sol
+    """La linea di prova risolta con queste zone, UNA volta sola.
+
+    CP-SAT gira su piu' thread e non e' deterministico: due risoluzioni della
+    stessa linea possono dare ciclogrammi diversi allo stesso takt, uno con
+    l'avvio approssimato e uno con l'avvio gia' esatto. I casi che partono
+    dalla stessa linea devono partire dallo STESSO ciclogramma, altrimenti il
+    loro presupposto vale o no a seconda della macchina (sul runner della CI
+    il secondo calcolo usciva esatto). allinea_avvio non tocca la soluzione
+    che riceve, quindi condividerla e' sicuro."""
+    chiave = tuple((z.lo, z.hi) for z in zone)
+    if chiave not in _risolte:
+        d = dataclasses.replace(dati_prova(), zones=zone)
+        sol = solve(d, time_limit_s=20)
+        assert sol.status in ("OPTIMAL", "FEASIBLE"), sol.status
+        _risolte[chiave] = (d, sol)
+    return _risolte[chiave]
 
 
 def bagni(d, at) -> dict[int, float]:
