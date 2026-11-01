@@ -5222,6 +5222,37 @@ def _vasche_che_bloccano(
 # alzando `min_hoists`, non qualcosa da decidere in automatico.
 
 
+def voce_registro(n_hoists: int, sol: Solution) -> dict:
+    """La voce del registro dei tentativi (`raw["hoist_sweep"]`) per la
+    ricerca con `n_hoists` carroponti, dall'esito di `solve_auto_zones`.
+
+    Sta qui e non dentro solve_auto_hoists perche' la scrive anche chi chiama
+    solve_auto_zones da solo, con il numero di carroponti scelto: senza la
+    voce, il resoconto di un fallimento non avrebbe niente da raccontare."""
+    voce = {
+        "n_hoists": n_hoists,
+        "status": sol.status,
+        "T": sol.T,
+        "errore_pesato": sol.raw.get("errore_pesato"),
+        # quante suddivisioni sono state davvero risolte e con che esito,
+        # piu' una su cui indagare se non si trova niente: e' cio' che
+        # permette di spiegare un fallimento invece di annunciarlo
+        "n_tried": sol.raw.get("n_tried", 0),
+        "n_skipped": sol.raw.get("n_skipped", 0),
+        "per_stato": sol.raw.get("per_stato", {}),
+        "candidata_tipica": sol.raw.get("candidata_tipica"),
+    }
+    n_portata = sol.raw.get("n_skipped_portata", 0)
+    if n_portata:
+        voce["n_skipped_portata"] = n_portata
+        voce["portata_example"] = sol.raw.get("portata_example")
+    n_layout = sol.raw.get("n_skipped_layout", 0)
+    if n_layout:
+        voce["n_skipped_layout"] = n_layout
+        voce["layout_example"] = sol.raw.get("layout_example")
+    return voce
+
+
 def solve_auto_hoists(
     data: ProblemData,
     max_hoists: int = 6,
@@ -5295,27 +5326,9 @@ def solve_auto_hoists(
                 print(f"  saltato: {e}")
             continue
 
-        voce = {
-            "n_hoists": n_hoists,
-            "status": sol.status,
-            "T": sol.T,
-            "errore_pesato": sol.raw.get("errore_pesato"),
-            # quante suddivisioni sono state davvero risolte e con che esito,
-            # piu' una su cui indagare se non si trova niente: e' cio' che
-            # permette di spiegare un fallimento invece di annunciarlo
-            "n_tried": sol.raw.get("n_tried", 0),
-            "n_skipped": sol.raw.get("n_skipped", 0),
-            "per_stato": sol.raw.get("per_stato", {}),
-            "candidata_tipica": sol.raw.get("candidata_tipica"),
-        }
-        n_portata = sol.raw.get("n_skipped_portata", 0)
-        if n_portata:
-            voce["n_skipped_portata"] = n_portata
-            voce["portata_example"] = sol.raw.get("portata_example")
-        n_layout = sol.raw.get("n_skipped_layout", 0)
+        voce = voce_registro(n_hoists, sol)
+        n_layout = voce.get("n_skipped_layout", 0)
         if n_layout:
-            voce["n_skipped_layout"] = n_layout
-            voce["layout_example"] = sol.raw.get("layout_example")
             if log_progress and sol.status not in ("OPTIMAL", "FEASIBLE"):
                 print(
                     f"  {n_layout} suddivisioni scartate perche' il modello non "

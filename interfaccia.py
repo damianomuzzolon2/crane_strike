@@ -60,6 +60,7 @@ from model import (
     rifinisci_soluzione,
     solve_auto_hoists,
     solve_auto_zones,
+    voce_registro,
 )
 import manuale
 from plotting import (
@@ -2079,6 +2080,10 @@ class Applicazione(tk.Tk):
             if sol.status not in ("OPTIMAL", "FEASIBLE"):
                 if interruzione.richiesta:
                     return ("interrotto", sol, None, None)
+                # Il registro e la diagnosi, come dopo "Calcola auto": senza,
+                # il resoconto diceva solo "nessun registro dei tentativi".
+                sol.raw["hoist_sweep"] = [voce_registro(n, sol)]
+                self._diagnostica(cfg.data, sol)
                 return ("nessuna", sol, None, None)
             dati = dataclasses.replace(cfg.data, zones=zone)
             sol = self._allinea_nel_lavoro(dati, sol, interruzione)
