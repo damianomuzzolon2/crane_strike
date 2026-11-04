@@ -66,6 +66,7 @@ import manuale
 from plotting import (
     _HOIST_COLORS,
     _sample_segment,
+    aggiungi_logo,
     disegna_avvio,
     eventi_del_trasporto,
     lettura_coordinate,
@@ -1344,6 +1345,7 @@ class Applicazione(tk.Tk):
             self.figura.savefig(percorso_png, dpi=150, bbox_inches="tight")
             return
         figura.tight_layout()
+        aggiungi_logo(figura, assi)
         figura.savefig(percorso_png, dpi=150)
 
     # ------------------------------------------------------------------

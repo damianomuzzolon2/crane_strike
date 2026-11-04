@@ -9,6 +9,9 @@ pattern e' periodico.
 
 from __future__ import annotations
 
+import os
+import sys
+
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
@@ -64,6 +67,47 @@ _KINEMATIC_KINDS = {"loaded", "empty", "quota"}
 # Stati che dichiarano esplicitamente l'assenza di una soluzione: gli unici
 # per cui non c'e' proprio niente da disegnare.
 _STATI_SENZA_SOLUZIONE = {"INFEASIBLE", "MODEL_INVALID", "UNKNOWN", "NOT_SOLVED"}
+
+
+def cartella_risorse() -> str:
+    """`risorse/` accanto a questo modulo, o dentro il pacchetto di
+    PyInstaller (`sys._MEIPASS`) quando gira l'eseguibile."""
+    return os.path.join(
+        getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__))),
+        "risorse",
+    )
+
+
+PERCORSO_LOGO = os.path.join(cartella_risorse(), "logo_imel.png")
+
+
+def aggiungi_logo(fig, ax) -> None:
+    """Mette il logo IMEL in alto a sinistra, nella fascia sopra gli assi
+    dove sta anche il titolo (che e' centrato, quindi non lo copre).
+
+    Va chiamata DOPO `tight_layout`: il logo sta su assi propri, che
+    tight_layout non sa sistemare, e la posizione si calcola da dove sono
+    finiti gli assi del grafico. Un logo che manca non ferma il salvataggio."""
+    try:
+        img = plt.imread(PERCORSO_LOGO)
+    except Exception:
+        return
+    larghezza_fig, altezza_fig = fig.get_size_inches()
+    # la fascia lasciata da tight_layout basta appena per il titolo: se ne
+    # fa una di almeno 0.6 pollici, abbassando un po' il bordo degli assi
+    minima = 0.6 / altezza_fig
+    if 1.0 - ax.get_position().y1 < minima:
+        fig.subplots_adjust(top=1.0 - minima)
+    pos = ax.get_position()
+    fascia = 1.0 - pos.y1
+    altezza = fascia * 0.7
+    larghezza = altezza * altezza_fig / larghezza_fig * img.shape[1] / img.shape[0]
+    assi_logo = fig.add_axes(
+        [pos.x0, pos.y1 + (fascia - altezza) / 2, larghezza, altezza],
+        label="logo_imel",
+    )
+    assi_logo.imshow(img)
+    assi_logo.axis("off")
 
 
 def _sample_segment(seg: Segment, n=25):
@@ -536,6 +580,7 @@ def plot_cyclogram(
 
     if save_path:
         plt.tight_layout()
+        aggiungi_logo(ax.figure, ax)
         plt.savefig(save_path, dpi=150)
     if own_fig:
         return ax.figure
