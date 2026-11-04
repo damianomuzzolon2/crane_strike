@@ -396,9 +396,19 @@ def test_tutti_gli_istanti(d: ProblemData):
     sol, dati = due_carroponti(d, 50.0)
     avvii = trova_avvii(dati, sol)
     check(len(avvii) > 1, f"ne trova piu' d'uno ({len(avvii)})")
+    # Il primo e' quello con piu' margine; dopo di lui gli altri seguono in
+    # ordine di tempo lungo il giro, cioe' la lista e' quella ordinata per
+    # tempo fatta cominciare da lui.
+    ordinati = sorted(avvii, key=lambda a: a.t)
+    da = ordinati.index(avvii[0])
     check(
-        [a.t for a in avvii] == sorted(a.t for a in avvii),
-        "sono in ordine di tempo crescente",
+        [a.t for a in avvii] == [a.t for a in ordinati[da:] + ordinati[:da]],
+        "sono in ordine di tempo lungo il giro",
+    )
+    check(
+        avvii[0].margine >= max(a.margine for a in avvii) - 1e-9,
+        f"e il primo e' quello con piu' margine "
+        f"({[round(a.margine, 2) for a in avvii]})",
     )
     check(
         all(a.indice == i and a.totale == len(avvii) for i, a in enumerate(avvii)),
