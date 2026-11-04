@@ -45,7 +45,7 @@ from matplotlib.text import Text
 
 from kinematics import Kinematics, position_profile
 from model import ProblemData, Solution
-from plotting import _HOIST_COLORS
+from plotting import _HOIST_COLORS, PERCORSO_LOGO
 
 # Colori del disegno. Il colore dei carroponti e' lo stesso del ciclogramma
 # (_HOIST_COLORS): la simulazione e il grafico si guardano uno accanto
@@ -988,6 +988,22 @@ def _barra(img, x0: int, x1: int, alto: int, basso: int, colore: str):
     img.put(colore, to=(x0, alto, x1 + 1, basso + 1))
 
 
+def _logo_ridotto(master, larghezza: int):
+    """Il logo IMEL largo `larghezza` pixel (scalati coi dpi dello schermo),
+    come immagine Tk, o None se il file non c'e'."""
+    try:
+        from PIL import Image, ImageTk
+
+        scala = max(1.0, master.winfo_fpixels("1i") / 96.0)
+        larghezza = round(larghezza * scala)
+        with Image.open(PERCORSO_LOGO) as img:
+            altezza = round(img.height * larghezza / img.width)
+            ridotta = img.convert("RGBA").resize((larghezza, altezza), Image.LANCZOS)
+        return ImageTk.PhotoImage(ridotta, master=master)
+    except Exception:
+        return None
+
+
 def icona_comando(nome: str, lato: int = 18, colore: str = _COLORE_ICONA):
     """L'icona di un comando, come immagine Tk.
 
@@ -1195,6 +1211,12 @@ class FinestraSimulazione(tk.Toplevel):
             textvariable=self.var_velocita,
             values=self.VELOCITA,
         ).pack(side=tk.LEFT)
+        # Il logo IMEL in fondo a destra della barra. Va impacchettato PRIMA
+        # del cursore, che si prende tutto lo spazio che resta. Tenuto in un
+        # attributo: senza riferimenti Tk cancella l'immagine.
+        self._logo = _logo_ridotto(self, 110)
+        if self._logo is not None:
+            ttk.Label(comandi, image=self._logo).pack(side=tk.RIGHT, padx=(8, 0))
         self.var_t = tk.DoubleVar(value=0.0)
         # takefocus=False perche' anche il cursore risponde alle frecce: se se
         # le prendesse lui, ogni freccia muoverebbe due volte il tempo -- una
