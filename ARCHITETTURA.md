@@ -558,6 +558,18 @@ dei vincoli di non collisione si prendeva quasi tutto il tempo.
 Si fa **una volta**, sulla soluzione finale, non dentro `solve`: la ricerca
 automatica chiama `solve` per ogni suddivisione in zone. Si tiene il risultato
 solo se ha lo stesso takt e meno soste, altrimenti torna la soluzione di prima.
+
+`riduci_soste` ha anche un secondo compito, che viene PRIMA delle soste: il
+tempo che un carroponte passa **fermo sopra il carico o lo scarico**
+(`stazioni_presidiate`, per posizione). Dove il carroponte passa il tempo che
+gli avanza e' indifferente al takt time, e il solutore sceglieva a caso: il
+primo carro restava sopra il carico, l'ultimo sopra lo scarico. Nella
+rifinitura l'obiettivo e' `(soste_possibili + 1) · attesa_presidiate + soste`:
+l'attesa si sposta dove ha consegnato, dove prelevera' o in una vasca in mezzo
+(anche a costo di una sosta in piu'), e resta li' solo se la non collisione la
+impone. Le attese nelle altre vasche non costano niente. Per questo la
+rifinitura gira anche su una soluzione OPTIMAL, e si tiene la nuova se
+`(attesa_presidiate, soste)` scende in ordine lessicografico.
 Gira senza rilassamento lineare (`PARAMETRI_RIFINITURA`), che qui non serve.
 
 ### 5.3 La fascia di esclusione — il vincolo difficile

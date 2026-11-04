@@ -1621,6 +1621,28 @@ def coppie_interblocco(
     return fuori
 
 
+# Tolleranza [mm] con cui una vasca si dice nella stessa posizione del carico
+# o dello scarico.
+_TOLL_PRESIDIATA_MM = 1.0
+
+
+def stazioni_presidiate(data: "ProblemData") -> frozenset[int]:
+    """Le stazioni del percorso che stanno sul CARICO o sullo SCARICO -- dove
+    il pezzo viene appeso e staccato, e un carroponte fermo sopra intralcia.
+
+    Per posizione e non per indice, come in `avvio.py`: se la ricetta ci
+    ripassa a meta' percorso resta comunque la vasca presidiata."""
+    estremi = (data.station_position(0), data.station_position(data.n_stations - 1))
+    return frozenset(
+        s
+        for s in range(data.n_stations)
+        if any(
+            abs(data.station_position(s) - x) <= _TOLL_PRESIDIATA_MM
+            for x in estremi
+        )
+    )
+
+
 def soste_candidate(
     data: "ProblemData",
     zone: "HoistZone",
@@ -3231,14 +3253,63 @@ def solve(
     # SCARTO PESATO dai tempi teorici (vedi `_pesi_scarto`), e le soste
     # restano il secondo con la stessa garanzia: un'unita' di scarto vale
     # piu' di tutte le soste possibili.
+    # -- Attese sopra il carico e lo scarico --------------------------------
+    #
+    # Il tempo che avanza a un carroponte fra una consegna e il prelievo
+    # successivo lo passa fermo da qualche parte: dove ha consegnato (partendo
+    # tardi), dove prelevera' (arrivando presto) o in una vasca in mezzo. Al
+    # takt time e alle soste e' indifferente, e il solutore sceglieva a caso:
+    # spesso il primo carro restava minuti sopra il carico, e l'ultimo sopra
+    # lo scarico, proprio dove l'operatore lavora. Qui si misura quel tempo,
+    # arco per arco, e lo minimizza `riduci_soste` sulla soluzione finale
+    # (vedi sotto): subito dopo il takt time e PRIMA delle soste in una vasca
+    # in mezzo, perche' fermarsi altrove e' meglio che fermarsi li'. Se
+    # l'attesa sopra carico o scarico serve a non collidere resta, perche' il
+    # vincolo di non collisione la impone comunque. Le attese nelle altre
+    # vasche non costano niente.
+    #
+    # Le variabili si creano anche quando non sono nell'obiettivo: il modello
+    # di `riduci_soste` deve avere le STESSE variabili di quello da cui viene
+    # il suggerimento (vedi `_firma_modello`).
+    presidiate = stazioni_presidiate(data)
+    attese_presidiate = []
+    misure_presidiate = []  # (attesa, literal), per il resoconto
+    for zd in zone_data:
+        h = zd["h"]
+        for (k1, k2), arco in zd["archi"].items():
+            termini = []
+            if k1 + 1 in presidiate:
+                # fermo dove ha consegnato, prima di partire
+                termini.append(("dep", arco["dep"] - arco["span_start"], arco["lit"]))
+            if k2 in presidiate:
+                # fermo dove prelevera', dopo essere arrivato
+                termini.append(("arr", arco["span_end"] - arco["arr"], arco["lit"]))
+            for i, opz in enumerate(arco["opzioni"]):
+                if opz["sosta"] is not None and opz["sosta"] in presidiate:
+                    # una sosta "in mezzo" che cade proprio sul carico o sullo
+                    # scarico e' un'attesa li' come le altre
+                    (_, _, _, arr_m), (_, _, dep_m, _) = opz["tappe"]
+                    termini.append((f"sosta{i}", dep_m - arr_m, opz["sel"]))
+            for nome, espr, lit in termini:
+                w = model.NewIntVar(0, DEP_MAX, f"attpres_{h}_{k1}_{k2}_{nome}")
+                vincolo = model.Add(w >= espr)
+                if lit is not None:
+                    vincolo.OnlyEnforceIf(lit)
+                attese_presidiate.append(w)
+                misure_presidiate.append((espr, lit))
+
     obiettivo_scarti = 0
     for k, sotto, sopra in scarti:
         peso_sotto, peso_sopra = _pesi_scarto(data.route[k])
         obiettivo_scarti += peso_sotto * sotto + peso_sopra * sopra
     primo = obiettivo_scarti if data.takt_fisso else Tv
     if _rifinisci is not None:
-        # Il primo criterio e' gia' inchiodato: resta da contare le soste.
-        model.Minimize(sum(sel_soste))
+        # Il primo criterio e' gia' inchiodato: restano le attese sopra
+        # carico e scarico e, sotto di loro, le soste. Il peso garantisce
+        # l'ordine: un tick di attesa li' costa sempre piu' di tutte le soste.
+        model.Minimize(
+            (len(sel_soste) + 1) * sum(attese_presidiate) + sum(sel_soste)
+        )
         _suggerisci(model, _rifinisci.raw.get("_suggerimento"), fissa=True)
     elif sel_soste:
         model.Minimize(primo * (data.n_moves + 1) + sum(sel_soste))
@@ -3362,6 +3433,14 @@ def solve(
         "n_separation_constraints": n_sep_constraints,
         "n_interlock_constraints": n_il_constraints,
         "n_soste":sum(solver.Value(sel) for sel in sel_soste),
+        # [tick] il tempo fermo sopra carico e scarico, terzo criterio di
+        # `riduci_soste`. Si misura dalle partenze e dagli arrivi, non dalle
+        # variabili `attpres_`: fuori dalla rifinitura nessuno le minimizza.
+        "attesa_presidiate": sum(
+            max(0, solver.Value(espr))
+            for espr, lit in misure_presidiate
+            if lit is None or solver.Value(lit)
+        ),
         # Lo scarto pesato dai tempi teorici, in secondi x peso: e' il primo
         # criterio con `takt_fisso`, e senza vale None (non e' stato cercato).
         # Si ricalcola dagli istanti con i tempi di trasporto ESATTI, non si
@@ -3539,16 +3618,26 @@ def riduci_soste(
     soluzione come suggerimento. Il modello che resta e' piccolo, e su una
     linea da 14 mosse e 6 carroponti si chiude in una decina di secondi.
 
-    SI TIENE LA NUOVA SOLO SE E' MEGLIO: stesso takt time e meno soste.
+    SI TIENE LA NUOVA SOLO SE E' MEGLIO: stesso takt time e, nell'ordine,
+    meno attesa sopra carico e scarico oppure, a parita', meno soste.
     Altrimenti -- tempo scaduto senza miglioramenti, modello che non si
     costruisce, calcolo fermato dall'utente -- si restituisce `sol` cosi'
     com'e', soste comprese. Non c'e' un caso in cui si peggiori.
 
-    `data` deve avere le zone della soluzione. Una soluzione OPTIMAL non si
-    tocca: l'ottimo e' dimostrato sull'obiettivo che conta gia' le soste."""
+    Nella stessa passata, e PRIMA delle soste, si toglie il tempo che il
+    carroponte passa FERMO sopra il carico o lo scarico (`stazioni_presidiate`):
+    l'attesa si sposta dove ha consegnato, dove prelevera' o in una vasca in
+    mezzo, se la non collisione lo permette -- anche a costo di una sosta in
+    piu'. Per questo si rifinisce anche una soluzione OPTIMAL: l'ottimo e'
+    dimostrato su takt e soste, non su dove si aspetta.
+
+    `data` deve avere le zone della soluzione."""
+    soste = sol.raw.get("n_soste", 0)
+    attesa = sol.raw.get("attesa_presidiate", 0)
+    da_togliere = (soste and sol.status == "FEASIBLE") or attesa
     if (
-        sol.status != "FEASIBLE"
-        or not sol.raw.get("n_soste")
+        sol.status not in ("OPTIMAL", "FEASIBLE")
+        or not da_togliere
         or "T_ticks" not in sol.raw
         or sol.raw.get("interrotto")
         or (interruzione is not None and interruzione.richiesta)
@@ -3567,7 +3656,8 @@ def riduci_soste(
         nuova.status not in ("OPTIMAL", "FEASIBLE")
         or nuova.raw.get("interrotto")
         or nuova.raw.get("T_ticks") != sol.raw["T_ticks"]
-        or nuova.raw.get("n_soste", 0) >= sol.raw["n_soste"]
+        or (nuova.raw.get("attesa_presidiate", 0), nuova.raw.get("n_soste", 0))
+        >= (attesa, soste)
     ):
         return sol
     # Il takt time non e' stato ottimizzato di nuovo: resta FEASIBLE com'era.
@@ -3576,11 +3666,12 @@ def riduci_soste(
     raw = dict(sol.raw)
     raw.update(
         # nella scala dell'obiettivo di `solve`, non di quello della rifinitura
-        objective=sol.raw["objective"] - sol.raw["n_soste"] + nuova.raw["n_soste"],
+        objective=sol.raw["objective"] - soste + nuova.raw["n_soste"],
         n_soste=nuova.raw["n_soste"],
+        attesa_presidiate=nuova.raw["attesa_presidiate"],
         n_separation_constraints=nuova.raw["n_separation_constraints"],
         _suggerimento=nuova.raw["_suggerimento"],
-        soste_tolte=sol.raw["n_soste"] - nuova.raw["n_soste"],
+        soste_tolte=max(0, soste - nuova.raw["n_soste"]),
         wall_time_soste=nuova.raw["wall_time"],
     )
     return dataclasses.replace(nuova, status=sol.status, raw=raw)
@@ -3676,6 +3767,7 @@ def rifinisci_soluzione(
         - sol.raw.get("n_soste", 0)
         + nuova.raw.get("n_soste", 0),
         n_soste=nuova.raw.get("n_soste", 0),
+        attesa_presidiate=nuova.raw.get("attesa_presidiate", 0),
         n_separation_constraints=nuova.raw["n_separation_constraints"],
         _suggerimento=nuova.raw["_suggerimento"],
         errore_pesato=nuova.raw["errore_pesato"],

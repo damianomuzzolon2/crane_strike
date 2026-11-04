@@ -1253,6 +1253,54 @@ def test_dove_va_ad_aspettare_il_carro():
         rep = verify_solution(d_con, con)
         check(rep.ok, _esito(con, rep, "e la soluzione con la sosta e' valida"))
 
+def test_niente_attese_sopra_carico_e_scarico():
+    print()
+    print("[9-bis-ter] il carro non aspetta sopra carico e scarico se non serve")
+    # Il tempo che avanza fra una consegna e il prelievo dopo, il carroponte
+    # lo passa fermo dove ha consegnato o dove prelevera'. Al takt time e'
+    # indifferente, e il solutore sceglieva a caso: il primo carro restava
+    # sopra il carico, l'ultimo sopra lo scarico. `riduci_soste` sposta
+    # quell'attesa altrove quando la non collisione lo permette.
+    from model import riduci_soste, stazioni_presidiate
+
+    # Takt largo e bagni lunghi: c'e' tempo da avanzare su ogni arco, e i
+    # carri sono abbastanza lontani da poterlo passare dove vogliono.
+    d = linea(
+        5, 3000, [HoistZone(0, 1), HoistZone(2, 4)],
+        dwell=(20, 400), takt_min=60.0, takt_max=60.0,
+    )
+    check(
+        stazioni_presidiate(d) == frozenset({0, 5}),
+        f"presidiate il carico e lo scarico ({sorted(stazioni_presidiate(d))})",
+    )
+    sol = solve(d, time_limit_s=30.0)
+    if sol.status not in ("OPTIMAL", "FEASIBLE"):
+        check(False, f"la linea di prova non si risolve ({sol.status})")
+        return
+    rif = riduci_soste(d, sol, time_limit_s=30.0)
+    check(
+        abs(rif.T - sol.T) < 1e-9,
+        "il takt time non cambia",
+    )
+    check(
+        rif.raw["attesa_presidiate"] == 0,
+        f"nessuna attesa sopra carico e scarico "
+        f"({sol.raw['attesa_presidiate']} -> {rif.raw['attesa_presidiate']} tick)",
+    )
+    x_pres = {d.station_position(s) / 1000 for s in stazioni_presidiate(d)}
+    ferme = [
+        (h + 1, sg.t_end - sg.t_start)
+        for h, segs in enumerate(rif.segments_per_hoist)
+        for sg in segs
+        if sg.kind == "wait"
+        and sg.t_end - sg.t_start > d.eps_seconds
+        and any(abs(sg.x_start - x) < 1e-6 for x in x_pres)
+    ]
+    check(not ferme, f"e nel disegno nessun carro e' fermo li' ({ferme})")
+    rep = verify_solution(d, rif)
+    check(rep.ok, "e la soluzione supera la verifica indipendente")
+
+
 def test_riduci_soste():
     print()
     print("[9-bis-bis] le soste che non servono si tolgono, le altre restano")
@@ -1299,15 +1347,26 @@ def test_riduci_soste():
         f"il conteggio delle soste corrisponde al piano "
         f"({ottima.raw.get('n_soste')} contro {soste(ottima)})",
     )
+    # L'ottimo conta gia' le soste: la rifinitura cambia una soluzione
+    # OPTIMAL solo per aspettare meno sopra carico e scarico.
+    rif_ottima = riduci_soste(d, ottima)
     check(
-        riduci_soste(d, ottima) is ottima,
-        "una soluzione OPTIMAL esce tale e quale: l'ottimo conta gia' le soste",
+        rif_ottima is ottima
+        or (
+            rif_ottima.raw["attesa_presidiate"]
+            < ottima.raw["attesa_presidiate"]
+            and abs(rif_ottima.T - ottima.T) < 1e-9
+        ),
+        "una soluzione OPTIMAL non cambia, se non per aspettare meno sopra "
+        "carico e scarico",
     )
 
     # -- 2) senza miglioramento si restituisce la soluzione di prima --------
     # Le soste dell'ottimo servono tutte: fingendola FEASIBLE non c'e' niente
     # da togliere, e quello che torna dev'essere lei, soste comprese.
-    finta = dataclasses.replace(ottima, status="FEASIBLE")
+    # (si parte da quella gia' rifinita: le sue attese sopra carico e scarico
+    # sono gia' le minime, e non resta davvero niente da togliere)
+    finta = dataclasses.replace(rif_ottima, status="FEASIBLE")
     check(
         riduci_soste(d, finta) is finta,
         f"se non si toglie niente torna la soluzione di prima, con le sue "
@@ -1332,9 +1391,13 @@ def test_riduci_soste():
         f"il takt time resta {di_corsa.T:.2f} s, e lo stato FEASIBLE",
     )
     check(
-        soste(rifinita) <= soste(di_corsa)
+        (
+            rifinita.raw["attesa_presidiate"] < di_corsa.raw["attesa_presidiate"]
+            or soste(rifinita) <= soste(di_corsa)
+        )
         and rifinita.raw["n_soste"] == soste(rifinita),
-        f"le soste non aumentano ({soste(di_corsa)} -> {soste(rifinita)})",
+        f"le soste aumentano solo per aspettare meno sopra carico e scarico "
+        f"({soste(di_corsa)} -> {soste(rifinita)})",
     )
     rep = verify_solution(d, rifinita)
     check(rep.ok, "e la soluzione rifinita supera la verifica indipendente")
@@ -2016,6 +2079,7 @@ def main():
     test_attesa_lunga_un_eps()
     test_dove_sosta_il_carro()
     test_dove_va_ad_aspettare_il_carro()
+    test_niente_attese_sopra_carico_e_scarico()
     test_riduci_soste()
     test_pezzo_in_vasca()
     test_frecce_delle_corse_verticali()
