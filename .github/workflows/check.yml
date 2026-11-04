@@ -10,15 +10,24 @@
 # PC, quindi un test che passa in locale passa anche qui. Costa circa tre volte
 # il tempo, e per questo i test girano su tre runner in parallelo.
 #
-# Attenzione: GitHub legge i workflow "issue_comment" solo dal ramo
-# principale. Finche' questo file non e' su master, il commento non fa nulla,
-# e le sue modifiche contano solo dopo essere arrivate su master.
+# Un nuovo "check" mentre i test girano li annulla e li fa ripartire da capo.
+# Un PUSH sulla PR li annulla e basta: il commit nuovo non ha nessuno stato
+# "check", e i test vanno richiesti di nuovo scrivendo "check".
+#
+# Attenzione: GitHub legge i workflow "issue_comment" e "pull_request_target"
+# solo dal ramo principale. Finche' questo file non e' su master, il commento
+# non fa nulla, e le sue modifiche contano solo dopo essere arrivate su master.
 
 name: check
 
 on:
   issue_comment:
     types: [created]
+  # Solo per annullare il check in corso (vedi `nuovo_push`). E' la variante
+  # "_target" perche', come issue_comment, legge il workflow da master e non
+  # esegue niente della PR: qui non si fa il checkout di nessun codice.
+  pull_request_target:
+    types: [synchronize]
 
 permissions:
   contents: read
@@ -26,18 +35,30 @@ permissions:
   pull-requests: write
   issues: write          # reazioni e commento col risultato
 
-# Un nuovo "check" sulla stessa PR annulla quello in corso. La condizione sta
-# anche nel nome del gruppo: un commento qualsiasi finisce in un altro gruppo e
-# non interrompe un check che sta girando.
+# Un nuovo "check" o un push sulla stessa PR annullano quello in corso: finiscono
+# nello stesso gruppo, e `cancel-in-progress` ferma la run che c'era. La
+# condizione sta anche nel nome del gruppo: un commento qualsiasi finisce in un
+# altro gruppo e non interrompe un check che sta girando.
 concurrency:
   group: >-
-    check-pr-${{ github.event.issue.number }}-${{
-      github.event.comment.body == 'check' &&
-      contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.comment.author_association)
+    check-pr-${{ github.event.issue.number || github.event.pull_request.number }}-${{
+      github.event_name == 'pull_request_target' || (
+        github.event.comment.body == 'check' &&
+        contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.comment.author_association)
+      )
     }}
   cancel-in-progress: true
 
 jobs:
+  nuovo_push:
+    # Non fa niente: basta che la run esista, nel gruppo del check, perche'
+    # quella in corso venga annullata. Gli altri job su un push si saltano da
+    # soli (`avvio` vuole un commento).
+    if: github.event_name == 'pull_request_target'
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "Nuovo push sulla PR ${{ github.event.pull_request.number }}, check in corso annullato"
+
   avvio:
     # Solo sulle PR (non sulle issue), solo col commento esatto "check", e
     # solo da chi ha accesso al repository: altrimenti chiunque potrebbe far
@@ -202,6 +223,39 @@ jobs:
           script: |
             const ok = process.env.ESITO === 'success';
             const url = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            // Annullato: o da un nuovo "check" sullo stesso commit, o da un push.
+            // Nel primo caso lo stato e il commento li scrive la run nuova, che
+            // ha gia' messo "in corso": scriverci "fallito" sopra mentre i test
+            // ripartono direbbe il falso. Nel secondo il commit non e' piu' la
+            // testa della PR, e si chiude il suo stato rimasto "in corso".
+            if (process.env.ESITO === 'cancelled') {
+              const { data: pr } = await github.rest.pulls.get({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                pull_number: context.issue.number,
+              });
+              if (pr.head.sha === process.env.SHA) {
+                core.info('Annullato da un nuovo check sullo stesso commit: lo stato lo scrive la run nuova.');
+                return;
+              }
+              await github.rest.repos.createCommitStatus({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                sha: process.env.SHA,
+                state: 'error',
+                context: 'check',
+                description: 'Annullato da un nuovo push',
+                target_url: url,
+              });
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: `⏹️ **check** su \`${process.env.SHA.slice(0, 7)}\` annullato da un nuovo push ` +
+                      `(\`${pr.head.sha.slice(0, 7)}\`): scrivi \`check\` per rifare i test — [log](${url})`,
+              });
+              return;
+            }
             await github.rest.repos.createCommitStatus({
               owner: context.repo.owner,
               repo: context.repo.repo,
@@ -227,9 +281,7 @@ jobs:
             }
             // un commento GitHub non supera 65536 caratteri
             if (dettaglio.length > 60000) dettaglio = dettaglio.slice(0, 60000) + '\n```\n…(tagliato, vedi il log)';
-            const perche = ok ? 'tutti i test passano'
-              : process.env.ESITO === 'cancelled' ? 'check annullato'
-              : 'ci sono test falliti';
+            const perche = ok ? 'tutti i test passano' : 'ci sono test falliti';
             await github.rest.issues.createComment({
               owner: context.repo.owner,
               repo: context.repo.repo,
