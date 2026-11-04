@@ -38,7 +38,9 @@ from tkinter import ttk
 import numpy as np
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from matplotlib.figure import Figure
+from matplotlib.image import imread as plt_imread
 from matplotlib.lines import Line2D
+from matplotlib.offsetbox import AnnotationBbox, OffsetImage
 from matplotlib.patches import Rectangle
 from matplotlib.path import Path
 from matplotlib.text import Text
@@ -988,22 +990,6 @@ def _barra(img, x0: int, x1: int, alto: int, basso: int, colore: str):
     img.put(colore, to=(x0, alto, x1 + 1, basso + 1))
 
 
-def _logo_ridotto(master, larghezza: int):
-    """Il logo IMEL largo `larghezza` pixel (scalati coi dpi dello schermo),
-    come immagine Tk, o None se il file non c'e'."""
-    try:
-        from PIL import Image, ImageTk
-
-        scala = max(1.0, master.winfo_fpixels("1i") / 96.0)
-        larghezza = round(larghezza * scala)
-        with Image.open(PERCORSO_LOGO) as img:
-            altezza = round(img.height * larghezza / img.width)
-            ridotta = img.convert("RGBA").resize((larghezza, altezza), Image.LANCZOS)
-        return ImageTk.PhotoImage(ridotta, master=master)
-    except Exception:
-        return None
-
-
 def icona_comando(nome: str, lato: int = 18, colore: str = _COLORE_ICONA):
     """L'icona di un comando, come immagine Tk.
 
@@ -1152,6 +1138,12 @@ class FinestraSimulazione(tk.Toplevel):
         self._raffica = None  # il timer del pulsante tenuto premuto
         self._muovo_io = False  # per non farsi rimbalzare indietro dal cursore
 
+        # il logo IMEL, letto una volta sola: lo mette `_metti_logo`
+        try:
+            self._logo = plt_imread(PERCORSO_LOGO)
+        except Exception:
+            self._logo = None
+
         self.figura = Figure(figsize=(11, 4.6), dpi=100)
         self.assi = self.figura.add_subplot(111)
         self.tela = FigureCanvasTkAgg(self.figura, master=self)
@@ -1211,12 +1203,6 @@ class FinestraSimulazione(tk.Toplevel):
             textvariable=self.var_velocita,
             values=self.VELOCITA,
         ).pack(side=tk.LEFT)
-        # Il logo IMEL in fondo a destra della barra. Va impacchettato PRIMA
-        # del cursore, che si prende tutto lo spazio che resta. Tenuto in un
-        # attributo: senza riferimenti Tk cancella l'immagine.
-        self._logo = _logo_ridotto(self, 110)
-        if self._logo is not None:
-            ttk.Label(comandi, image=self._logo).pack(side=tk.RIGHT, padx=(8, 0))
         self.var_t = tk.DoubleVar(value=0.0)
         # takefocus=False perche' anche il cursore risponde alle frecce: se se
         # le prendesse lui, ogni freccia muoverebbe due volte il tempo -- una
@@ -1270,6 +1256,30 @@ class FinestraSimulazione(tk.Toplevel):
             )
         )
         self._disegna()
+
+    def _metti_logo(self):
+        """Il logo IMEL sulla riga del titolo, allineato al bordo sinistro del
+        disegno: dove sta anche nel PNG del ciclogramma. E' ancorato agli
+        assi, quindi segue il disegno quando la finestra cambia misura; va
+        rimesso dopo ogni `assi.clear()`. Escluso dal tight_layout: sta nella
+        fascia che il titolo riserva gia'."""
+        if self._logo is None:
+            return
+        # il titolo sta 6 punti sopra gli assi ed e' alto circa 10: il centro
+        # del logo va a meta' della sua altezza
+        logo = AnnotationBbox(
+            OffsetImage(self._logo, zoom=15 / self._logo.shape[0]),
+            (0.0, 1.0),
+            xycoords="axes fraction",
+            xybox=(5, 6 + 5),  # 5 punti a destra: in riga con la legenda
+            boxcoords="offset points",
+            box_alignment=(0.0, 0.5),
+            frameon=False,
+            pad=0,
+            annotation_clip=False,
+        )
+        logo.set_in_layout(False)
+        self.assi.add_artist(logo)
 
     def _prepara_scena(self):
         """Disegna quello che non si muove (capannone, vasche, rotaia) e crea
@@ -1630,6 +1640,7 @@ class FinestraSimulazione(tk.Toplevel):
         # presente calcolerebbe i margini senza tenerne conto -- poi quello
         # vero finirebbe tagliato dal bordo della finestra.
         self.assi.set_title(self._titolo(0.0, 0), fontsize=10, color="#2f3640")
+        self._metti_logo()
         self.figura.set_facecolor("#ffffff")
         # Con la finestra rimpicciolita al minimo i margini non ci stanno e
         # matplotlib lo scrive su stderr. Non c'e' niente da fare e niente da
