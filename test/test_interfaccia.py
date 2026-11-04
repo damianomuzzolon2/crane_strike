@@ -17,6 +17,7 @@ Per eseguirlo:
 
 from __future__ import annotations
 
+import dataclasses
 import os
 import sys
 import tempfile
@@ -1711,15 +1712,6 @@ def test_dati_linea(percorso_linea):
         )
         check(righe_da_file(copia).vasche[1][1] == 2600, "con dentro la modifica")
 
-        # il selettore Takt fisso si vede anche nelle tabelle
-        app.var_takt_fisso.set(True)
-        app._cambia_takt_fisso()
-        app.update()
-        check(
-            f.righe().parametri["takt_fisso"] == "1" and not f.da_applicare(),
-            "Takt fisso aggiorna la tabella senza farne una modifica",
-        )
-
         # un file che non passa i controlli si apre nella finestra
         from openpyxl import load_workbook
 
@@ -1782,13 +1774,11 @@ def test_takt_fisso(percorso_linea):
                 break
             time.sleep(0.02)
         check(
-            not app.var_takt_fisso.get(),
+            not app.config_linea.data.takt_fisso,
             "il modello d'esempio apre col takt libero, come dice il file",
         )
-        app.var_takt_fisso.set(True)
-        app._cambia_takt_fisso()
-        d = app.config_linea.data
-        check(d.takt_fisso, "il selettore arriva alla linea")
+        d = dataclasses.replace(app.config_linea.data, takt_fisso=True)
+        app.config_linea = dataclasses.replace(app.config_linea, data=d)
 
         app._calcola_automatico()
         check(pompa(app), "il calcolo termina")
@@ -1839,14 +1829,6 @@ def test_takt_fisso(percorso_linea):
             f"la tabella dei tempi in vasca ha la colonna dello scarto ({valori})",
         )
 
-        # Tornare al takt libero non butta il ciclogramma: cambia solo cosa
-        # cerchera' il prossimo calcolo.
-        app.var_takt_fisso.set(False)
-        app._cambia_takt_fisso()
-        check(
-            app.soluzione is sol and not app.config_linea.data.takt_fisso,
-            "togliendo il segno il ciclogramma resta, cambia l'obiettivo",
-        )
     finally:
         chiudi(app)
 

@@ -396,18 +396,6 @@ class Applicazione(tk.Tk):
             barra, text="Calcola auto", command=self._calcola_automatico
         )
         self.btn_auto.pack(side=tk.LEFT)
-        # COSA ottimizza "Calcola auto": il takt time piu' corto, oppure --
-        # col takt fisso al teorico -- i tempi in vasca piu' vicini ai teorici.
-        # Si legge dal file (parametro takt_fisso) e qui si puo' cambiare al
-        # volo: e' una domanda che si fa alla stessa linea, non un'altra linea.
-        self.var_takt_fisso = tk.BooleanVar(value=False)
-        self.chk_takt_fisso = ttk.Checkbutton(
-            barra,
-            text="Takt fisso",
-            variable=self.var_takt_fisso,
-            command=self._cambia_takt_fisso,
-        )
-        self.chk_takt_fisso.pack(side=tk.LEFT, padx=(6, 0))
         # Accanto a "Calcola auto", perche' e' il suo contrario: una ricerca
         # automatica puo' durare decine di minuti, e prima l'unico modo di
         # rinunciarci era chiudere il programma. Acceso solo mentre si calcola.
@@ -855,7 +843,6 @@ class Applicazione(tk.Tk):
             self.finestra_simulazione.destroy()
             self.finestra_simulazione = None
         d = self.config_linea.data
-        self.var_takt_fisso.set(d.takt_fisso)
         self._mostra_percorso(percorso)
         self._scrivi_riepilogo(
             f"Linea: {self._descrizione_linea()}\n"
@@ -1072,43 +1059,6 @@ class Applicazione(tk.Tk):
                 righe, os.path.normpath(os.path.abspath(percorso)), errori
             )
 
-    def _cambia_takt_fisso(self):
-        """Il selettore "Takt fisso": cambia l'obiettivo della linea caricata.
-
-        Non tocca il ciclogramma che c'e': resta valido com'e', e cambia solo
-        cosa cerchera' il prossimo "Calcola auto". Il riepilogo pero' si
-        rinfresca, perche' dice quale dei due obiettivi e' in vigore."""
-        if self.config_linea is None:
-            self.var_takt_fisso.set(False)
-            return
-        fisso = self.var_takt_fisso.get()
-        try:
-            data = dataclasses.replace(self.config_linea.data, takt_fisso=fisso)
-        except ValueError as e:
-            # Col takt inchiodato al teorico una vasca puo' non starci piu' coi
-            # suoi posti, e ProblemData lo dice subito: meglio qui che come un
-            # INFEASIBLE muto dopo minuti di calcolo.
-            self.var_takt_fisso.set(not fisso)
-            self._errore("Takt fisso non applicabile", str(e))
-            return
-        self.config_linea = dataclasses.replace(self.config_linea, data=data)
-        # Anche nelle tabelle, se no la finestra "Dati linea" mostrerebbe il
-        # valore di prima, e applicarla rimetterebbe l'obiettivo vecchio.
-        if self.righe_linea is not None:
-            self.righe_linea.parametri["takt_fisso"] = int(fisso)
-        if self._finestra_dati_aperta():
-            self.finestra_dati.imposta_parametro("takt_fisso", int(fisso))
-        if self.dati is not None:
-            self.dati = dataclasses.replace(self.dati, takt_fisso=fisso)
-        self._stato(
-            "Calcola auto cerchera' i tempi in vasca piu' vicini ai teorici, "
-            f"con il takt time fisso a {data.takt_nominale:.1f} s"
-            if fisso
-            else "Calcola auto cerchera' il takt time piu' corto nella banda"
-        )
-        if self.soluzione is not None and self.T_corrente is not None:
-            self._aggiorna_banner_e_riepilogo()
-
     def _calcola_automatico(self):
         if not self._pronto_per_calcolare():
             return
@@ -1192,7 +1142,7 @@ class Applicazione(tk.Tk):
     def _mostra_fattibilita(self):
         """I limiti inferiori del takt time della linea caricata, in una
         finestra a parte: col takt e il numero massimo di carroponti che
-        userebbe "Calcola auto", compreso il selettore Takt fisso."""
+        userebbe "Calcola auto"."""
         if not self._pronto_per_calcolare():
             return
         cfg = self.config_linea
@@ -3241,7 +3191,6 @@ class Applicazione(tk.Tk):
             self.schede.tab(1, state=tk.DISABLED)
         self.btn_auto.configure(state=stato)
         self.btn_fattibilita.configure(state=stato)
-        self.chk_takt_fisso.configure(state=stato)
         # Ferma e' acceso solo mentre c'e' un calcolo da fermare, e si spegne
         # appena lo si preme: il calcolo non si ferma all'istante -- finisce la
         # costruzione del modello in corso, o il solutore deve accorgersene --

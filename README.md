@@ -251,8 +251,7 @@ corretta: si salva il lavoro, e gli errori li si ritrova riaprendola.
 `Annulla modifiche` torna alla linea in uso, `Chiudi` chiede se applicare
 quello che non e' ancora stato applicato.
 
-Il selettore `Takt fisso` della barra e il parametro `takt_fisso` sono la
-stessa cosa: cambiando l'uno cambia anche l'altro.
+Il takt fisso si sceglie col parametro `takt_fisso` del foglio Parametri.
 
 ### Quanto durera' il calcolo
 

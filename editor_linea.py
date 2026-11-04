@@ -824,20 +824,6 @@ class FinestraDatiLinea(tk.Toplevel):
         caricate."""
         return self._firma() != (self._base or self._caricata)
 
-    def imposta_parametro(self, nome: str, valore):
-        """Cambia un parametro da fuori -- il selettore "Takt fisso" della
-        finestra principale -- senza farlo contare come una modifica da
-        applicare: la linea del programma ce l'ha gia'."""
-        if nome not in PARAMETRI:
-            return
-        pulita = not self.da_applicare()
-        self.griglie[FOGLIO_PARAMETRI].imposta_cella(
-            list(PARAMETRI).index(nome), 1, testo_cella(valore)
-        )
-        if pulita:
-            self._base = self._firma()
-        self._cambiato()
-
     # -- stato -------------------------------------------------------------
 
     def _aggiorna_intestazione(self):
