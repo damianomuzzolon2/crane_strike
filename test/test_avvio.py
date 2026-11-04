@@ -302,16 +302,22 @@ def test_carro_senza_riposo(d: ProblemData):
     print("\n[6] un carroponte che non si ferma mai non blocca il calcolo")
     sol, dati = due_carroponti(d, 70.0)
     # Si toglie al primo carroponte ogni istante di riposo: le attese
-    # diventano traslazioni di lunghezza nulla, e aggancio e sgancio
-    # spariscono. E' un caso che un impianto vero non da', ma il programma non
-    # deve ne' sbagliare ne' fermarsi se ci capita.
+    # diventano traslazioni di lunghezza nulla, e i tratti a carico perdono la
+    # loro mossa, cosi' non ci sono piu' ne' l'aggancio ne' lo sgancio. Non
+    # basterebbe azzerarne i tempi: un aggancio di 0 s e' comunque un istante
+    # fermo in basso, e conta. E' un caso che un impianto vero non da', ma il
+    # programma non deve ne' sbagliare ne' fermarsi se ci capita.
     import dataclasses
 
-    senza = [
-        dataclasses.replace(s, kind="empty" if s.kind == "wait" else s.kind)
-        for s in sol.segments_per_hoist[0]
-    ]
-    muto = dataclasses.replace(dati, engage_time=0.0, disengage_time=0.0)
+    def spento(s):
+        if s.kind == "wait":
+            return dataclasses.replace(s, kind="empty")
+        if s.kind == "loaded":
+            return dataclasses.replace(s, move=None)
+        return s
+
+    senza = [spento(s) for s in sol.segments_per_hoist[0]]
+    muto = dati
     sol2 = dataclasses.replace(
         sol, segments_per_hoist=[senza, sol.segments_per_hoist[1]]
     )

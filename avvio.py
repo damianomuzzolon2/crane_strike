@@ -147,7 +147,7 @@ def stazione_di_riposo(data: ProblemData, x: float) -> Optional[int]:
 
 def _coda_ferma_in_basso(
     data: ProblemData, fasi: list, stazione: int, *, dalla_fine: bool
-) -> float:
+) -> Optional[float]:
     """Quanti secondi, agli estremi di una presa o di un rilascio, il carroponte
     e' gia' (o e' ancora) fermo col gancio in fondo alla corsa.
 
@@ -159,13 +159,20 @@ def _coda_ferma_in_basso(
 
     Le fasi si guardano una per una e si smette alla prima che non va: una fase
     che alza il gancio, che trasla, o che lo tiene a una quota diversa dal fondo
-    chiude la finestra."""
+    chiude la finestra.
+
+    Zero e None sono due risposte diverse. Zero vuol dire che il carroponte e'
+    fermo col gancio in fondo per UN ISTANTE soltanto -- un aggancio di 0 s:
+    arriva sopra la vasca e comincia subito a sollevare -- e quell'istante e'
+    un punto di avvio buono, perche' li' il carroponte si puo' lasciare. None
+    vuol dire che all'estremo della presa o del rilascio il gancio NON e' fermo
+    in fondo nemmeno per un istante."""
     fondo = -data.corsa_verticale(stazione)
-    quanto = 0.0
+    quanto: Optional[float] = None
     for f in reversed(fasi) if dalla_fine else fasi:
         if f.trasla or f.z_start != f.z_end or abs(f.z_start - fondo) > _TOL_X:
             break
-        quanto += f.duration
+        quanto = (quanto or 0.0) + f.duration
     return quanto
 
 
@@ -213,20 +220,23 @@ def finestre_di_riposo(data: ProblemData, segs: list[Segment]) -> list[Riposo]:
             testa = _coda_ferma_in_basso(
                 data, data.pick_phases(k), k, dalla_fine=False
             )
-            if testa > 0:
+            if testa is not None:
                 t0 = s.t_start - data.pick_time_at(k)
                 grezze.append((t0, t0 + testa, data.approach_position(k)))
             coda = _coda_ferma_in_basso(
                 data, data.release_phases(k + 1), k + 1, dalla_fine=True
             )
-            if coda > 0:
+            if coda is not None:
                 t1 = s.t_end + data.release_time_at(k + 1)
                 grezze.append((t1 - coda, t1, data.approach_position(k + 1)))
 
     fuori: list[Riposo] = []
     for inizio, fine, x in sorted(grezze):
         stazione = stazione_di_riposo(data, x)
-        if stazione is None or fine <= inizio + _TOL_T:
+        # Una finestra lunga zero si tiene: e' l'istante in cui il carroponte
+        # arriva e solleva subito (o rilascia e riparte subito), fermo in basso
+        # per un attimo, e per l'avvio un attimo basta.
+        if stazione is None or fine < inizio - _TOL_T:
             continue
         if (
             fuori
@@ -304,9 +314,7 @@ def _nel_periodo(finestre: list[Riposo], T: float) -> list[tuple[float, float]]:
     non ha bisogno che stiano dentro [0, T)."""
     grezze: list[tuple[float, float]] = []
     for f in finestre:
-        durata = min(f.t_fine - f.t_inizio, T)
-        if durata <= _TOL_T:
-            continue
+        durata = min(max(f.t_fine - f.t_inizio, 0.0), T)
         a = f.t_inizio % T
         grezze.append((a, a + durata))
     if not grezze:
