@@ -29,10 +29,11 @@ carroponti di tanti secondi di percorso".
 A quell'errore -- che di solito e' zero -- ci arriva quasi sempre PIU' DI UN
 tratto del ciclo, e sono tratti lontani fra loro. Sono equivalenti, e sceglierne
 uno non e' una decisione che questo modulo abbia gli elementi per prendere:
-quale convenga dipende dall'impianto. `trova_avvii` li restituisce tutti, in
-ordine di tempo, e nella finestra si scorrono col pulsante "Avvio";
-`trova_avvio` da' il primo, che e' quello che si scrive dove non c'e' nessuno a
-scegliere.
+quale convenga dipende dall'impianto. `trova_avvii` li restituisce tutti, e
+nella finestra si scorrono col pulsante "Avvio". Il primo della lista -- quello
+che `trova_avvio` da' e che si scrive dove non c'e' nessuno a scegliere -- e'
+quello con PIU' MARGINE: un carroponte fermo in basso anche solo per un istante
+e' a riposo, ma fra un istante cosi' e un tratto largo si propone il tratto.
 
 Il modulo non decide niente sul ciclogramma e non lo cambia: legge i segmenti
 che ci sono gia' -- gli stessi che disegnano il grafico e che muovono la
@@ -100,13 +101,17 @@ class Avvio:
 
     `indice` e `totale` dicono che posto occupa fra gli istanti EQUIVALENTI --
     quelli che sbagliano esattamente quanto lui -- perche' quasi sempre ce n'e'
-    piu' d'uno e non c'e' nessuna ragione tecnica per preferirne uno: la
-    ragione la sa chi conosce l'impianto. Vedi `trova_avvii`."""
+    piu' d'uno: il primo e' quello con piu' margine, gli altri seguono in
+    ordine di tempo lungo il giro. Vedi `trova_avvii`."""
 
     t: float  # [s] dentro il ciclo, in [0, T)
     posizioni: list[PosizioneAvvio]
-    indice: int = 0  # 0-based, in ordine di tempo crescente
+    indice: int = 0  # 0-based, nell'ordine di `trova_avvii`
     totale: int = 1
+    # [s] per quanto, prima e dopo `t`, tutti i carroponti restano a riposo:
+    # il lato piu' stretto del carroponte piu' stretto. Zero per un istante
+    # che dura un attimo e per un avvio approssimato.
+    margine: float = 0.0
 
     @property
     def errore(self) -> float:
@@ -147,7 +152,7 @@ def stazione_di_riposo(data: ProblemData, x: float) -> Optional[int]:
 
 def _coda_ferma_in_basso(
     data: ProblemData, fasi: list, stazione: int, *, dalla_fine: bool
-) -> float:
+) -> Optional[float]:
     """Quanti secondi, agli estremi di una presa o di un rilascio, il carroponte
     e' gia' (o e' ancora) fermo col gancio in fondo alla corsa.
 
@@ -159,13 +164,20 @@ def _coda_ferma_in_basso(
 
     Le fasi si guardano una per una e si smette alla prima che non va: una fase
     che alza il gancio, che trasla, o che lo tiene a una quota diversa dal fondo
-    chiude la finestra."""
+    chiude la finestra.
+
+    Zero e None sono due risposte diverse. Zero vuol dire che il carroponte e'
+    fermo col gancio in fondo per UN ISTANTE soltanto -- un aggancio di 0 s:
+    arriva sopra la vasca e comincia subito a sollevare -- e quell'istante e'
+    un punto di avvio buono, perche' li' il carroponte si puo' lasciare. None
+    vuol dire che all'estremo della presa o del rilascio il gancio NON e' fermo
+    in fondo nemmeno per un istante."""
     fondo = -data.corsa_verticale(stazione)
-    quanto = 0.0
+    quanto: Optional[float] = None
     for f in reversed(fasi) if dalla_fine else fasi:
         if f.trasla or f.z_start != f.z_end or abs(f.z_start - fondo) > _TOL_X:
             break
-        quanto += f.duration
+        quanto = (quanto or 0.0) + f.duration
     return quanto
 
 
@@ -213,20 +225,23 @@ def finestre_di_riposo(data: ProblemData, segs: list[Segment]) -> list[Riposo]:
             testa = _coda_ferma_in_basso(
                 data, data.pick_phases(k), k, dalla_fine=False
             )
-            if testa > 0:
+            if testa is not None:
                 t0 = s.t_start - data.pick_time_at(k)
                 grezze.append((t0, t0 + testa, data.approach_position(k)))
             coda = _coda_ferma_in_basso(
                 data, data.release_phases(k + 1), k + 1, dalla_fine=True
             )
-            if coda > 0:
+            if coda is not None:
                 t1 = s.t_end + data.release_time_at(k + 1)
                 grezze.append((t1 - coda, t1, data.approach_position(k + 1)))
 
     fuori: list[Riposo] = []
     for inizio, fine, x in sorted(grezze):
         stazione = stazione_di_riposo(data, x)
-        if stazione is None or fine <= inizio + _TOL_T:
+        # Una finestra lunga zero si tiene: e' l'istante in cui il carroponte
+        # arriva e solleva subito (o rilascia e riparte subito), fermo in basso
+        # per un attimo, e per l'avvio un attimo basta.
+        if stazione is None or fine < inizio - _TOL_T:
             continue
         if (
             fuori
@@ -304,9 +319,7 @@ def _nel_periodo(finestre: list[Riposo], T: float) -> list[tuple[float, float]]:
     non ha bisogno che stiano dentro [0, T)."""
     grezze: list[tuple[float, float]] = []
     for f in finestre:
-        durata = min(f.t_fine - f.t_inizio, T)
-        if durata <= _TOL_T:
-            continue
+        durata = min(max(f.t_fine - f.t_inizio, 0.0), T)
         a = f.t_inizio % T
         grezze.append((a, a + durata))
     if not grezze:
@@ -362,7 +375,8 @@ def _estensione(
 
 
 def trova_avvii(data: ProblemData, solution: Solution) -> list[Avvio]:
-    """TUTTI gli istanti di avvio equivalenti, in ordine di tempo crescente.
+    """TUTTI gli istanti di avvio equivalenti: per primo quello con piu'
+    margine, poi gli altri in ordine di tempo lungo il giro.
 
     Si guardano gli istanti CANDIDATI, che sono gli estremi delle finestre di
     riposo: fra due estremi consecutivi la somma degli errori e' lineare in `t`,
@@ -389,6 +403,15 @@ def trova_avvii(data: ProblemData, solution: Solution) -> list[Avvio]:
         in cui l'ultimo carroponte si e' appena fermato, e avviare esattamente
         li' vuol dire non avere nessun margine ne' prima ne' dopo;
       - altrimenti il PRIMO, perche' a pari errore si tiene il primo.
+
+    L'ORDINE della lista: si comincia dall'istante con piu' margine (a parita',
+    il primo nel ciclo) e si prosegue in ordine di tempo, girando. Il primo e'
+    quello che finisce nel file dei risultati e quello che la finestra mostra
+    appena calcolato, e deve essere il piu' comodo: un istante lungo un attimo
+    -- un carroponte che arriva sopra una vasca e solleva subito -- e' un avvio
+    esatto, ma senza margine ne' prima ne' dopo, e se c'e' un tratto in cui
+    tutti restano fermi per secondi si propone quello. Gli altri seguono nel
+    loro ordine naturale, cosi' il pulsante li scorre come si scorre il giro.
 
     Lista vuota se non c'e' niente da leggere."""
     T = solution.T
@@ -454,9 +477,10 @@ def trova_avvii(data: ProblemData, solution: Solution) -> list[Avvio]:
         tratti[0] = tratti.pop() + tratti[0]
 
     esatto = minimo <= _TOL_T * max(1, len(con_finestre))
-    istanti = []
+    istanti: list[tuple[float, float]] = []  # (istante, margine)
     for tratto in tratti:
         t = tratto[0]
+        margine = 0.0
         if esatto and con_finestre:
             # Il margine lo misura ogni carroponte sulla finestra che contiene
             # l'istante, e quello che vale per tutti e' il piu' stretto. Si
@@ -466,10 +490,23 @@ def trova_avvii(data: ProblemData, solution: Solution) -> list[Avvio]:
             dietro = min(d for d, _ in margini)
             avanti = min(a for _, a in margini)
             t += (avanti - dietro) / 2.0
-        istanti.append(t % T)
+            # centrato, ha davanti e dietro lo stesso spazio
+            margine = max(0.0, (dietro + avanti) / 2.0)
+        istanti.append((t % T, margine))
+
+    # Prima il piu' largo, poi gli altri in ordine di tempo lungo il giro. Un
+    # margine si confronta a meno della tolleranza: due tratti larghi uguali
+    # differiscono solo per arrotondamenti, e allora vince il primo nel ciclo.
+    istanti.sort()
+    if istanti:
+        largo = max(m for _, m in istanti)
+        primo = next(
+            i for i, (_, m) in enumerate(istanti) if m >= largo - _TOL_T
+        )
+        istanti = istanti[primo:] + istanti[:primo]
 
     fuori = []
-    for i, t in enumerate(sorted(istanti)):
+    for i, (t, margine) in enumerate(istanti):
         posizioni = []
         for h, segs, finestre in carri:
             x = posizione_a(segs, t, T)
@@ -483,17 +520,25 @@ def trova_avvii(data: ProblemData, solution: Solution) -> list[Avvio]:
                 )
             )
         fuori.append(
-            Avvio(t=t, posizioni=posizioni, indice=i, totale=len(istanti))
+            Avvio(
+                t=t,
+                posizioni=posizioni,
+                indice=i,
+                totale=len(istanti),
+                margine=margine,
+            )
         )
     return fuori
 
 
 def trova_avvio(data: ProblemData, solution: Solution) -> Optional[Avvio]:
-    """Il PRIMO degli istanti di avvio, o None se non ce n'e' nessuno.
+    """Il PRIMO degli istanti di avvio -- quello con piu' margine --, o None
+    se non ce n'e' nessuno.
 
     E' quello che si scrive quando non c'e' nessuno a scegliere: il file dei
-    risultati, il grafico salvato da riga di comando. Gli altri, altrettanto
-    buoni, li da' `trova_avvii`, e nella finestra si scorrono col pulsante."""
+    risultati, il grafico salvato da riga di comando. Gli altri, che sbagliano
+    altrettanto, li da' `trova_avvii`, e nella finestra si scorrono col
+    pulsante."""
     avvii = trova_avvii(data, solution)
     return avvii[0] if avvii else None
 

@@ -302,16 +302,22 @@ def test_carro_senza_riposo(d: ProblemData):
     print("\n[6] un carroponte che non si ferma mai non blocca il calcolo")
     sol, dati = due_carroponti(d, 70.0)
     # Si toglie al primo carroponte ogni istante di riposo: le attese
-    # diventano traslazioni di lunghezza nulla, e aggancio e sgancio
-    # spariscono. E' un caso che un impianto vero non da', ma il programma non
-    # deve ne' sbagliare ne' fermarsi se ci capita.
+    # diventano traslazioni di lunghezza nulla, e i tratti a carico perdono la
+    # loro mossa, cosi' non ci sono piu' ne' l'aggancio ne' lo sgancio. Non
+    # basterebbe azzerarne i tempi: un aggancio di 0 s e' comunque un istante
+    # fermo in basso, e conta. E' un caso che un impianto vero non da', ma il
+    # programma non deve ne' sbagliare ne' fermarsi se ci capita.
     import dataclasses
 
-    senza = [
-        dataclasses.replace(s, kind="empty" if s.kind == "wait" else s.kind)
-        for s in sol.segments_per_hoist[0]
-    ]
-    muto = dataclasses.replace(dati, engage_time=0.0, disengage_time=0.0)
+    def spento(s):
+        if s.kind == "wait":
+            return dataclasses.replace(s, kind="empty")
+        if s.kind == "loaded":
+            return dataclasses.replace(s, move=None)
+        return s
+
+    senza = [spento(s) for s in sol.segments_per_hoist[0]]
+    muto = dati
     sol2 = dataclasses.replace(
         sol, segments_per_hoist=[senza, sol.segments_per_hoist[1]]
     )
@@ -390,9 +396,19 @@ def test_tutti_gli_istanti(d: ProblemData):
     sol, dati = due_carroponti(d, 50.0)
     avvii = trova_avvii(dati, sol)
     check(len(avvii) > 1, f"ne trova piu' d'uno ({len(avvii)})")
+    # Il primo e' quello con piu' margine; dopo di lui gli altri seguono in
+    # ordine di tempo lungo il giro, cioe' la lista e' quella ordinata per
+    # tempo fatta cominciare da lui.
+    ordinati = sorted(avvii, key=lambda a: a.t)
+    da = ordinati.index(avvii[0])
     check(
-        [a.t for a in avvii] == sorted(a.t for a in avvii),
-        "sono in ordine di tempo crescente",
+        [a.t for a in avvii] == [a.t for a in ordinati[da:] + ordinati[:da]],
+        "sono in ordine di tempo lungo il giro",
+    )
+    check(
+        avvii[0].margine >= max(a.margine for a in avvii) - 1e-9,
+        f"e il primo e' quello con piu' margine "
+        f"({[round(a.margine, 2) for a in avvii]})",
     )
     check(
         all(a.indice == i and a.totale == len(avvii) for i, a in enumerate(avvii)),
