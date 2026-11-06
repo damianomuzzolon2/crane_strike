@@ -254,6 +254,11 @@ class Applicazione(tk.Tk):
         # prima non deve fermare quello dopo appena parte.
         self._interruzione: Interruzione | None = None
         self._inizio_lavoro = 0.0
+        # Da quando e' cominciata la pausa in corso, None se non ce n'e'; e
+        # l'ultimo tentativo annunciato, per non contare due volte quello che
+        # una pausa fa rifare. Li riazzera _avvia_lavoro.
+        self._inizio_pausa: float | None = None
+        self._ultimo_tentativo = None
         # Quanto e' durato il calcolo che ha prodotto il ciclogramma che si sta
         # guardando, in secondi. None quando non viene da un calcolo -- una
         # linea riletta da file, o un ciclogramma composto da zero. Serve a
@@ -404,6 +409,19 @@ class Applicazione(tk.Tk):
             barra, text="Ferma", command=self._ferma_calcolo, state=tk.DISABLED
         )
         self.btn_ferma.pack(side=tk.LEFT, padx=(6, 0))
+        # Pausa e Riprendi sono lo stesso pulsante. La pausa vale fra un
+        # tentativo e l'altro della ricerca (vedi model.Interruzione): il
+        # tentativo in corso si ferma subito e alla ripresa si rifa' da capo,
+        # le soluzioni gia' trovate restano. Larghezza fissa, perche'
+        # l'etichetta cambia.
+        self.btn_pausa = ttk.Button(
+            barra,
+            text="Pausa",
+            width=9,
+            command=self._pausa_calcolo,
+            state=tk.DISABLED,
+        )
+        self.btn_pausa.pack(side=tk.LEFT, padx=(6, 0))
         self.btn_proposta = ttk.Button(
             barra, text="Calcola man", command=self._componi_da_zero
         )
@@ -1358,7 +1376,12 @@ class Applicazione(tk.Tk):
         da `self`: il thread non deve dipendere da uno stato della finestra che
         nel frattempo potrebbe cambiare."""
         self._lavoro_in_corso = True
-        interruzione = self._interruzione = Interruzione()
+        # su_pausa gira nel thread di lavoro: passa dalla coda come il resto
+        interruzione = self._interruzione = Interruzione(
+            su_pausa=lambda in_pausa: self._coda.put(("pausa", in_pausa))
+        )
+        self._inizio_pausa = None
+        self._ultimo_tentativo = None
         # Si cronometra QUI, e non dentro il solutore: quello che interessa e'
         # quanto ha aspettato chi guarda lo schermo, che comprende tutti i
         # tentativi di solve_auto_hoists e la verifica finale. Il tempo che
@@ -1405,6 +1428,66 @@ class Applicazione(tk.Tk):
         self._interruzione.ferma()
         self._aggiorna_stato_pulsanti()
         self._stato("Interruzione in corso...")
+
+    def _pausa_calcolo(self):
+        """Pulsante 'Pausa' / 'Riprendi'. Come Ferma chiede e basta: che la
+        pausa sia cominciata (o finita) lo dice il thread di lavoro, con un
+        messaggio "pausa" nella coda -- vedi _controlla_coda."""
+        interruzione = self._interruzione
+        if not self._lavoro_in_corso or interruzione is None:
+            return
+        if interruzione.in_pausa:
+            interruzione.riprendi()
+            self._stato("Riprendo il calcolo...")
+        else:
+            interruzione.pausa()
+            self._stato("Metto in pausa...")
+        self._aggiorna_pulsante_pausa()
+
+    def _aggiorna_pulsante_pausa(self):
+        """Acceso solo quando una pausa si puo' fare davvero (durante la
+        ricerca, non nelle rifiniture che seguono) o ce n'e' una da finire.
+        Lo si richiama a ogni giro di _controlla_coda: quando la ricerca
+        entra ed esce dal tratto pausabile non lo dice a nessuno."""
+        interruzione = self._interruzione
+        in_pausa = (
+            self._lavoro_in_corso
+            and interruzione is not None
+            and interruzione.in_pausa
+            and not interruzione.richiesta
+        )
+        acceso = in_pausa or (
+            self._lavoro_in_corso
+            and interruzione is not None
+            and interruzione.pausabile
+        )
+        testo = "Riprendi" if in_pausa else "Pausa"
+        stato = tk.NORMAL if acceso else tk.DISABLED
+        if self.btn_pausa.cget("text") != testo:
+            self.btn_pausa.configure(text=testo)
+        if str(self.btn_pausa.cget("state")) != stato:
+            self.btn_pausa.configure(state=stato)
+
+    def _mostra_pausa(self, in_pausa: bool):
+        """La pausa e' cominciata o finita davvero, nel thread di lavoro. Il
+        tempo passato in pausa non e' tempo di calcolo: si sposta in avanti
+        l'inizio del lavoro, cosi' la durata finale e la stima di quanto
+        manca lo ignorano senza doverlo sapere."""
+        adesso = time.monotonic()
+        if in_pausa:
+            self._inizio_pausa = adesso
+            self.avanzamento.stop()
+            self._stato(
+                "In pausa - premi Riprendi per continuare: il tentativo "
+                "interrotto si rifa' da capo, le soluzioni trovate restano"
+            )
+        else:
+            if self._inizio_pausa is not None:
+                self._inizio_lavoro += adesso - self._inizio_pausa
+            self._inizio_pausa = None
+            if self._interruzione is not None and not self._interruzione.richiesta:
+                self._stato("Riprendo il calcolo...")
+        self._aggiorna_pulsante_pausa()
 
     def _mostra_avanzamento(
         self,
@@ -1462,8 +1545,13 @@ class Applicazione(tk.Tk):
             self.avanzamento.configure(mode="determinate", maximum=totale)
         self.avanzamento.configure(maximum=totale, value=indice)
 
-        conclusi = self._tentativi_avviati
-        self._tentativi_avviati += 1
+        # Un tentativo interrotto da una pausa si rifa': si riannuncia con
+        # lo stesso indice, e non va contato due volte.
+        chiave = (n_hoists, indice)
+        if chiave != self._ultimo_tentativo:
+            self._ultimo_tentativo = chiave
+            self._tentativi_avviati += 1
+        conclusi = self._tentativi_avviati - 1
         testo = (
             f"{n_hoists} carropont{'e' if n_hoists == 1 else 'i'}: "
             f"tentativo {indice} di {totale}"
@@ -1610,10 +1698,14 @@ class Applicazione(tk.Tk):
                     self.avanzamento.start()
                     self._stato(carico)
                     continue
+                if tipo == "pausa":
+                    self._mostra_pausa(carico)
+                    continue
                 if tipo != "progresso":
                     break
                 self._mostra_avanzamento(*carico)
         except queue.Empty:
+            self._aggiorna_pulsante_pausa()
             self.after(80, self._controlla_coda)
             return
 
@@ -3203,6 +3295,7 @@ class Applicazione(tk.Tk):
             and not self._interruzione.richiesta
         )
         self.btn_ferma.configure(state=tk.NORMAL if in_corso else tk.DISABLED)
+        self._aggiorna_pulsante_pausa()
         self.btn_proposta.configure(state=stato)
         # "Modifica" si abilita quando c'e' qualcosa da modificare, e basta:
         # non ha una sorgente da scegliere, perche' il ciclogramma corrente e'

@@ -409,6 +409,13 @@ STRUTTURE = [
     ("h3", "Interruzione -- fermare un calcolo da un altro thread"),
     ("c", "model.Interruzione"),
     ("p",
+     "Sa anche METTERE IN PAUSA, con pausa() e riprendi(), ma solo fra un "
+     "tentativo e l'altro di solve_auto_zones: il tentativo in corso si ferma, "
+     "il suo esito si butta e alla ripresa lo si rifa'. Fuori da quel tratto "
+     "la pausa non ferma niente. `da_lasciare` e' la condizione che solve "
+     "guarda mentre costruisce il modello: uno stop, o una pausa che li' "
+     "vale."),
+    ("p",
      "La richiesta di fermare un calcolo. L'interfaccia ne crea una a ogni "
      "'Calcola auto', la passa al thread che calcola, e il pulsante Ferma "
      "chiama ferma(). Una ricerca automatica puo' durare decine di minuti, e "

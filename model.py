@@ -108,6 +108,7 @@ APPROCCIO SCELTO E SUE ASSUNZIONI (importante leggere prima di usare il codice)
 
 from __future__ import annotations
 
+import contextlib
 import dataclasses
 import itertools
 import math
@@ -2114,28 +2115,119 @@ class Interruzione:
     ancora registrato, e andrebbe persa -- il calcolo durerebbe tutto il suo
     limite di tempo. Registrare e fermare sotto lo stesso lucchetto garantisce
     che o il solutore e' gia' registrato, e viene fermato, o la richiesta c'e'
-    gia', e il solutore non parte."""
+    gia', e il solutore non parte.
 
-    def __init__(self) -> None:
+    METTERE IN PAUSA e' un'altra cosa: si vuole liberare il computer per un
+    po' e poi continuare. CP-SAT non sa sospendersi, e congelarlo da fuori non
+    servirebbe -- il suo limite di tempo corre in tempo reale, e alla ripresa
+    il tentativo scadrebbe subito. Allora la pausa vale solo fra un tentativo
+    e l'altro della ricerca automatica (`solve_auto_zones`), che e' l'unico
+    punto dove ripartire non costa niente: il tentativo in corso si ferma
+    subito, come con `ferma()`, e il suo esito si BUTTA; alla ripresa lo si
+    rifa' da capo e si continua con i successivi, con le soluzioni gia'
+    trovate ancora in mano. Si perde al massimo un tentativo.
+
+    Fuori dalla ricerca -- le rifiniture sulla soluzione scelta, la diagnosi
+    -- una pausa non si puo' onorare: fermare quei solutori ne cambierebbe il
+    risultato. La' `pausa()` resta in attesa del prossimo punto buono, e se non
+    ce n'e' piu' si dimentica a fine ricerca. `pausabile` dice a chi guarda se
+    in questo momento il pulsante ha senso.
+
+    `su_pausa(in_pausa)`, se data, viene chiamata dal thread di LAVORO quando
+    la pausa comincia davvero e quando finisce: e' il momento esatto in cui
+    il computer smette (e riprende) di lavorare, che chi guarda vuole sapere
+    -- per dirlo, e per non contare quel tempo nella durata del calcolo."""
+
+    def __init__(self, su_pausa=None) -> None:
         self._richiesta = False
         self._blocco = threading.Lock()
+        self._ripresa = threading.Condition(self._blocco)
         self._solutori: list = []
+        self._pausa = False
+        # quante pause sono state chieste in tutto: un tentativo durante il
+        # quale e' cambiato e' stato toccato da una pausa, e va rifatto
+        self._n_pause = 0
+        # >0 mentre si e' dentro una ricerca automatica (vedi `_ricerca`)
+        self._pausabile = 0
+        self.su_pausa = su_pausa
 
     @property
     def richiesta(self) -> bool:
         return self._richiesta
 
+    @property
+    def in_pausa(self) -> bool:
+        return self._pausa
+
+    @property
+    def pausabile(self) -> bool:
+        return self._pausabile > 0 and not self._richiesta
+
+    @property
+    def da_lasciare(self) -> bool:
+        """True se chi costruisce un modello deve smettere: per uno stop, o
+        per una pausa che in questo punto si puo' onorare."""
+        return self._richiesta or (self._pausa and self._pausabile > 0)
+
     def ferma(self) -> None:
-        """Da qualunque thread. Chiamarla piu' volte non fa danni."""
+        """Da qualunque thread. Chiamarla piu' volte non fa danni. Ferma anche
+        un calcolo in pausa, senza bisogno di riprenderlo prima."""
         with self._blocco:
             self._richiesta = True
             for solutore in self._solutori:
                 solutore.StopSearch()
+            self._ripresa.notify_all()
+
+    def pausa(self) -> None:
+        """Da qualunque thread. Vedi la docstring della classe."""
+        with self._blocco:
+            if self._pausa or self._richiesta:
+                return
+            self._pausa = True
+            self._n_pause += 1
+            if self._pausabile:
+                for solutore in self._solutori:
+                    solutore.StopSearch()
+
+    def riprendi(self) -> None:
+        """Da qualunque thread. Senza una pausa in corso non fa niente."""
+        with self._blocco:
+            self._pausa = False
+            self._ripresa.notify_all()
+
+    def _attendi_ripresa(self) -> None:
+        """Gira nel thread di lavoro: se c'e' una pausa, aspetta che finisca
+        (o che arrivi uno stop). Senza pausa torna subito."""
+        with self._blocco:
+            if not self._pausa or self._richiesta:
+                return
+        if self.su_pausa is not None:
+            self.su_pausa(True)
+        with self._blocco:
+            while self._pausa and not self._richiesta:
+                self._ripresa.wait()
+        if self.su_pausa is not None:
+            self.su_pausa(False)
+
+    @contextlib.contextmanager
+    def _ricerca(self):
+        """Il tratto in cui una pausa si puo' onorare. All'uscita una pausa
+        rimasta in sospeso si dimentica: non c'e' piu' un punto dove farla."""
+        with self._blocco:
+            self._pausabile += 1
+        try:
+            yield
+        finally:
+            with self._blocco:
+                self._pausabile -= 1
+                if not self._pausabile:
+                    self._pausa = False
 
     def _registra(self, solutore) -> bool:
-        """False se la richiesta c'e' gia': allora il solutore non va lanciato."""
+        """False se la richiesta c'e' gia' -- o una pausa che qui vale: allora
+        il solutore non va lanciato."""
         with self._blocco:
-            if self._richiesta:
+            if self._richiesta or (self._pausa and self._pausabile):
                 return False
             self._solutori.append(solutore)
             return True
@@ -2334,7 +2426,7 @@ def solve(
             + "\n(solve_auto_zones scarta da solo le suddivisioni non valide)."
         )
 
-    if interruzione is not None and interruzione.richiesta:
+    if interruzione is not None and interruzione.da_lasciare:
         return _soluzione_interrotta()
 
     # Import posticipato: cosi' il resto del modulo (dataclass, cinematica,
@@ -2469,7 +2561,7 @@ def solve(
         # La costruzione del modello e' Python, e su una linea lunga dura
         # parecchi secondi: si guarda se qualcuno ha chiesto di fermare a ogni
         # carroponte, e piu' sotto a ogni confine.
-        if interruzione is not None and interruzione.richiesta:
+        if interruzione is not None and interruzione.da_lasciare:
             return _soluzione_interrotta()
         moves = list(range(z.lo, z.hi + 1))
         n_h = len(moves)
@@ -3047,7 +3139,7 @@ def solve(
 
     n_sep_constraints = 0
     for h in range(data.n_hoists - 1):
-        if interruzione is not None and interruzione.richiesta:
+        if interruzione is not None and interruzione.da_lasciare:
             return _soluzione_interrotta()
         zL, zR = zone_data[h], zone_data[h + 1]
         z_left, z_right = zL["z"], zR["z"]
@@ -3220,7 +3312,7 @@ def solve(
             return intervalli[chiave]
 
         for (h1, h2), coppie in sorted(coppie_il.items()):
-            if interruzione is not None and interruzione.richiesta:
+            if interruzione is not None and interruzione.da_lasciare:
                 return _soluzione_interrotta()
             for a, b in sorted(coppie):
                 # a coppie, come per la non collisione: le prenotazioni di uno
@@ -4838,41 +4930,64 @@ def solve_auto_zones(
     # adesso gli lascia qualcosa in mano o niente.
     n_valide = 0
 
-    for indice, zones in enumerate(da_provare, start=1):
-        if interruzione is not None and interruzione.richiesta:
-            break
-        if su_tentativo is not None:
-            su_tentativo(
-                n_hoists,
-                indice,
-                len(da_provare),
-                n_valide,
-                None if best_solution is None else best_solution.T,
-                None
-                if best_solution is None
-                else best_solution.raw.get("errore_pesato"),
-            )
-        candidate_data = dataclasses.replace(data, zones=zones)
-        n_tried += 1
-        sol = solve(
-            candidate_data,
-            time_limit_s=time_limit_per_candidate,
-            interruzione=interruzione,
-        )
-        per_stato[sol.status] = per_stato.get(sol.status, 0) + 1
-        if log_progress:
-            zone_str = ", ".join(f"[{z.lo}-{z.hi}]" for z in zones)
-            info = f"T={sol.T:.2f}s" if sol.T is not None else sol.status
-            if sol.raw.get("errore_pesato") is not None:
-                info += f", scarto pesato {sol.raw['errore_pesato']:.2f}"
-            print(f"  zone {zone_str}: {info}")
-        if sol.status in ("OPTIMAL", "FEASIBLE") and sol.T is not None:
-            n_valide += 1
-            if best_solution is None or _chiave_migliore(sol) < _chiave_migliore(
-                best_solution
-            ):
-                best_solution = sol
-                best_zones = zones
+    # La pausa (vedi `Interruzione`) vale solo qui dentro: un tentativo
+    # toccato da una pausa si butta, si aspetta la ripresa e lo si rifa'.
+    with (
+        interruzione._ricerca()
+        if interruzione is not None
+        else contextlib.nullcontext()
+    ):
+        for indice, zones in enumerate(da_provare, start=1):
+            candidate_data = dataclasses.replace(data, zones=zones)
+            sol = None
+            while True:
+                if interruzione is not None:
+                    interruzione._attendi_ripresa()
+                    if interruzione.richiesta:
+                        break
+                    pause_prima = interruzione._n_pause
+                if su_tentativo is not None:
+                    su_tentativo(
+                        n_hoists,
+                        indice,
+                        len(da_provare),
+                        n_valide,
+                        None if best_solution is None else best_solution.T,
+                        None
+                        if best_solution is None
+                        else best_solution.raw.get("errore_pesato"),
+                    )
+                sol = solve(
+                    candidate_data,
+                    time_limit_s=time_limit_per_candidate,
+                    interruzione=interruzione,
+                )
+                if interruzione is None:
+                    break
+                if interruzione._n_pause != pause_prima or interruzione.in_pausa:
+                    # toccato da una pausa: l'esito non vale niente
+                    sol = None
+                if sol is not None or interruzione.richiesta:
+                    break
+            if sol is None:
+                # fermato mentre era in pausa, o prima di risolvere il
+                # tentativo che la pausa aveva interrotto: quello non conta
+                break
+            n_tried += 1
+            per_stato[sol.status] = per_stato.get(sol.status, 0) + 1
+            if log_progress:
+                zone_str = ", ".join(f"[{z.lo}-{z.hi}]" for z in zones)
+                info = f"T={sol.T:.2f}s" if sol.T is not None else sol.status
+                if sol.raw.get("errore_pesato") is not None:
+                    info += f", scarto pesato {sol.raw['errore_pesato']:.2f}"
+                print(f"  zone {zone_str}: {info}")
+            if sol.status in ("OPTIMAL", "FEASIBLE") and sol.T is not None:
+                n_valide += 1
+                if best_solution is None or _chiave_migliore(sol) < _chiave_migliore(
+                    best_solution
+                ):
+                    best_solution = sol
+                    best_zones = zones
 
     conti = {
         "n_tried": n_tried,
