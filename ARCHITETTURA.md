@@ -1075,6 +1075,19 @@ calcolo fermato e' **UNKNOWN con `raw["interrotto"]`, mai INFEASIBLE**: non ha
 dimostrato niente, e l'interfaccia non deve lanciare la diagnosi ne' cancellare
 il ciclogramma che c'era.
 
+**Mettere in pausa.** `Pausa` chiama `Interruzione.pausa()`, `Riprendi`
+`riprendi()`. CP-SAT non sa sospendersi, e congelarlo da fuori non servirebbe:
+`max_time_in_seconds` e' tempo reale, e alla ripresa il tentativo scadrebbe.
+Allora la pausa vale solo dentro il ciclo dei tentativi di `solve_auto_zones`
+(il tratto `Interruzione._ricerca`): il solutore in corso riceve
+`StopSearch()`, il suo esito si butta (un contatore di pause dice se un
+tentativo ne e' stato toccato), il thread aspetta su una `Condition` e alla
+ripresa rifa' lo stesso tentativo. Fuori da quel tratto la pausa non ferma
+niente: le rifiniture cambierebbero risultato. Il thread annuncia inizio e
+fine della pausa con `su_pausa`, che l'interfaccia passa nella coda: serve a
+dirlo nella barra e a spostare in avanti `_inizio_lavoro`, cosi' durata e stima
+di quanto manca ignorano il tempo in pausa.
+
 ### 9.1 Le due viste, e perche' si modifica solo su una
 
 | vista | quando | cosa |
