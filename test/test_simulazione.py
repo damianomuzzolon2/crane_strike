@@ -340,6 +340,22 @@ def test_assegnazione_parziale(d: ProblemData):
     )
 
 
+def ferma(finestra):
+    """Mette in pausa una FinestraSimulazione appena creata, PRIMA di qualunque
+    update(), e la restituisce.
+
+    La finestra parte animandosi da sola: `_passo` ridisegna e si riprogramma
+    ogni PASSO_MS (40 ms). update() esegue eventi finche' ce ne sono di pronti,
+    e se un ridisegno dura piu' del passo -- su una macchina lenta, come il
+    runner della CI -- il timer successivo e' gia' scaduto quando ricontrolla:
+    update() non torna piu' e la suite resta appesa fino al timeout. Sul PC il
+    ridisegno sta sotto i 40 ms e non si vede niente: per questo va fatto
+    SEMPRE, non solo dove si e' visto il problema."""
+    if finestra._in_moto:
+        finestra.avvia_o_ferma()
+    return finestra
+
+
 def test_finestra(d: ProblemData):
     """La finestra viene aperta davvero e pilotata da codice.
 
@@ -357,7 +373,8 @@ def test_finestra(d: ProblemData):
     radice.geometry("200x100")
     try:
         f = FinestraSimulazione(radice, dati, sol, titolo_linea="prova")
-        radice.update()
+        # Si guarda che parta PRIMA di qualunque update(): lasciata in moto,
+        # su una macchina lenta update() non torna piu' (vedi `ferma`).
         check(f._in_moto, "parte da sola: e' quello che si e' chiesto guardandola")
         f.avvia_o_ferma()  # da qui in poi il tempo lo muoviamo noi
         radice.update()
@@ -1041,7 +1058,7 @@ def test_cambio_quota():
     try:
         from simulazione import FinestraSimulazione
 
-        f = FinestraSimulazione(radice, dati, sol)
+        f = ferma(FinestraSimulazione(radice, dati, sol))
         f.update()
         for verso, stazione, zona in (
             ("carico", 0, d.cambio_quota_carico),
@@ -1066,7 +1083,7 @@ def test_cambio_quota():
         # e il piano gli sta giusto sotto: la regola e' la stessa, cambia solo
         # dove il telaio viene posato.
         sol_n, dati_n = proposta_semplice(dati_prova())
-        g = FinestraSimulazione(radice, dati_n, sol_n)
+        g = ferma(FinestraSimulazione(radice, dati_n, sol_n))
         g.update()
         y0 = dati_n.station_position(0)
         check(
@@ -1087,7 +1104,7 @@ def test_cambio_quota():
             tanks[nome] = _dc.replace(tanks[nome], lift_height=600.0)
         con_corsa = _dc.replace(dati_n, tanks=tanks)
         sol_c, dati_c = proposta_semplice(con_corsa)
-        h = FinestraSimulazione(radice, dati_c, sol_c)
+        h = ferma(FinestraSimulazione(radice, dati_c, sol_c))
         h.update()
         estremi = [dati_c.station_position(0), dati_c.station_position(-1)]
         check(
@@ -1289,7 +1306,7 @@ def test_vasca_fuori_percorso():
     radice.geometry("200x100")
     try:
         sol, dati = proposta_semplice(dati_f)
-        f = FinestraSimulazione(radice, dati, sol)
+        f = ferma(FinestraSimulazione(radice, dati, sol))
         f.update()
         check(
             f.posizioni_fuori_percorso == {pos},

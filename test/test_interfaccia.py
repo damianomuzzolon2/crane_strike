@@ -17,6 +17,7 @@ Per eseguirlo:
 
 from __future__ import annotations
 
+import contextlib
 import dataclasses
 import os
 import sys
@@ -85,6 +86,80 @@ def pompa(app, secondi_max=1800.0):
         time.sleep(0.02)
     app.update()
     return not app._lavoro_in_corso
+
+
+class CalcoliRicordati:
+    """Il calcolo automatico della linea d'esempio fatto UNA volta sola.
+
+    Quasi ogni test ha bisogno di "una finestra con la linea gia' risolta",
+    e ognuno rifaceva da capo la stessa ricerca completa -- tutte le
+    suddivisioni, la rifinitura, l'allineamento dell'avvio. Col solutore
+    deterministico e' ogni volta lo stesso risultato, e sul runner della CI
+    (4 processori) costava minuti a colpo: il file sforava le tre ore.
+
+    Si ricorda quindi l'esito di `Applicazione._risolvi`, che e' una funzione
+    della sola configurazione e gira nel thread di lavoro: tutto il resto --
+    il thread, la coda, i pulsanti, la barra di stato, il disegno -- passa
+    ancora dal percorso vero. Ogni chiamata riceve una COPIA, cosi' un test
+    che ritocca la soluzione non sporca quella dei successivi.
+
+    Il risultato arriva alla finestra solo col prossimo `after(80, ...)` di
+    `_controlla_coda`: anche pronto subito, dopo un `update()` il calcolo
+    risulta ancora in corso, come serve a test_scheda_chiusa_durante_il_calcolo.
+
+    I test che provano il CALCOLO stesso -- quanto dura, l'avanzamento
+    tentativo per tentativo -- lo vogliono vero: `with CALCOLI.veri():`."""
+
+    def __init__(self):
+        self._esiti: dict[str, tuple] = {}
+        self._veri = 0
+        self._originale = None
+        self.riusati = 0
+
+    def installa(self):
+        import copy
+        import interfaccia
+
+        originale = self._originale = interfaccia.Applicazione._risolvi
+        # Quello che `_risolvi` chiama. Un test che ne sostituisce uno con un
+        # finto (test_ferma_il_calcolo) vuole che il finto venga chiamato:
+        # allora qui non si ricorda e non si riusa niente.
+        nomi = ("solve_auto_hoists", "rifinisci_soluzione", "allinea_avvio")
+        veri = {n: getattr(interfaccia, n) for n in nomi}
+
+        def risolvi(app, cfg, interruzione):
+            if any(getattr(interfaccia, n) is not f for n, f in veri.items()):
+                return originale(app, cfg, interruzione)
+            chiave = repr((cfg.data, cfg.max_carroponti, cfg.tempo_limite_s))
+            if not self._veri and chiave in self._esiti:
+                self.riusati += 1
+                return copy.deepcopy(self._esiti[chiave])
+            esito = originale(app, cfg, interruzione)
+            # solo un calcolo andato in fondo: uno fermato o fallito dipende
+            # da come e' andato quel test, non dalla linea
+            if esito[0] == "ok" and not interruzione.richiesta:
+                self._esiti[chiave] = copy.deepcopy(esito)
+            return esito
+
+        interfaccia.Applicazione._risolvi = risolvi
+
+    def disinstalla(self):
+        if self._originale is not None:
+            import interfaccia
+
+            interfaccia.Applicazione._risolvi = self._originale
+            self._originale = None
+
+    @contextlib.contextmanager
+    def veri(self):
+        self._veri += 1
+        try:
+            yield
+        finally:
+            self._veri -= 1
+
+
+CALCOLI = CalcoliRicordati()
 
 
 def chiudi(app):
@@ -219,8 +294,9 @@ def test_calcolo_automatico(percorso_linea):
         # solutore si ferma comunque appena dimostra l'ottimo.
         if app.config_linea is not None:
             app.config_linea.tempo_limite_s = 60.0
-        app._calcola_automatico()
-        check(pompa(app), "il calcolo termina")
+        with CALCOLI.veri():
+            app._calcola_automatico()
+            check(pompa(app), "il calcolo termina")
         check(
             app.soluzione is not None
             and app.soluzione.status in ("OPTIMAL", "FEASIBLE"),
@@ -366,8 +442,9 @@ def test_avanzamento_del_calcolo(percorso_linea):
             originale(testo)
 
         app._stato = spia
-        app._calcola_automatico()
-        check(pompa(app), "il calcolo termina")
+        with CALCOLI.veri():
+            app._calcola_automatico()
+            check(pompa(app), "il calcolo termina")
         app._stato = originale
 
         tentativi = [t for t, _m in registro if "tentativo" in t]
@@ -1474,10 +1551,15 @@ def test_simulazione_dal_pulsante(percorso_linea):
         )
 
         app._apri_simulazione()
-        app.update()
         finestra = app.finestra_simulazione
         check(finestra is not None, "la finestra si apre")
-        finestra.avvia_o_ferma()  # in pausa: qui il tempo lo muoviamo noi
+        # In pausa PRIMA di qualunque update(): la finestra parte animandosi da
+        # sola, e su una macchina lenta (il runner della CI) un ridisegno dura
+        # piu' del passo di 40 ms -- il timer successivo e' gia' scaduto quando
+        # update() ricontrolla la coda, e update() non torna piu'.
+        if finestra is not None and finestra._in_moto:
+            finestra.avvia_o_ferma()  # qui il tempo lo muoviamo noi
+        app.update()
         check(
             abs(finestra.sim.T - app.T_corrente) < 1e-9,
             f"mostra il ciclogramma che c'e' (T={finestra.sim.T:.2f} s)",
@@ -1844,6 +1926,8 @@ def main():
     fd, linea = tempfile.mkstemp(suffix=".xlsx")
     os.close(fd)
     scrivi_modello(linea)
+    CALCOLI.installa()
+    t0 = time.perf_counter()
     try:
         test_apertura_e_proposta(linea)
         test_calcolo_automatico(linea)
@@ -1863,10 +1947,14 @@ def main():
         test_dati_linea(linea)
         test_file_illeggibile()
     finally:
+        CALCOLI.disinstalla()
         os.unlink(linea)
 
     print("\n" + "=" * 72)
-    print(f"RISULTATO: {_n_pass} ok, {_n_fail} falliti")
+    print(
+        f"RISULTATO: {_n_pass} ok, {_n_fail} falliti  "
+        f"({time.perf_counter() - t0:.0f}s, {CALCOLI.riusati} calcoli riusati)"
+    )
     print("=" * 72)
     return 1 if _n_fail else 0
 
