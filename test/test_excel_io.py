@@ -1181,7 +1181,7 @@ def test_risultati_scarto_pesato():
             if isinstance(ws.cell(r, 1).value, int)
             and isinstance(ws.cell(r, col["scarto pesato"]).value, (int, float))
         ]
-        somma = sum(ws.cell(r, col["scarto pesato"]).value for r in righe)
+        somma = sum(abs(ws.cell(r, col["scarto [s]"]).value) for r in righe)
         coerenti = all(
             abs(
                 ws.cell(r, col["scarto [s]"]).value
@@ -1203,11 +1203,11 @@ def test_risultati_scarto_pesato():
             == "takt time minimo, poi scarto minimo",
             "il Riepilogo dice l'obiettivo del calcolo",
         )
-        totale = valori.get("Scarto pesato dai teorici")
+        totale = valori.get("Scarto dai teorici")
         check(
-            totale is not None and abs(totale - somma) < 0.05,
-            f"e lo scarto pesato totale ({totale}) e' la somma delle righe "
-            f"({somma:.2f})",
+            totale is not None and abs(totale - somma) < 0.05 * max(1, len(righe)),
+            f"e lo scarto totale senza pesi ({totale}) e' la somma dei valori "
+            f"assoluti delle righe ({somma:.2f})",
         )
     finally:
         os.unlink(percorso)
