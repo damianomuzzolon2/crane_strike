@@ -68,6 +68,7 @@ from model import (
     coppie_interblocco,
     errore_pesato,
     scarti_dal_teorico,
+    scarto_totale,
 )
 from verify import prenotazioni, sovrapposizione, verify_solution
 
@@ -105,6 +106,10 @@ class Allineamento:
     margine: float  # [s] attorno all'istante di avvio, dal lato piu' stretto
     errore_pesato_prima: float
     errore_pesato_dopo: float
+    # [s] lo stesso scarto dai teorici senza pesi (vedi `scarto_totale`): e'
+    # quello da mostrare, perche' si legge come una durata
+    scarto_prima: float = 0.0
+    scarto_dopo: float = 0.0
 
 
 def _proprietari(sol: Solution, data: ProblemData) -> Optional[dict[int, int]]:
@@ -373,6 +378,8 @@ def allinea_avvio(
         margine=solver.Value(margine) * g,
         errore_pesato_prima=e_prima,
         errore_pesato_dopo=e_dopo,
+        scarto_prima=scarto_totale(scarti_dal_teorico(data, at)),
+        scarto_dopo=scarto_totale(scarti_dal_teorico(data, nuovi)),
     )
 
 

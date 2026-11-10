@@ -3609,6 +3609,17 @@ def errore_pesato(data: ProblemData, scarti: dict[int, float]) -> float:
     return sum(scarto_pesato(data.route[k], v) for k, v in scarti.items())
 
 
+def scarto_totale(scarti: dict[int, float]) -> float:
+    """Lo scarto dai tempi teorici SENZA pesi, in secondi: la somma dei valori
+    assoluti degli scarti di tutte le vasche. E' il numero da mostrare a chi
+    vuole sapere quanti secondi di distacco ci sono davvero; quello pesato
+    (`errore_pesato`) resta l'obiettivo del calcolo, ma in secondi x peso non
+    si legge come una durata.
+
+    `scarti`: stazione -> scarto in secondi, come da `scarti_dal_teorico`."""
+    return sum(abs(v) for v in scarti.values())
+
+
 # Le variabili che `riduci_soste` inchioda al valore della soluzione, per
 # prefisso del nome: takt time, istanti di prelievo del pezzo, fasi e periodi
 # di ogni mossa, ordine del giro. Resta libero solo come il carroponte va a
@@ -4826,7 +4837,9 @@ def solve_auto_zones(
     viene chiamata PRIMA di ogni risoluzione, con l'indice contato da 1 e il
     totale gia' al netto dei prefiltri. `n_valide` e' quante suddivisioni
     fattibili si sono trovate fino a quel momento, `best_T` il takt time della
-    migliore e `best_errore` il suo scarto pesato dai teorici (None se non se
+    migliore e `best_errore` il suo scarto dai teorici in secondi, SENZA pesi
+    (vedi `scarto_totale`; la scelta della migliore usa invece quello pesato)
+    (None se non se
     n'e' trovata ancora nessuna, e `best_errore` None anche col takt time
     libero, dove non si calcola): insieme dicono cosa si avrebbe in
     mano fermando adesso, quante soluzioni e quanto buona la migliore. Serve a
@@ -4957,9 +4970,14 @@ def solve_auto_zones(
                         len(da_provare),
                         n_valide,
                         None if best_solution is None else best_solution.T,
+                        # la migliore si sceglie sullo scarto PESATO, ma a chi
+                        # guarda si dice quello in secondi veri
                         None
                         if best_solution is None
-                        else best_solution.raw.get("errore_pesato"),
+                        or best_solution.raw.get("errore_pesato") is None
+                        else scarto_totale(
+                            scarti_dal_teorico(data, best_solution.actual_time)
+                        ),
                     )
                 sol = solve(
                     candidate_data,

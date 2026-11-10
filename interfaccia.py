@@ -57,8 +57,9 @@ from model import (
     TEMPO_RIDUCI_SOSTE_S,
     Interruzione,
     diagnosi_zone,
-    errore_pesato,
     rifinisci_soluzione,
+    scarti_dal_teorico,
+    scarto_totale,
     solve_auto_hoists,
     solve_auto_zones,
     voce_registro,
@@ -1540,7 +1541,8 @@ class Applicazione(tk.Tk):
         la pena aspettarne una quarta. Chi ha in mente il valore che gli serve
         riconosce da solo quando puo' smettere. Con il takt time FISSO il takt
         e' lo stesso per tutte, e il numero che dice quanto e' buona la
-        migliore e' il suo scarto pesato dai tempi teorici."""
+        migliore e' il suo scarto dai tempi teorici, in secondi veri (senza
+        i pesi, che servono al calcolo ma non si leggono come una durata)."""
         if self.avanzamento.cget("mode") != "determinate":
             self.avanzamento.stop()
             self.avanzamento.configure(mode="determinate", maximum=totale)
@@ -1579,12 +1581,12 @@ class Applicazione(tk.Tk):
                 testo += f" - {n_valide} gia' trovate: fermando ora resta la migliore"
             elif best_errore is not None:
                 quante = (
-                    "1 soluzione trovata, scarto pesato"
+                    "1 soluzione trovata, scarto dai teorici"
                     if n_valide == 1
-                    else f"{n_valide} soluzioni trovate, migliore scarto pesato"
+                    else f"{n_valide} soluzioni trovate, migliore scarto dai teorici"
                 )
                 testo += (
-                    f" - {quante} = {best_errore:.2f}: fermando ora resta quella"
+                    f" - {quante} = {best_errore:.2f} s: fermando ora resta quella"
                 )
             else:
                 testo += (
@@ -1802,7 +1804,8 @@ class Applicazione(tk.Tk):
             )
             + f"T = {sol.T:.2f} s"
             + (
-                f", scarto pesato {sol.raw['errore_pesato']:.2f}"
+                f", scarto dai teorici "
+                f"{scarto_totale(scarti_dal_teorico(self.dati, sol.actual_time)):.2f} s"
                 if sol.raw.get("errore_pesato") is not None
                 else ""
             )
@@ -2489,8 +2492,8 @@ class Applicazione(tk.Tk):
         }
         self._ricomponi(
             f"Avvio reso esatto: {descrivi(r.spostamenti, self._carri_delle_zone())}"
-            f" (scarto pesato {r.errore_pesato_prima:.2f}"
-            f" -> {r.errore_pesato_dopo:.2f})",
+            f" (scarto dai teorici {r.scarto_prima:.2f} s"
+            f" -> {r.scarto_dopo:.2f} s)",
             prima,
             tieni_rientri=True,
         )
@@ -2811,7 +2814,7 @@ class Applicazione(tk.Tk):
 
         La stessa cosa sta nella tabella della scheda Ciclogramma, ma quella si
         apre solo per modificare: qui la si legge accanto al takt time e allo
-        scarto pesato, che sono i numeri con cui la si giudica. Le vasche fuori
+        scarto dai teorici, che sono i numeri con cui la si giudica. Le vasche fuori
         dalla tolleranza si segnano, perche' in una colonna di numeri non si
         vedono -- il verdetto lo da' la verifica, il segno dice dove guardare."""
         d = self.config_linea.data
@@ -2846,20 +2849,23 @@ class Applicazione(tk.Tk):
             )
         return righe
 
-    def _scarto_pesato_corrente(self) -> float:
-        """Lo scarto pesato dai teorici del ciclogramma che si sta guardando.
+    def _scarto_corrente(self) -> float:
+        """Lo scarto dai teorici del ciclogramma che si sta guardando, in
+        secondi e SENZA pesi: la somma di quanto ogni bagno si scosta dal suo
+        teorico, sopra o sotto. I pesi decidono dove il calcolo spende lo
+        scarto, ma il numero pesato non si legge come una durata; questo dice
+        quanti secondi di distacco ci sono davvero.
 
         Si calcola dai tempi in vasca e non dalla soluzione del solutore: cosi'
         vale anche per un ciclogramma composto o ritoccato a mano, ed e' il
         numero con cui confrontarlo con quello del calcolo automatico."""
         d = self.config_linea.data
-        return errore_pesato(
-            d,
+        return scarto_totale(
             {
                 k: self.permanenze[k] - d.route[k].nominale
                 for k in range(1, d.n_moves)
                 if k in self.permanenze
-            },
+            }
         )
 
     def _banner_neutro(self, testo: str):
@@ -2939,7 +2945,7 @@ class Applicazione(tk.Tk):
             f"Takt time:      {T:.2f} s"
             + ("  (fisso al teorico)" if self.dati.takt_fisso else ""),
             f"Produttivita':  {3600.0 / T:.1f} pezzi/ora",
-            f"Scarto pesato dai teorici: {self._scarto_pesato_corrente():.2f}"
+            f"Scarto dai teorici: {self._scarto_corrente():.2f} s"
             + (
                 "  (e' cio' che Calcola auto rende minimo)"
                 if self.dati.takt_fisso
