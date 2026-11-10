@@ -4064,11 +4064,15 @@ def _assembla(
                 )
                 return partenza, arrivo
             vuoto = _durata_rientro(data, k1 + 1, k2, sst.get(k1))
-            if attese is not None:
+            if attese is not None and k1 in attese:
                 # c'e' una scelta gia' fatta -- dal solutore, o salvata nel
                 # file -- e si usa quella: e' l'unico modo perche' il
-                # ciclogramma riaperto sia quello che era stato verificato
-                partenza = finish[k1] + attese.get(k1, 0.0)
+                # ciclogramma riaperto sia quello che era stato verificato.
+                # Una mossa che non ce l'ha (cella vuota nel file, o un
+                # rientro nato da una modifica a mano) segue la regola
+                # predefinita qui sotto: "assente" vuol dire "decidi tu", non
+                # "riparti subito".
+                partenza = finish[k1] + attese[k1]
                 return partenza, partenza + vuoto
             bersaglio = lp[k2] + (T if k2 == riferimento else 0.0)
             if _aspetta_dove_ha_consegnato(z, k1, k2):

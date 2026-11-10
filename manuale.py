@@ -237,6 +237,81 @@ def componi(
     return sol, dati, incoerenze
 
 
+def adatta_rientri(
+    data: ProblemData,
+    nuova: Solution,
+    prima: Optional[Solution],
+    assegnazione: dict[int, int],
+    assegnazione_prima: dict[int, int],
+    attese: Optional[dict[int, float]],
+    soste: Optional[dict],
+) -> tuple[Optional[dict[int, float]], dict]:
+    """Le pause scelte per il ciclogramma di PRIMA (attese dopo la consegna e
+    soste per strada) riportate su quello nuovo, dopo una modifica.
+
+    Buttarle a ogni ritocco cambiava il ciclogramma ben oltre quello che si
+    era toccato: si spostava un tempo in vasca e sparivano tutte le pause che
+    il solutore aveva messo per stare lontani dal vicino. Qui invece una pausa
+    resta dov'era, con la sua durata, finche' il rientro a cui appartiene
+    esiste ancora -- stesso carroponte, stessa mossa consegnata, stessa mossa
+    dopo. Se nel ciclogramma nuovo non ci sta piu' (il tempo libero si e'
+    accorciato) la si accorcia quanto basta, prima l'attesa e poi la sosta; se
+    il rientro non esiste piu' se ne va, e quel rientro segue la regola
+    predefinita.
+
+    `nuova` e' il ciclogramma gia' ricomposto con la regola predefinita: serve
+    a sapere quali rientri ci sono adesso e quanto tempo hanno. `prima` quello
+    da cui le pause venivano. Restituisce (attese, soste) da passare a
+    `componi`."""
+    if prima is None or (attese is None and not soste):
+        return attese, dict(soste or {})
+
+    def successori(sol: Solution) -> dict[int, int]:
+        return {
+            k: p.order[(i + 1) % len(p.order)]
+            for p in sol.plans
+            for i, k in enumerate(p.order)
+        }
+
+    dopo_prima = successori(prima)
+    nuove_attese: dict[int, float] = {}
+    nuove_soste: dict = {}
+    for p in nuova.plans:
+        for i, k in enumerate(p.order):
+            nxt = p.order[(i + 1) % len(p.order)]
+            if (
+                dopo_prima.get(k) != nxt
+                or assegnazione.get(k) != assegnazione_prima.get(k)
+            ):
+                continue  # rientro nuovo: decide la regola predefinita
+            attesa = None if attese is None else attese.get(k)
+            sosta = (soste or {}).get(k)
+            if attesa is None and sosta is None:
+                continue
+            # tempo fra la consegna e il prelievo successivo, meno il viaggio
+            arrivo = p.local_pick[nxt] + (nuova.T if i == len(p.order) - 1 else 0.0)
+            libero = arrivo - p.finish[k] - data.empty_leg_seconds(k + 1, nxt)
+            if sosta is not None:
+                viaggio = (
+                    data.empty_leg_seconds(k + 1, sosta.stazione)
+                    + data.empty_leg_seconds(sosta.stazione, nxt)
+                )
+                libero = arrivo - p.finish[k] - viaggio
+                if libero < 0.0:
+                    sosta = None  # la deviazione da sola non ci sta piu'
+                    libero = arrivo - p.finish[k] - data.empty_leg_seconds(k + 1, nxt)
+            if attesa is not None:
+                attesa = min(attesa, max(0.0, libero))
+                nuove_attese[k] = attesa
+                libero -= attesa
+            if sosta is not None:
+                secondi = min(sosta.secondi, max(0.0, libero))
+                nuove_soste[k] = dataclasses.replace(sosta, secondi=secondi)
+    if attese is None:
+        return None, nuove_soste
+    return nuove_attese, nuove_soste
+
+
 def passaggi_per_zona(
     zone: list[HoistZone], assegnazione: dict[int, int], passaggi: list[dict]
 ) -> tuple[dict[int, list[tuple[float, float]]], set[int]]:

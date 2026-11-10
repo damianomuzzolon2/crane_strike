@@ -1977,16 +1977,30 @@ class Applicazione(tk.Tk):
         if prima is not None:
             self._annulla.append(prima)
             self.modificato = True
-        if prima is not None and not tieni_rientri:
-            # Le soste erano state scelte per il ciclogramma di PRIMA: con le
-            # fasi o l'assegnazione cambiate non descrivono piu' niente di
-            # sensato (si aspetterebbe piu' a lungo del tempo disponibile).
-            # Si torna alla regola predefinita, che si adatta da sola.
-            self.attese = None
-            # E le soste per strada se ne vanno con loro: erano il posto giusto
-            # per il ciclogramma di prima. Senza attese non c'e' nemmeno da
-            # chiedersi quando ci si fermava.
-            self.soste = {}
+        if prima is not None and not tieni_rientri and (self.attese or self.soste):
+            # Le pause (attese e soste per strada) erano state scelte per il
+            # ciclogramma di PRIMA. Buttarle tutte faceva sparire anche quelle
+            # dei rientri che la modifica non toccava, e il ciclogramma
+            # cambiava ben oltre il ritocco fatto. Si tengono invece rientro
+            # per rientro, accorciate se il tempo libero non basta piu'; solo
+            # i rientri nuovi passano alla regola predefinita.
+            provvisoria, _, _ = manuale.componi(
+                self.config_linea.data,
+                self.T_corrente,
+                self.permanenze,
+                self.assegnazione,
+                self.n_carroponti,
+                passaggi=self.passaggi,
+            )
+            self.attese, self.soste = manuale.adatta_rientri(
+                self.config_linea.data,
+                provvisoria,
+                self.soluzione,
+                self.assegnazione,
+                prima[2],
+                self.attese,
+                self.soste,
+            )
         self.soluzione, self.dati, self.incoerenze = manuale.componi(
             self.config_linea.data,
             self.T_corrente,
@@ -2025,6 +2039,10 @@ class Applicazione(tk.Tk):
             dict(self.assegnazione),
             self.n_carroponti,
             [dict(p) for p in self.passaggi],
+            # le pause: senza, annullare una modifica le avrebbe lasciate
+            # come la modifica le aveva ridotte
+            None if self.attese is None else dict(self.attese),
+            dict(self.soste or {}),
         )
 
     def _annulla_modifica(self):
@@ -2037,6 +2055,8 @@ class Applicazione(tk.Tk):
             self.assegnazione,
             self.n_carroponti,
             self.passaggi,
+            self.attese,
+            self.soste,
         ) = self._annulla.pop()
         self._ricomponi("Modifica annullata")
 
