@@ -646,6 +646,85 @@ def test_modifica_tempi_in_vasca(percorso_linea):
         chiudi(app)
 
 
+def test_pause_restano_dopo_modifica(percorso_linea):
+    """Le pause (attese dopo la consegna) di un ciclogramma gia' fatto non
+    devono sparire alla prima modifica: prima venivano buttate tutte, e un
+    ritocco a un tempo in vasca cambiava il ciclogramma ovunque."""
+    print("\n[4-bis] le pause sopravvivono a una modifica")
+    import manuale
+
+    app = _app_risolta(percorso_linea)
+    try:
+        d = app.dati
+
+        def margine(piano, i, k):
+            nxt = piano.order[(i + 1) % len(piano.order)]
+            arrivo = piano.local_pick[nxt] + (
+                app.soluzione.T if i == len(piano.order) - 1 else 0.0
+            )
+            return arrivo - piano.finish[k] - d.empty_leg_seconds(k + 1, nxt)
+
+        # il rientro con piu' margine, e una pausa a meta': ne' 0 ne' tutto il
+        # margine, cioe' niente che la regola predefinita sceglierebbe da se'
+        piano, i, k = max(
+            (
+                (p, i, k)
+                for p in app.soluzione.plans
+                for i, k in enumerate(p.order)
+            ),
+            key=lambda v: margine(*v),
+        )
+        libero = margine(piano, i, k)
+        check(libero > 4.0, f"c'e' un rientro con margine ({libero:.1f} s dopo la mossa {k})")
+        pausa = round(libero / 2, 2)
+        app.attese = {m: v for p in app.soluzione.plans for m, v in p.attese.items()}
+        app.attese[k] = pausa
+        app._ricomponi("pausa di prova")
+
+        def attesa_disegnata():
+            return next(
+                p.attese[k] for p in app.soluzione.plans if k in p.attese
+            )
+
+        check(
+            abs(attesa_disegnata() - pausa) < 1e-6,
+            f"la pausa di {pausa:.2f} s e' nel ciclogramma",
+        )
+
+        istantanea = app._istantanea()
+        app.permanenze[1] += 1.0
+        app._ricomponi("ritocco", istantanea)
+        app.update()
+        check(
+            app.attese is not None and abs(attesa_disegnata() - pausa) < 1e-6,
+            f"dopo aver ritoccato un tempo in vasca la pausa c'e' ancora "
+            f"({attesa_disegnata():.2f} s)",
+        )
+
+        app.permanenze[1] -= 1.0
+        app._annulla_modifica()
+        check(
+            app.attese is not None and abs(app.attese[k] - pausa) < 1e-6,
+            "annullare la modifica rimette le pause com'erano",
+        )
+
+        # Una pausa che non ci sta piu' si accorcia al tempo libero, non si
+        # butta e non fa arrivare in ritardo. Il margine si rimisura sul
+        # ciclogramma ricomposto: quello del solutore e' arrotondato al tick.
+        piano = next(p for p in app.soluzione.plans if k in p.order)
+        libero = margine(piano, piano.order.index(k), k)
+        attese, _ = manuale.adatta_rientri(
+            d, app.soluzione, app.soluzione, app.assegnazione,
+            app.assegnazione, {k: 1e6}, {},
+        )
+        check(
+            abs(attese[k] - libero) < 1e-6,
+            f"una pausa troppo lunga si riduce al margine ({attese[k]:.2f} s)",
+        )
+    finally:
+        chiudi(app)
+
+
 def test_vista_e_immagine(percorso_linea):
     print("\n[5] la vista la decide il modo in cui sei arrivato")
     app = _app_risolta(percorso_linea)
@@ -1933,6 +2012,7 @@ def main():
         test_calcolo_automatico(linea)
         test_avanzamento_del_calcolo(linea)
         test_modifica_tempi_in_vasca(linea)
+        test_pause_restano_dopo_modifica(linea)
         test_vista_e_immagine(linea)
         test_takt_e_carroponti(linea)
         test_composizione_da_zero(linea)
