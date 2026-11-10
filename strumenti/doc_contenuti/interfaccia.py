@@ -327,6 +327,19 @@ CALCOLO = [
      "questo il pulsante si spegne subito e la barra scrive 'Interruzione in "
      "corso...': un clic che non sembra fare niente viene ripetuto."),
 
+    ("h3", "Mettere in pausa il calcolo"),
+    ("c", "interfaccia.Applicazione._pausa_calcolo"),
+    ("p",
+     "Pausa e Riprendi sono lo stesso pulsante, e come Ferma chiedono e basta. "
+     "Che la pausa sia cominciata davvero lo dice il thread di lavoro con un "
+     "messaggio 'pausa' nella coda: a quel punto la barra lo scrive e si "
+     "segna l'ora; alla ripresa _inizio_lavoro si sposta in avanti del tempo "
+     "passato in pausa, cosi' la durata finale e la stima di quanto manca "
+     "non lo contano. Il pulsante e' acceso solo quando l'Interruzione dice "
+     "pausabile -- durante la ricerca delle suddivisioni -- e lo si ricontrolla "
+     "a ogni giro di _controlla_coda. Un tentativo rifatto dopo la pausa si "
+     "riannuncia con lo stesso indice, e non si conta due volte nella stima."),
+
     ("h3", "L'avanzamento: quanto manca"),
     ("p",
      "Un calcolo puo' durare minuti, e una barra che oscilla non dice se manca "

@@ -1705,6 +1705,112 @@ def test_ferma_il_calcolo():
     )
 
 
+def test_pausa_del_calcolo():
+    print("\n[9-sexies] un calcolo si puo' mettere in pausa e riprendere")
+    # La pausa vale fra un tentativo e l'altro della ricerca: il tentativo
+    # in corso si butta e si rifa' alla ripresa, gli altri restano: ogni
+    # suddivisione si prova una volta sola, e l'esito non sembra uno stop.
+    # Limite di tempo corto: qui interessa il conteggio, non l'ottimo.
+    import threading
+
+    from model import Interruzione, solve_auto_zones
+
+    piccola = linea(4, 2500, None, takt_max=120.0)
+
+    eventi = []
+    interruzione = Interruzione(su_pausa=lambda p: eventi.append(p))
+    annunciati = []
+
+    def al_secondo(n_h, indice, totale, n_valide, best_T, best_errore):
+        annunciati.append(indice)
+        if indice == 2 and annunciati.count(2) == 1:
+            # la pausa arriva prima che il solutore parta: non deve partire,
+            # e alla ripresa il secondo tentativo si rifa'
+            interruzione.pausa()
+            threading.Timer(1.0, interruzione.riprendi).start()
+
+    t0 = time.perf_counter()
+    sol, zone = solve_auto_zones(
+        piccola, n_hoists=2, time_limit_per_candidate=1.0,
+        su_tentativo=al_secondo, interruzione=interruzione,
+    )
+    durata = time.perf_counter() - t0
+    check(
+        eventi == [True, False] and durata >= 1.0,
+        f"la pausa comincia e finisce davvero (eventi {eventi}, "
+        f"{durata:.1f} s)",
+    )
+    per_stato = sol.raw.get("per_stato", {})
+    check(
+        annunciati == [1, 2, 2, 3]
+        and sol.raw.get("n_tried") == 3
+        and sum(per_stato.values()) == 3,
+        f"il tentativo interrotto si rifa' e non si conta due volte "
+        f"(annunciati {annunciati}, provati {sol.raw.get('n_tried')}, "
+        f"esiti {per_stato})",
+    )
+    check(
+        not sol.raw.get("interrotto"),
+        f"e alla fine non risulta interrotto ({sol.status})",
+    )
+
+    # -- mentre CP-SAT cerca, e poi Ferma senza riprendere --------------------
+    n = 10
+    base = linea(
+        n, 2000, [HoistZone(0, n // 2 - 1), HoistZone(n // 2, n - 1)],
+        dwell=(30, 300), capacity=3, lift_height=1500,
+        kin_lift_empty=Kinematics(v_max=250, a_max=150),
+        kin_lift_loaded=Kinematics(v_max=200, a_max=150),
+        engage_time=2.0, disengage_time=1.0, takt_min=25.0, takt_max=400.0,
+    )
+    data = con_ostacoli(base, svincolo=700.0)
+    in_pausa = threading.Event()
+    interruzione = Interruzione(su_pausa=lambda p: p and in_pausa.set())
+    ritardo = 4.0
+    threading.Timer(ritardo, interruzione.pausa).start()
+    esito = {}
+
+    def lavoro():
+        esito["sol"] = solve_auto_zones(
+            data, n_hoists=2, time_limit_per_candidate=120.0,
+            interruzione=interruzione,
+        )
+
+    t0 = time.perf_counter()
+    filo = threading.Thread(target=lavoro)
+    filo.start()
+    check(
+        in_pausa.wait(ritardo + 5.0) and time.perf_counter() - t0 < ritardo + 3.0,
+        f"la pausa ferma subito CP-SAT ({time.perf_counter() - t0:.1f} s, "
+        f"chiesta a {ritardo:.0f} s su un limite di 120)",
+    )
+    interruzione.ferma()
+    filo.join(5.0)
+    sol = esito.get("sol", (None,))[0]
+    check(
+        not filo.is_alive() and sol is not None
+        and sol.raw.get("interrotto") and sol.status != "INFEASIBLE"
+        and sol.raw.get("n_tried") == 0,
+        "Ferma chiude anche un calcolo in pausa, e il tentativo buttato "
+        "non conta",
+    )
+
+    # -- fuori dalla ricerca la pausa non tocca niente ------------------------
+    interruzione = Interruzione()
+    interruzione.pausa()
+    import dataclasses
+
+    sol = solve(
+        dataclasses.replace(piccola, zones=[HoistZone(0, 1), HoistZone(2, 3)]),
+        time_limit_s=2.0,
+        interruzione=interruzione,
+    )
+    check(
+        not sol.raw.get("interrotto") and not interruzione.pausabile,
+        f"un solve fuori dalla ricerca ignora la pausa ({sol.status})",
+    )
+
+
 def test_takt_fisso():
     print("\n[23] takt time fisso: si minimizza lo scarto pesato dai teorici")
     import dataclasses
@@ -2084,6 +2190,7 @@ def main():
     test_pezzo_in_vasca()
     test_frecce_delle_corse_verticali()
     test_ferma_il_calcolo()
+    test_pausa_del_calcolo()
     test_takt_fisso()
     test_takt_fisso_ricerca_zone()
     test_rifinitura_tempi_in_vasca()
