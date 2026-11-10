@@ -39,6 +39,7 @@ from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolb
 from matplotlib.figure import Figure
 from matplotlib.lines import Line2D
 
+from accesso import chiedi_accesso
 from allinea_avvio import allinea_avvio, descrivi
 from avvio import righe_di_riepilogo, trova_avvii
 from editor_linea import FinestraDatiLinea
@@ -3805,6 +3806,10 @@ def main(argv=None):
     file_iniziale = argv[0] if argv else None
     _identita_windows()
     try:
+        # Prima di tutto chi entra: senza utente e password giusti la finestra
+        # principale non si costruisce nemmeno.
+        if not chiedi_accesso(TITOLO, _applica_icona):
+            return 1
         app = Applicazione(file_iniziale, con_splash=True)
         app.mainloop()
     except Exception:

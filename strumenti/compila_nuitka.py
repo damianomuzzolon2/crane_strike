@@ -74,6 +74,7 @@ ICONA = RADICE / "risorse" / "icona.ico"
 
 TEST = [
     "kinematics.py",  # l'autoverifica della cinematica sta nel modulo stesso
+    "test/test_accesso.py",
     "test/test_verify.py",
     "test/test_excel_io.py",
     "test/test_model.py",

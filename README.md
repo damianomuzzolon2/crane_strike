@@ -37,7 +37,7 @@ create_cyclograms/
   interfaccia.py  simulazione.py  ciclogramma.py       <- i moduli: nessuna
   model.py  verify.py  excel_io.py  avvio.py               sottocartella, cosi'
   kinematics.py  plotting.py  manuale.py                  si importano per nome
-  allinea_avvio.py  programma_carri.py
+  allinea_avvio.py  programma_carri.py  accesso.py
   CraneStrike.bat  README.md  ARCHITETTURA.md
   requirements.txt
 
@@ -1515,6 +1515,30 @@ file invece che a un foglio in un cassetto.
 > copyright dentro: quelle righe dicono di chi e' il programma, non impediscono
 > a nessuno di usarlo. Proteggere il codice e impedire la copia sono problemi
 > diversi, e piu' grossi.
+
+### Utenti e password
+
+All'avvio (sia `CraneStrike.exe` sia `interfaccia.py`) compare una finestra che
+chiede **utente e password**: senza la coppia giusta la finestra principale non
+si apre, e dopo 5 tentativi sbagliati il programma si chiude.
+
+Le persone abilitate sono scritte in `accesso.py`, nell'elenco `UTENTI`, ma
+**solo come impronta** (PBKDF2-HMAC-SHA256 con sale casuale per ogni voce):
+nel codice non c'e' ne' la password ne' il nome utente in chiaro. Il nome utente
+non distingue maiuscole e minuscole, la password si'.
+
+Per abilitare una persona:
+
+```text
+python strumenti/genera_utente.py
+```
+
+chiede nome e password e stampa la voce da incollare in `UTENTI`. Per togliere
+una persona si cancella la sua voce. In entrambi i casi poi si **ricompila
+l'eseguibile**: gli utenti sono dentro il programma, non in un file a parte.
+
+`CraneStrike.exe --autotest` non chiede la password: non apre l'interfaccia per
+lavorarci, crea solo una linea di prova e controlla che il calcolo funzioni.
 
 ### Aggiornare a una versione nuova
 
