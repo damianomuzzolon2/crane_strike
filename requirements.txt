@@ -3,5 +3,15 @@ ortools>=9.10      # solutore CP-SAT
 matplotlib>=3.8    # disegno del ciclogramma
 openpyxl>=3.1      # lettura e scrittura dei file Excel
 
-# Solo per costruire l'eseguibile autonomo (python costruisci_exe.py)
+# Solo per costruire l'eseguibile autonomo.
+#
+# Due strade, a scelta:
+#   - Nuitka   -> python strumenti/compila_nuitka.py
+#                 compila il Python in codice macchina: dentro la cartella
+#                 consegnata NON resta sorgente ne' bytecode del progetto.
+#                 E' la via consigliata per proteggere il codice. Gratuito.
+#   - PyInstaller -> python strumenti/costruisci_exe.py
+#                 impacchetta i .pyc (bytecode, decompilabile): piu' veloce da
+#                 costruire, ma non protegge il sorgente.
+nuitka>=2.4
 pyinstaller>=6.0

@@ -42,7 +42,7 @@ create_cyclograms/
   requirements.txt
 
   test/        i test e l'esempio d'uso in codice
-  strumenti/   costruisci_exe.py e la ricetta PyInstaller
+  strumenti/   compila_nuitka.py, costruisci_exe.py e la ricetta PyInstaller
   risorse/     icona.png e icona.ico, ricavata dalla prima
   doc/         immagini del manuale, SOLVE_riga_per_riga.docx
   dati/        file Excel di esempio e di prova
@@ -109,7 +109,8 @@ OR-Tools installato.
 | `interfaccia.py` | 2053 | L'**interfaccia grafica** (tkinter). La classe `Applicazione` e' tutta la finestra: caricamento, calcolo in background, grafico incorporato (ciclogramma o pettine, secondo come ci si e' arrivati), la pagina unica in cui il ciclogramma si modifica -- calcolato o composto da zero che sia -- simulazione, verifica e salvataggio. `autotest()` prova l'installazione da sola. E' il programma che usa un utente normale. |
 | `ciclogramma.py` | 191 | Lo stesso lavoro da **riga di comando**, per chi preferisce il terminale o vuole automatizzare. |
 | `test/esempio.py` | 198 | La linea di esempio definita **in codice** invece che in Excel, per chi vuole integrare il solutore in qualcos'altro. |
-| `strumenti/costruisci_exe.py` | 119 | Costruisce l'**eseguibile autonomo** con PyInstaller. Vedi sotto. |
+| `strumenti/compila_nuitka.py` | — | Costruisce l'**eseguibile autonomo PROTETTO** con Nuitka: compila i moduli in codice macchina, cosi' nella cartella consegnata non resta nessun sorgente. E' la via consigliata. Vedi sotto. |
+| `strumenti/costruisci_exe.py` | 119 | Costruisce l'**eseguibile autonomo** con PyInstaller: piu' veloce da costruire, ma impacchetta i `.pyc` (bytecode decompilabile), quindi **non** protegge il sorgente. Vedi sotto. |
 | `strumenti/cranestrike.spec` | — | La ricetta per PyInstaller: cosa includere, cosa escludere, come impacchettare. Non si lancia a mano, la usa `costruisci_exe.py`. |
 | `strumenti/genera_doc.py` | 470 | Produce i documenti Word in `doc/`: la spiegazione riga per riga di ogni modulo e l'albero delle chiamate. Il codice citato **non e' ricopiato**, viene estratto dal sorgente per nome a ogni generazione. Vedi *La documentazione in `doc/`*. |
 | `CraneStrike.bat` | — | Avvia l'interfaccia con un doppio clic, senza aprire il terminale. |
@@ -1293,35 +1294,87 @@ Il testo sta in `strumenti/doc_contenuti/<modulo>.py`, uno per modulo.
 
 ## Creare l'eseguibile per PC senza Python
 
-Serve PyInstaller una volta sola:
+Ci sono **due strade**. Producono la stessa cosa — una cartella `dist/CraneStrike/`
+da copiare e lanciare — ma proteggono il sorgente in modo diverso.
+
+### Via consigliata: Nuitka (eseguibile protetto)
+
+Nuitka non impacchetta il Python: lo **traduce in C e lo compila** in codice
+macchina. Dentro `dist/CraneStrike/` non resta nessun `.py` ne' alcun `.pyc` del
+progetto — solo l'eseguibile e le librerie compilate — quindi chi riceve la
+cartella non puo' leggere ne' copiare il codice. E' gratis (Nuitka e' open
+source): nessuna licenza annuale.
+
+Serve Nuitka una volta sola (porta con se' un compilatore C, lo scarica da solo
+al primo uso se manca):
 
 ```bash
-pip install pyinstaller
+pip install nuitka
 ```
 
 Poi, dalla cartella del progetto, **un comando**:
 
 ```bash
+python strumenti/compila_nuitka.py
+```
+
+La **prima** volta ci vogliono diversi minuti: Nuitka compila il C. Le volte
+dopo la cache rende tutto piu' rapido. Al termine si trova tutto in
+`dist/CraneStrike/`, circa 450 MB.
+
+### Via rapida: PyInstaller (eseguibile NON protetto)
+
+PyInstaller impacchetta i `.pyc`, cioe' bytecode Python che si puo' decompilare:
+piu' veloce da costruire (un paio di minuti), ma **non protegge il sorgente**. Va
+bene per una prova interna, non per consegnare a un cliente.
+
+```bash
+pip install pyinstaller
 python strumenti/costruisci_exe.py
 ```
 
-Ci vogliono un paio di minuti. Al termine si trova tutto in
-`dist/CraneStrike/`, circa 390 MB.
+### In comune alle due strade
 
-Con `--con-test` il comando esegue prima l'intera suite di test, e non
-impacchetta se qualcosa non passa. Non e' obbligatorio, ma e' l'unico modo per
-non scoprire un problema in stabilimento.
+Con `--con-test` il comando esegue prima l'intera suite di test, e non costruisce
+se qualcosa non passa. Non e' obbligatorio, ma e' l'unico modo per non scoprire
+un problema in stabilimento.
 
 Come si porta quella cartella su un'altra macchina — e come si verifica che li'
 funzioni davvero, prima di servirsene — e' il capitolo qui sotto.
 
 ### Perche' una cartella e non un singolo file
 
-Con OR-Tools e matplotlib dentro, un `--onefile` supera i 280 MB e a **ogni
+Con OR-Tools e matplotlib dentro, un singolo file supera i 280 MB e a **ogni
 avvio** deve scompattarsi in una cartella temporanea: decine di secondi di
-attesa tutte le volte. La cartella si copia tale e quale e parte subito.
+attesa tutte le volte. La cartella si copia tale e quale e parte subito. Vale per
+entrambe le strade (Nuitka `--standalone`, PyInstaller onedir).
 
-### Se serve rimettere le mani nello spec
+### Se serve rimettere le mani nella ricetta Nuitka
+
+Le opzioni stanno in cima a `strumenti/compila_nuitka.py`, in chiaro. Punti
+delicati:
+
+- **Identita' del file** (`--company-name`, `--product-name`, `--file-version`,
+  `--copyright`): azienda, prodotto, versione e copyright che si leggono con
+  *tasto destro -> Proprieta' -> Dettagli* sul `.exe`. Il numero di versione sta
+  li' e in nessun altro posto; l'anno del copyright e' quello in cui si compila,
+  non scritto a mano.
+- **`--include-package=ortools` e `--include-package-data=ortools`**: OR-Tools
+  porta librerie native e file di dati che vanno inclusi a mano, altrimenti
+  l'eseguibile parte e poi fallisce al primo solve.
+- **`--nofollow-import-to=...`**: toglie i pacchetti che nessuno usa ma che le
+  librerie grosse trascinano dentro (plotly, Qt, ecc.). Fa la cartella piu'
+  piccola e la compilazione piu' stabile. **`pandas` non si toglie** (lo importa
+  OR-Tools) e **`PIL` non si toglie** (lo usa `interfaccia.py` per l'icona).
+- **`--include-data-dir=risorse=risorse`** e **`--windows-icon-from-ico=...`**:
+  la cartella `risorse/` finisce accanto all'eseguibile (l'icona della finestra la
+  mette `interfaccia.py` da li'); l'icona del `.exe` in Esplora risorse e' una
+  cosa a parte e serve l'opzione dedicata. Servono tutte e due.
+- **`--windows-console-mode=disable`**: niente finestra nera. Come contropartita,
+  un errore all'avvio sarebbe invisibile, quindi `interfaccia.py` lo intercetta e
+  lo mostra in una finestra di dialogo.
+
+### Se serve rimettere le mani nello spec di PyInstaller
 
 `cranestrike.spec` e' la ricetta per PyInstaller. Tre punti delicati:
 
@@ -1368,8 +1421,10 @@ di un collega, il computer di un cliente.
 ### Copiare e avviare
 
 1. **Copia tutta la cartella** `dist\CraneStrike`, non il solo `CraneStrike.exe`.
-   L'eseguibile da solo non parte: tutto il resto sta in `_internal` accanto a
-   lui, ed e' li' che ci sono Python, OR-Tools e le librerie.
+   L'eseguibile da solo non parte: tutto il resto (Python, OR-Tools, le librerie)
+   sta accanto a lui nella cartella. Con PyInstaller e' raccolto in una
+   sottocartella `_internal`; con Nuitka sta direttamente accanto all'eseguibile.
+   In un caso come nell'altro, si copia la cartella **intera**.
 2. **Mettila su un disco locale**, non lanciarla da una cartella di rete: l'avvio
    diventa lentissimo e certi antivirus aziendali bloccano gli eseguibili che
    partono da un percorso UNC. `C:\CraneStrike` va benissimo.
