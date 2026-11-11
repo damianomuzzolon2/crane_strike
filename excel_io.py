@@ -37,7 +37,7 @@ from kinematics import Kinematics
 from model import (
     SCALA_PESI,
     coppie_interblocco,
-    errore_pesato,
+    scarto_totale,
     scarti_dal_teorico,
     scarto_pesato,
     Portata,
@@ -2921,13 +2921,13 @@ def scrivi_risultati(
     # Si scrive sempre: con tutti e due gli obiettivi lo scarto e' stato reso
     # minimo -- col takt libero a parita' di takt -- e serve a confrontare.
     if solution.actual_time:
+        # Senza pesi: i secondi di distacco veri. Quello pesato, che e'
+        # l'obiettivo del calcolo, sta riga per riga in FlussoPezzo.
         voce(
-            "Scarto pesato dai teorici",
-            round(
-                errore_pesato(data, scarti_dal_teorico(data, solution.actual_time)),
-                2,
-            ),
-            "s x peso, somma su tutte le vasche (dettaglio in FlussoPezzo)",
+            "Scarto dai teorici",
+            round(scarto_totale(scarti_dal_teorico(data, solution.actual_time)), 2),
+            "s, somma dei valori assoluti su tutte le vasche, senza pesi "
+            "(dettaglio in FlussoPezzo)",
         )
 
     # -- il punto di avvio -------------------------------------------------

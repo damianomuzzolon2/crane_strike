@@ -34,6 +34,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 os.environ.setdefault("CRANESTRIKE_DETERMINISTICO", "1")
 
 from excel_io import scrivi_modello
+from model import scarti_dal_teorico, scarto_totale
 
 _n_pass = 0
 _n_fail = 0
@@ -1956,14 +1957,18 @@ def test_takt_fisso(percorso_linea):
         )
         check(app.report.ok, "la soluzione supera la verifica indipendente")
         riepilogo = app.testo_riepilogo.get("1.0", "end")
-        atteso = f"Scarto pesato dai teorici: {sol.raw['errore_pesato']:.2f}"
-        check(
-            atteso in riepilogo,
-            f"il Riepilogo riporta lo scarto del solutore ('{atteso}')",
+        atteso = (
+            f"Scarto dai teorici: "
+            f"{scarto_totale(scarti_dal_teorico(app.dati, sol.actual_time)):.2f} s"
         )
         check(
-            "scarto pesato" in app.etichetta_stato["text"],
-            "e la barra di stato lo dice a fine calcolo",
+            atteso in riepilogo,
+            f"il Riepilogo riporta lo scarto senza pesi ('{atteso}')",
+        )
+        check(
+            "scarto dai teorici" in app.etichetta_stato["text"]
+            and "pesato" not in app.etichetta_stato["text"],
+            "e la barra di stato lo dice a fine calcolo, senza pesi",
         )
         # La tabella dei tempi in vasca: una riga per vasca intermedia, col
         # teorico e il tempo effettivo che il ciclogramma le da'.
