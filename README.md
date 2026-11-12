@@ -1914,9 +1914,11 @@ centro come sempre. Non e' la stessa cosa di una **zona di cambio quota** (piu'
 sotto), che cambia il giro anche col pezzo appeso: se a non poter cambiare
 quota sopra lo scarico e' solo il gancio vuoto, basta l'ostacolo.
 
-`v_max_sollevamento_vuoto_mm_s` e `a_max_sollevamento_vuoto_mm_s2` servono solo
-se c'e' almeno una vasca ostacolo: senza ostacoli quelle corse non le fa
-nessuno, e i due parametri si possono lasciare in bianco.
+`v_max_sollevamento_vuoto_mm_s` e `a_max_sollevamento_vuoto_mm_s2` sono
+obbligatori come quelli col telaio, anche se senza ostacoli le corse a gancio
+scarico non le fa nessuno: sono un dato del carroponte, non della linea. Solo le
+decelerazioni (`d_max_...`) si possono lasciare in bianco, e allora si frena con
+l'accelerazione.
 
 #### Le posizioni di svincolo
 
