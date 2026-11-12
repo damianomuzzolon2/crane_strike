@@ -126,23 +126,23 @@ def test_andata_e_ritorno():
         check(d.tanks["ZINCATURA"].capacity == 2, "ZINCATURA a 2 posti")
         check(
             (d.takt_nominale, d.takt_delta_neg, d.takt_delta_pos)
-            == (130.0, 20.0, 20.0),
-            "takt time 130 s teorici con 20 s di tolleranza per parte",
+            == (300.0, 30.0, 30.0),
+            "takt time 300 s teorici con 30 s di tolleranza per parte",
         )
         check(
-            (d.takt_min, d.takt_max) == (110.0, 150.0),
-            "e la banda che ne esce e' 110-150 s",
+            (d.takt_min, d.takt_max) == (270.0, 330.0),
+            "e la banda che ne esce e' 270-330 s",
         )
         check(
-            (d.kin_empty.v_max, d.kin_loaded.a_max) == (1600, 400),
+            (d.kin_empty.v_max, d.kin_loaded.a_max) == (500, 200),
             "cinematiche vuoto e carico",
         )
         check(
-            (d.engage_time, d.disengage_time) == (2.0, 1.0),
+            (d.engage_time, d.disengage_time) == (0.0, 0.0),
             "tempi di aggancio/sgancio",
         )
         check(
-            (d.kin_lift_empty.v_max, d.kin_lift_loaded.a_max) == (500, 500),
+            (d.kin_lift_empty.v_max, d.kin_lift_loaded.a_max) == (350, 150),
             "cinematiche di sollevamento",
         )
         # Corsa e sgocciolamento sono di ogni vasca e obbligatori: nessun
@@ -166,7 +166,7 @@ def test_andata_e_ritorno():
         )
         check(d.zones is None, "foglio Zone vuoto -> scelta automatica")
         check(
-            (cfg.max_carroponti, cfg.tempo_limite_s) == (4, 15.0),
+            (cfg.max_carroponti, cfg.tempo_limite_s, d.takt_fisso) == (10, 120.0, True),
             "opzioni di risoluzione",
         )
     finally:
@@ -734,15 +734,42 @@ def test_parametro_facoltativo_vuoto():
         for riga in range(2, ws.max_row + 1):
             if ws.cell(riga, 1).value in (
                 "tempo_aggancio_s",
-                "risoluzione_tick_per_s",
                 "max_carroponti",
             ):
                 ws.cell(riga, 2).value = None
         wb.save(p)
         cfg = leggi_problema(p)
         check(cfg.data.engage_time == 0.0, "tempo_aggancio_s -> default 0")
-        check(cfg.data.time_scale == 100, "risoluzione_tick_per_s -> default 100")
-        check(cfg.max_carroponti == 6, "max_carroponti -> default 6")
+        check(cfg.max_carroponti == 10, "max_carroponti -> default 10")
+    finally:
+        os.unlink(p)
+
+
+def test_risoluzione_non_modificabile():
+    print("\n[8-bis] la risoluzione temporale non si cambia dal file")
+    p = modello_temporaneo()
+    try:
+        from openpyxl import load_workbook
+
+        ws = load_workbook(p)[FOGLIO_PARAMETRI]
+        nomi = {ws.cell(r, 1).value for r in range(2, ws.max_row + 1)}
+        check(
+            "risoluzione_tick_per_s" not in nomi,
+            "il foglio Parametri non ha la riga risoluzione_tick_per_s",
+        )
+        check(leggi_problema(p).data.time_scale == 100, "e il solutore usa 100")
+
+        # Un file di una versione precedente la ha ancora: si legge lo stesso,
+        # e il valore scritto non conta.
+        wb = load_workbook(p)
+        ws = wb[FOGLIO_PARAMETRI]
+        ws.append(["risoluzione_tick_per_s", 10])
+        wb.save(p)
+        msg = errore_leggendo(p)
+        check(
+            not msg and leggi_problema(p).data.time_scale == 100,
+            f"una riga vecchia si ignora, senza errore ({msg[:60]})",
+        )
     finally:
         os.unlink(p)
 
@@ -912,7 +939,7 @@ def test_dati_incoerenti():
     print("\n[12] dati validi come numeri ma incoerenti fra loro")
     p = modello_temporaneo()
     try:
-        modifica(p, FOGLIO_PARAMETRI, "B3", 200)  # delta negativo > teorico
+        modifica(p, FOGLIO_PARAMETRI, "B3", 400)  # delta negativo > teorico
         msg = errore_leggendo(p)
         check(
             "Parametri!B3" in msg and "non minore del takt time teorico" in msg,
@@ -923,8 +950,9 @@ def test_dati_incoerenti():
 
     p = modello_temporaneo()
     try:
-        # ZINCATURA a 1 posto non regge una permanenza di 180 s con takt 150 s
+        # ZINCATURA a 1 posto non regge una permanenza di 480 s con takt 330 s
         modifica(p, FOGLIO_VASCHE, "C5", 1)
+        modifica(p, FOGLIO_PERCORSO, "C5", 500)
         msg = errore_leggendo(p)
         check("occupa un posto per almeno" in msg, "capienza insufficiente riportata")
     finally:
@@ -1575,9 +1603,16 @@ def test_misure_di_disegno():
         z = d.tanks["ZINCATURA"]
         check(
             (z.larghezza, z.altezza) == (2600.0, 1600.0)
-            and (d.larghezza_pezzo, d.altezza_pezzo) == (1400.0, 900.0),
+            and (d.larghezza_pezzo, d.altezza_pezzo) == (None, None),
             f"le misure del modello si rileggono (vasca {z.larghezza:.0f}x"
-            f"{z.altezza:.0f}, pezzo {d.larghezza_pezzo:.0f}x{d.altezza_pezzo:.0f})",
+            f"{z.altezza:.0f}, pezzo vuoto)",
+        )
+        for nome, mm in (("larghezza_pezzo_mm", 1400), ("altezza_pezzo_mm", 900)):
+            modifica(p, FOGLIO_PARAMETRI, f"B{riga_parametro(p, nome)}", mm)
+        d = leggi_problema(p).data
+        check(
+            (d.larghezza_pezzo, d.altezza_pezzo) == (1400.0, 900.0),
+            "e quelle del pezzo, compilate, si leggono",
         )
         # Vuoto vuol dire "non lo so", non zero: carico e scarico non sono
         # vasche e nel modello restano in bianco.
@@ -1686,13 +1721,13 @@ def test_decelerazione_separata():
     try:
         cfg = leggi_problema(p)
         check(
-            cfg.data.kin_empty.d_max == 1200 and cfg.data.kin_loaded.d_max == 500,
+            cfg.data.kin_empty.d_max == 200 and cfg.data.kin_loaded.d_max == 200,
             f"le quattro decelerazioni si leggono "
             f"(vuoto {cfg.data.kin_empty.d_max}, carico {cfg.data.kin_loaded.d_max})",
         )
         check(
-            cfg.data.kin_lift_empty.d_max == 800
-            and cfg.data.kin_lift_loaded.d_max == 500,
+            cfg.data.kin_lift_empty.d_max == 150
+            and cfg.data.kin_lift_loaded.d_max == 150,
             "anche quelle del sollevamento",
         )
         # la leva vera: a parita' di tutto il resto, frenare piu' forte
@@ -1767,7 +1802,7 @@ def test_avvicinamento_sollevamento():
         cfg = leggi_problema(p)
         d = cfg.data
         check(
-            d.v_approach_lift == 80 and d.d_approach_lift == 150,
+            d.v_approach_lift == 100 and d.d_approach_lift == 250,
             f"i due parametri si leggono ({d.v_approach_lift} mm/s per "
             f"{d.d_approach_lift} mm)",
         )
@@ -1784,8 +1819,8 @@ def test_avvicinamento_sollevamento():
             "salendo la zona e' in testa alla corsa, scendendo e' in fondo",
         )
         check(
-            salita.kin.approach.speed == 80
-            and salita.kin.approach.distance == 150,
+            salita.kin.approach.speed == 100
+            and salita.kin.approach.distance == 250,
             "e porta i due numeri dichiarati nel file",
         )
 
@@ -1928,7 +1963,7 @@ def test_takt_fisso_e_pesi():
     p = modello_temporaneo()
     try:
         d = leggi_problema(p).data
-        check(not d.takt_fisso, "il modello d'esempio ottimizza il takt time")
+        check(d.takt_fisso, "il modello d'esempio ha il takt time fisso")
         zinc = d.route[3]
         check(
             (zinc.tank_id, zinc.peso_sotto, zinc.peso_sopra) == ("ZINCATURA", 10, 3),
@@ -2016,6 +2051,7 @@ def main():
     test_percorso_riordinato()
     test_parametro_sconosciuto()
     test_parametro_facoltativo_vuoto()
+    test_risoluzione_non_modificabile()
     test_sollevamento_obbligatorio()
     test_portate()
     test_errori_multipli()
