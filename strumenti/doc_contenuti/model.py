@@ -1,9 +1,9 @@
 """
 Il testo dei documenti di model.py.
 
-Sessantatre' fra funzioni e metodi, 2648 righe: il modulo piu' grande del
-progetto e l'unico che nessun altro puo' sostituire. Diviso per argomento,
-non per posizione nel file.
+Centotrenta fra funzioni e metodi, piu' di 5600 righe: il modulo piu' grande
+del progetto e l'unico che nessun altro puo' sostituire. Diviso per
+argomento, non per posizione nel file.
 """
 
 from __future__ import annotations
@@ -27,13 +27,17 @@ STRUTTURE = [
     ("p",
      "Un ciclogramma sembra fatto di moltissime grandezze: istanti di "
      "prelievo, traiettorie, giri a vuoto, tempi di salita. Sono quasi tutte "
-     "CONSEGUENZE. I gradi di liberta' veri sono quattro:"),
+     "CONSEGUENZE. I gradi di liberta' veri sono cinque:"),
     ("li", "il TAKT TIME: ogni quanto entra un pezzo in linea;"),
     ("li", "il TEMPO IN VASCA di ogni tappa, entro i limiti di processo;"),
     ("li", "l'ASSEGNAZIONE: quale carroponte esegue quale trasporto;"),
     ("li",
      "la SOSTA: quanto ogni carroponte resta fermo dove ha consegnato, prima "
-     "di partire a vuoto verso la mossa successiva."),
+     "di partire a vuoto verso la mossa successiva;"),
+    ("li",
+     "la SOSTA INTERMEDIA: se, durante quel viaggio a vuoto, il carroponte "
+     "va ad aspettare in un'ALTRA vasca della propria zona, quale e per "
+     "quanto (SostaIntermedia, terzo documento)."),
     ("p",
      "Tutto il resto si ricalcola da questi. E' il fatto piu' importante "
      "dell'intero progetto, perche' da li' discendono l'editor manuale (si "
@@ -63,13 +67,19 @@ STRUTTURE = [
     ("h2", "1. Tank -- la vasca"),
     ("c", "model.Tank"),
     ("q",
-     "LE ULTIME DUE NON SERVONO A CALCOLARE NIENTE. `larghezza` e `altezza` "
+     "LE ULTIME TRE NON SERVONO A CALCOLARE NIENTE. `larghezza` e `altezza` "
      "della vasca -- come `larghezza_pezzo` e `altezza_pezzo` in ProblemData "
      "-- le guarda solo la simulazione, per disegnare in proporzione invece "
      "che con misure convenzionali. Sono facoltative, e una linea che non le "
      "dichiara si risolve e si verifica esattamente come prima. Il controllo "
      "in __post_init__ rifiuta solo lo zero o il negativo, che non sarebbero "
      "un disegno diverso ma un rettangolo invisibile."),
+    ("p",
+     "`cover_presente` e' dello stesso genere visto da un'altra parte: il "
+     "ciclogramma non lo guarda, ma il programma dei carri si', perche' il "
+     "carro che arriva su una vasca col coperchio deve aprirlo prima di "
+     "scendere e richiuderlo una volta risalito. Sta qui perche' e' una "
+     "proprieta' della vasca fisica, come la sua posizione."),
     ("p",
      "Immutabile (frozen), e ogni campo porta con se' la ragione per cui sta "
      "li'. Vale la pena leggerli in ordine, perche' raccontano tre "
@@ -106,6 +116,27 @@ STRUTTURE = [
 
     ("h3", "StationSpec e HoistZone"),
     ("c", "model.StationSpec"),
+    ("p",
+     "Il modello ragiona su due SOGLIE, dwell_min e dwell_max: sono quelle il "
+     "vincolo. Ma chi compila la ricetta non scrive due soglie, scrive un "
+     "tempo TEORICO e due tolleranze, e da_teorico costruisce la tappa "
+     "esattamente cosi'. Il teorico va conservato in `dwell_nominal` perche' "
+     "da min e max soli non ci si risale -- e il file va poi riscritto "
+     "com'era stato compilato."),
+    ("p",
+     "`nominale`, `delta_neg` e `delta_pos` sono le tre letture inverse. "
+     "Quando la tappa e' stata costruita dalle sole soglie -- nei test, o da "
+     "chi la costruisce a mano -- il nominale e' il centro della finestra: il "
+     "docstring la chiama 'l'unica risposta onesta', perche' nessun'altra "
+     "scelta e' giustificata dai dati."),
+    ("q",
+     "I PESI NON SONO SIMMETRICI, E NON E' UN CAPRICCIO. peso_sotto e "
+     "peso_sopra dicono quanto costa, nell'obiettivo a takt time fisso, ogni "
+     "secondo SOTTO e ogni secondo SOPRA il teorico. Il commento ne da' la "
+     "ragione: stare sotto vuol dire di solito un trattamento incompleto, "
+     "stare sopra solo un bagno piu' lungo. Le soglie restano vincoli "
+     "rigidi; i pesi dicono solo dove conviene spendere lo scarto DENTRO la "
+     "banda."),
     ("c", "model.HoistZone"),
     ("q",
      "MOSSE, NON STAZIONI. La distinzione piu' facile da sbagliare di tutto il "
@@ -114,6 +145,16 @@ STRUTTURE = [
      "mosse. Un carroponte che gestisce le mosse da 2 a 4 tocca le stazioni da "
      "2 a 5: cinque stazioni per tre mosse. Confondere i due indici da' codice "
      "che funziona sugli esempi piccoli e sbaglia di uno agli estremi."),
+
+    ("h3", "Portata"),
+    ("c", "model.Portata"),
+    ("p",
+     "Fin dove un carroponte puo' arrivare lungo la rotaia, dichiarato con "
+     "due vasche. Il docstring insiste che e' un LIMITE e non una zona: le "
+     "portate di due carroponti vicini possono sovrapporsi, e le vasche in "
+     "comune le puo' servire l'uno o l'altro -- quale dei due lo sceglie la "
+     "ricerca. Il tratto e' quello fra le POSIZIONI delle due vasche, quindi "
+     "comprende anche quelle che ci stanno in mezzo senza essere nominate."),
 
     # ==================================================================
     ("h2", "2. ZonaCambioQuota"),
@@ -174,7 +215,7 @@ STRUTTURE = [
     ("c", "model.ProblemData", None, "    def __post_init__"),
     ("p",
      "Il problema completo. I campi obbligatori vengono prima, poi quelli con "
-     "un valore predefinito. Tre commenti meritano lettura."),
+     "un valore predefinito. Diversi commenti meritano lettura."),
     ("p",
      "Gli INGOMBRI si dichiarano separatamente per lato perche' il carrello "
      "non e' detto sia simmetrico rispetto al gancio, e il gancio e' il punto "
@@ -213,11 +254,46 @@ STRUTTURE = [
      "commento dice perche': aggiungerle in mezzo romperebbe le costruzioni "
      "posizionali gia' scritte. E' la stessa preoccupazione dei campi "
      "keyword-only di Tank."),
+    ("p",
+     "`takt_nominal` e' per il takt time quello che dwell_nominal e' per la "
+     "tappa: il valore teorico, da cui takt_min e takt_max discendono come "
+     "teorico meno e piu' le due tolleranze. Il modello continua a "
+     "ragionare sulle soglie, e il nominale serve a riscrivere il file "
+     "com'era."),
+    ("p",
+     "Gli ultimi quattro campi decidono COSA si cerca e con quali regole:"),
+    ("li",
+     "`max_soste_intermedie`: quante vasche in mezzo il solutore puo' "
+     "valutare come posto dove sostare durante un viaggio a vuoto. Il "
+     "commento spiega perche' e' un limite e non un interruttore: ogni "
+     "candidato e' un ramo in piu' per ogni arco del giro, e attorno ai "
+     "confini intervalli in piu' nel vincolo di non collisione, che si "
+     "combinano a coppie;"),
+    ("li",
+     "`takt_fisso`: False cerca il takt time piu' piccolo nella banda; True "
+     "lo inchioda al teorico e cerca invece il giro i cui tempi in vasca "
+     "stanno piu' vicini ai teorici, pesati con peso_sotto e peso_sopra;"),
+    ("li",
+     "`interblocco`: la regola con cui il PLC dell'impianto protegge le "
+     "vasche comuni e quelle a ridosso di un confine (terzo documento). Si "
+     "AGGIUNGE alla distanza di sicurezza, non la sostituisce;"),
+    ("li",
+     "`portate`: una Portata per carroponte, nell'ordine della linea. "
+     "Dichiarate, fissano anche QUANTI sono i carroponti."),
+    ("q",
+     "I VALORI PREDEFINITI DELLA DATACLASS NON SONO QUELLI DEL FILE. Qui "
+     "max_soste_intermedie vale 1 e takt_fisso False -- il comportamento "
+     "storico, che e' quello che i test e chi costruisce ProblemData a mano "
+     "si aspettano. Il foglio Parametri ha i suoi: excel_io dichiara 2 per "
+     "max_soste_intermedie e 1 per takt_fisso. Chi legge una linea da file "
+     "ottiene quelli; chi la costruisce in Python ottiene questi. Non e' un "
+     "errore, ma e' un posto in cui due numeri che sembrano lo stesso "
+     "numero non lo sono."),
 
     # ==================================================================
     ("h2", "5. __post_init__ -- rifiutare bene"),
     ("p",
-     "Duecentoquaranta righe di sole validazioni, ed e' proporzionato: quasi "
+     "Piu' di trecento righe di sole validazioni, ed e' proporzionato: quasi "
      "ogni riga qui e' un INFEASIBLE muto che qualcuno non dovra' diagnosticare. "
      "Un solutore che risponde 'impossibile' senza dire perche' e' la peggiore "
      "esperienza che questo programma possa dare, perche' manda a cercare la "
@@ -227,10 +303,32 @@ STRUTTURE = [
     ("c", "model.ProblemData.__post_init__", None, "        # Gli svincoli devono stare fra"),
     ("p",
      "Percorso di almeno due stazioni, zone che coprono tutte le mosse, vasche "
-     "che esistono, permanenze ordinate, tempi non negativi. Il confronto "
-     "delle zone e' fra LISTE, non insiemi: verifica in un colpo solo che non "
-     "manchi niente, che non ci sia niente in piu' e che l'ordine sia "
-     "crescente."),
+     "che esistono, portate coerenti, takt time positivo e ordinato, tempi "
+     "non negativi. Il confronto delle zone e' fra LISTE, non insiemi: "
+     "verifica in un colpo solo che non manchi niente, che non ci sia niente "
+     "in piu' e che l'ordine sia crescente."),
+    ("p",
+     "Le portate si controllano in tre modi: una lista vuota non vuol dire "
+     "niente (None e' 'nessun limite'), piu' portate che mosse lascerebbero "
+     "un carroponte senza lavoro, e ogni vasca nominata deve esistere. Il "
+     "takt teorico, se c'e', deve cadere dentro la banda: il commento spiega "
+     "che fuori vorrebbe dire un delta scritto col segno sbagliato, e il file "
+     "riscritto direbbe un'altra linea."),
+    ("p",
+     "La zona di avvicinamento ha tre controlli suoi: i due numeri vanno "
+     "insieme, devono essere positivi, e la velocita' lenta non puo' superare "
+     "quella massima di sollevamento -- 'non e' un avvicinamento, e' un "
+     "refuso'. Seguono le misure di solo disegno (larghezza e altezza delle "
+     "vasche e del pezzo), rifiutate solo se zero o negative."),
+    ("q",
+     "UN BLOCCO RIENTRATO UN LIVELLO DI TROPPO. I controlli sulle "
+     "permanenze -- dwell_min non oltre dwell_max, dwell_min non negativo, "
+     "pesi non negativi -- stanno nel codice DENTRO `if self.portate is not "
+     "None`, dopo il ciclo sulle portate, e usano la variabile `s` rimasta "
+     "dall'ultimo giro del ciclo sul percorso. Cosi' come sono scritti "
+     "scattano solo quando le portate sono dichiarate, e guardano solo "
+     "l'ultima tappa. Chi legge il blocco deve saperlo: un dwell_min "
+     "negativo su una tappa in mezzo non viene fermato qui."),
     ("p",
      "L'ultimo controllo del blocco e' di natura diversa: se qualche vasca ha "
      "una corsa verticale, kin_lift_loaded diventa obbligatoria. E il "
@@ -286,11 +384,7 @@ STRUTTURE = [
     ("h3", "Ostacoli e svincoli, insieme"),
     ("c", "model.ProblemData.__post_init__", "        # -- svincoli e vasche-ostacolo",
      "        if self.clearance_step_mm <= 0:"),
-    ("p", "Quattro regole che legano fra loro le due proprieta' per vasca."),
-    ("li", "Una vasca ostacolo agli ESTREMI non ha senso: li' non c'e' niente "
-           "da scavalcare. Il messaggio non si limita a rifiutare, indirizza "
-           "verso lo strumento giusto: 'quello che serve e' una ZONA DI CAMBIO "
-           "QUOTA, non un ostacolo'."),
+    ("p", "Tre regole che legano fra loro le due proprieta' per vasca."),
     ("li", "Gli svincoli si dichiarano per TUTTA la linea o per niente. La "
            "ragione e' nel commento: qualunque vasca puo' essere il capo di un "
            "rientro che deve passare alto, e quella senza svincoli non "
@@ -300,19 +394,35 @@ STRUTTURE = [
     ("li", "Con degli ostacoli serve kin_lift_empty, altrimenti non si sa "
            "quanto costa la salita."),
     ("p",
-     "Sono quattro messaggi diversi per quattro situazioni diverse, e nessuno "
-     "di essi dice soltanto che un dato manca: ciascuno dice cosa non si "
+     "Sono tre messaggi diversi per tre situazioni diverse, e nessuno di "
+     "essi dice soltanto che un dato manca: ciascuno dice cosa non si "
      "potrebbe fare senza."),
+    ("q",
+     "CARICO E SCARICO POSSONO ESSERE OSTACOLI. Qui c'era una quarta regola, "
+     "che li rifiutava con l'idea che agli estremi non ci fosse niente da "
+     "scavalcare e che servisse una zona di cambio quota. Il commento spiega "
+     "perche' sono due cose diverse: la zona di cambio quota cambia il giro "
+     "ANCHE COL PEZZO APPESO, l'ostacolo riguarda solo il GANCIO SCARICO -- "
+     "il telaio si prende e si posa al centro come sempre, ma il gancio vuoto "
+     "deve salire e scendere sullo svincolo. Rifiutarlo obbligava a "
+     "descrivere con una zona di cambio quota un giro che il pezzo non fa. "
+     "serve_alto e svincolo_verso lo gestiscono come per qualunque altra "
+     "vasca."),
 
     ("h3", "L'impossibile dichiarato subito"),
     ("c", "model.ProblemData.__post_init__", "        if self.clearance_step_mm <= 0:", None),
     ("p",
-     "L'ultimo controllo e' il piu' interessante del metodo, perche' non "
-     "riguarda la coerenza dei dati ma la FATTIBILITA' fisica."),
+     "Prima, quattro controlli di dominio -- il passo delle verifiche di "
+     "distanza positivo, max_soste_intermedie non negativo, ingombri e "
+     "sicurezza non negativi, almeno un posto per vasca. Poi l'ultimo, che "
+     "e' il piu' interessante del metodo, perche' non riguarda la coerenza "
+     "dei dati ma la FATTIBILITA' fisica."),
     ("p",
      "Un pezzo occupa un posto per un certo tempo, e ogni T ne "
-     "entra uno nuovo; se l'occupazione minima supera capacity * takt_max, non "
-     "c'e' ciclogramma possibile. Il commento dichiara che e' una condizione "
+     "entra uno nuovo; se l'occupazione minima supera capacity * "
+     "takt_max_ricerca, non c'e' ciclogramma possibile. Il massimo e' quello "
+     "in cui il solutore CERCA: col takt fisso e' il teorico, non la banda "
+     "dichiarata. Il commento dichiara che e' una condizione "
      "NECESSARIA valutata una tappa alla volta: se la stessa vasca compare "
      "piu' volte il vincolo vero e' ancora piu' stretto, ma quello lo impone "
      "il modello."),
@@ -327,7 +437,7 @@ STRUTTURE = [
     ("h2", "6. Le comodita'"),
     ("c", "model.ProblemData", "    # -- comodita'", "    def zona_cambio_quota"),
     ("p",
-     "hoist_length ha il docstring piu' lungo di tutti i cinque, e per una "
+     "hoist_length ha il docstring piu' lungo del gruppo, e per una "
      "buona ragione: dimostra che i due ingombri contano solo per la loro "
      "SOMMA. Se il carroponte di sinistra ha il gancio in p e quello di destra "
      "in q, lo spazio libero fra i due vale q - p - (pos + neg). Dove sia il "
@@ -339,6 +449,25 @@ STRUTTURE = [
      "(solve_auto_zones). E' l'errore piu' facile da fare usando il modulo "
      "come libreria, perche' la ProblemData appena letta non ha ancora le "
      "zone."),
+    ("p",
+     "takt_nominale, takt_delta_neg e takt_delta_pos sono le stesse tre "
+     "letture di StationSpec, applicate al takt time, con lo stesso ripiego "
+     "sul centro della banda."),
+    ("q",
+     "takt_min_ricerca E takt_max_ricerca, NON takt_min E takt_max. Il "
+     "commento lo dice come una regola: con takt_fisso la banda in cui il "
+     "SOLUTORE cerca si stringe al solo teorico, e tutto quello che "
+     "dimensiona il modello sul takt -- orizzonte, traslazioni, prefiltro "
+     "delle zone, il controllo di capienza qui sopra -- deve leggere questa. "
+     "La banda dichiarata resta, ma serve a riscrivere il file e alla "
+     "diagnosi."),
+    ("p",
+     "portata_mm traduce la Portata del carroponte in un tratto di rotaia "
+     "(minimo, massimo), e raggiunge risponde alla domanda che serve davvero: "
+     "questo carroponte arriva a quella tappa? Tutte e due rispondono 'nessun "
+     "limite' quando le portate non sono dichiarate, e la tolleranza di un "
+     "milionesimo di millimetro tiene dentro la vasca che sta esattamente "
+     "sull'estremo."),
     ("c", "model.ProblemData", "    def tank_capacity", "    def to_ticks"),
     ("p",
      "steps_by_tank esclude carico e scarico, che stanno fuori dalla catena "
@@ -354,6 +483,11 @@ STRUTTURE = [
      "mobile e non entrano mai come variabili: le vasche sono ferme, quindi "
      "ogni distanza e ogni tempo di percorrenza sono COSTANTI note prima di "
      "risolvere. E' questa asimmetria che tiene il modello lineare."),
+    ("p",
+     "time_scale resta un campo, con 100 come valore predefinito, ma dal "
+     "file non si cambia piu': excel_io lo fissa a 100 e ignora la vecchia "
+     "riga risoluzione_tick_per_s. Tutte le tolleranze del progetto sono "
+     "pensate su quel valore."),
     ("p",
      "eps_seconds e' la conseguenza dichiarata di quell'arrotondamento: chi "
      "ricalcola le stesse durate in virgola mobile deve accettare uno scarto "
@@ -395,6 +529,22 @@ STRUTTURE = [
      "locali sono note solo modulo T. Senza questi valori il controllo delle "
      "permanenze sarebbe ambiguo per multipli interi del takt time -- ed e' "
      "esattamente la nota che verify.py registra quando i piani mancano."),
+    ("p",
+     "Gli ultimi tre campi sono le parti della traiettoria che NON "
+     "discendono dalle fasi. `attese[k]` e' quanto il carroponte resta fermo "
+     "dove ha consegnato la mossa k -- il quarto grado di liberta'. "
+     "`soste_intermedie[k]` e' la sosta in una vasca in mezzo, se c'e' -- il "
+     "quinto. `passaggi[k]` sono i punti (istante, posizione) per cui "
+     "l'utente, disegnando a mano, ha fatto passare il rientro che segue la "
+     "mossa k: dove ci sono, il percorso lo decidono loro, e attesa e sosta "
+     "di quel rientro non contano piu'."),
+    ("q",
+     "IL COMMENTO SU `order` DICE 'da zone.lo', E NON E' PIU' VERO. Il giro "
+     "comincia dalla mossa su cui il periodo si richiude, che il solutore "
+     "sceglie (quarto documento), e nel ciclogramma composto a mano dalla "
+     "mossa con la fase di prelievo piu' piccola (quinto documento). Chi "
+     "legge un HoistPlan deve fidarsi dell'ordine della lista, non della "
+     "zona."),
     ("c", "model.Solution"),
     ("p",
      "Sei campi, e `raw` e' l'unico non strutturato: un dizionario di valori "
@@ -743,8 +893,8 @@ RIENTRI = [
      "una sola cappa, nove rientri su dieci pagavano un pedaggio inesistente, "
      "e il takt time ne risentiva."),
     ("p",
-     "Ora e' una proprieta' della VASCA, e le tre funzioni di questo documento "
-     "sono la conseguenza: quando serve passare alto, da dove si sale, e come "
+     "Ora e' una proprieta' della VASCA, e le prime tre funzioni di questo "
+     "documento sono la conseguenza: quando serve passare alto, da dove si sale, e come "
      "e' fatto il giro che ne risulta."),
 
     # ==================================================================
@@ -890,6 +1040,167 @@ RIENTRI = [
      "codici. E' quello che permette di usarla in due modi opposti senza "
      "duplicarla: solve() la usa per rifiutare, verify.py per avvisare. Le due "
      "analisi non possono divergere perche' sono la stessa funzione."),
+
+    ("h3", "zone_fuori_portata -- la geometria che la macchina non consente"),
+    ("c", "model.zone_fuori_portata"),
+    ("p",
+     "Stessa forma di zone_layout_conflicts -- una lista di frasi gia' "
+     "leggibili, vuota se va tutto bene -- ma una domanda di natura "
+     "diversa: non se il MODELLO sa rappresentare la suddivisione, ma se la "
+     "MACCHINA ci arriva. La zona h e' del carroponte h, perche' la ricerca "
+     "numera le zone nell'ordine della linea come sono numerate le portate."),
+    ("p",
+     "Si guardano le sole tappe della zona, da lo a hi+1. Il docstring dice "
+     "perche' basta: i rientri a vuoto e le soste per strada stanno fra "
+     "quelle, e un punto di cambio quota sta fra la tappa che serve e la sua "
+     "vicina. `dict.fromkeys` toglie i doppioni senza perdere l'ordine, per "
+     "una vasca che la ricetta tocca due volte."),
+    ("q",
+     "QUESTO CONTROLLO NON SI SALTA NEMMENO PER STUDIO. solve() lo applica "
+     "anche con allow_unsafe_layout, e il commento lo motiva in una riga: la "
+     "geometria patologica e' un limite del MODELLO, la portata e' la "
+     "macchina. Una soluzione che manda un carroponte oltre la propria "
+     "corsa non e' un ciclogramma da studiare, e' un ciclogramma che non si "
+     "puo' eseguire."),
+
+    # ==================================================================
+    ("h2", "5. Le soste in una vasca in mezzo"),
+    ("p",
+     "Fra una consegna e il prelievo successivo il carroponte ha spesso del "
+     "tempo che avanza. Lo puo' passare dove ha consegnato o dove deve "
+     "andare -- e' la scelta della partenza, il quarto grado di liberta'. "
+     "Ma ci sono casi in cui NESSUNO dei due estremi e' un buon posto: tutti "
+     "e due sono dentro la fascia del vicino. Il caso piu' frequente e' "
+     "quello di due mosse consecutive che condividono la vasca: il "
+     "carroponte non si sposta affatto, e l'unica via d'uscita e' andarsene "
+     "e tornare. Le funzioni di questa sezione decidono DOVE potrebbe "
+     "andare, e quanto costa."),
+    ("c", "model.SostaIntermedia"),
+    ("p",
+     "Il quinto grado di liberta', in due campi. `stazione` e' l'indice di "
+     "TAPPA, non di vasca, perche' e' con quello che si chiedono posizioni e "
+     "tempi di percorrenza. Il docstring ripete la regola dei gradi di "
+     "liberta': non discende da niente, quindi va portata dietro e salvata, "
+     "altrimenti il ciclogramma riaperto non e' quello verificato."),
+    ("c", "model.confini_condivisi"),
+    ("p",
+     "Le posizioni che il carroponte di una zona condivide con un vicino. "
+     "NON sono i due estremi della zona: l'estremo che sta al capo della "
+     "linea non lo condivide con nessuno, e trattarlo come un confine "
+     "farebbe scartare come 'esposto' il posto piu' sicuro che ci sia. Con "
+     "un carroponte solo la lista e' vuota."),
+    ("c", "model.soste_candidate"),
+    ("p",
+     "La funzione con il docstring piu' lungo della sezione, e ogni "
+     "capoverso difende una scelta. Restituisce le vasche in cui il "
+     "carroponte POTREBBE sostare, in ordine di preferenza, tagliate a "
+     "`quante` (per default max_soste_intermedie). Lista vuota vuol dire che "
+     "quel rientro si fa diritto, e il modello per quell'arco resta quello "
+     "di prima."),
+    ("li", "solo tappe della PROPRIA zona: fuori, quel pezzo di rotaia e' del "
+           "vicino;"),
+    ("li", "mai i due estremi del viaggio: sostare li' e' l'attesa che il "
+           "modello ha gia';"),
+    ("li", "NON necessariamente FRA i due estremi: il caso che conta di piu' e' "
+           "quello in cui non c'e' nessun 'fra', perche' si consegna e si "
+           "riprende nella stessa vasca;"),
+    ("li", "due tappe sulla stessa posizione contano per una, perche' il posto "
+           "dove fermarsi e' lo stesso."),
+    ("q",
+     "UNA SOSTA SERVE SOLO SE TUTTI E DUE GLI ESTREMI SONO ESPOSTI. Se uno "
+     "dei due e' al riparo, la mossa migliore e' gia' nel modello: partire "
+     "subito, o all'ultimo momento, e passare li' tutto il tempo morto. "
+     "Qualunque deviazione aggiunge tempo dentro le fasce, non lo toglie. E "
+     "non e' un risparmio opportunista: ogni candidato e' un ramo in piu' "
+     "per il solutore e un fascio di intervalli in piu' nel vincolo di non "
+     "collisione. Il docstring racconta che su una linea con gli svincoli "
+     "candidati inutili sono bastati a far scadere il tempo su un modello "
+     "che prima si risolveva."),
+    ("p",
+     "'Al riparo' e' la distanza fra due ganci (ingombro piu' sicurezza) "
+     "PIU' la sporgenza massima degli svincoli: il vicino, per scavalcare la "
+     "vasca di confine col gancio scarico, si spinge fino allo svincolo, che "
+     "sta oltre la vasca e quindi dentro il nostro pezzo di rotaia. "
+     "`esposizione` e' la distanza dal confine piu' vicino: piu' e' grande, "
+     "piu' si e' al riparo."),
+    ("p",
+     "L'ordine mette prima le vasche al riparo, e fra quelle la piu' VICINA "
+     "-- misurata col costo dei due viaggi a vuoto -- perche' uscita dalla "
+     "fascia, farsi altri metri non compra niente. Poi le altre, dalla meno "
+     "esposta in giu'. A pari merito vince l'indice minore, cosi' il "
+     "risultato non dipende dall'ordine in cui il dizionario delle vasche e' "
+     "stato letto."),
+    ("q",
+     "NON SI SCARTA UNA VASCA PERCHE' E' ESPOSTA QUANTO UN ESTREMO. "
+     "Sembrerebbe ovvio -- se non sei piu' al riparo di dove sei, perche' "
+     "muoverti? -- ma le due esposizioni possono guardare confini DIVERSI. "
+     "L'esempio del docstring: FO1 a 2080 mm dal vicino di destra, LA3 a "
+     "2035 mm da quello di sinistra. Spostarsi dall'una all'altra risolve "
+     "eccome, se il vicino di sinistra in quel momento e' altrove. QUANDO "
+     "ciascun vicino sia libero e' una domanda di orario, e la puo' "
+     "risolvere solo il solutore: qui si mettono in fila i candidati, non "
+     "si decide al suo posto."),
+    ("c", "model._durata_rientro"),
+    ("p",
+     "Quanto passa fra la partenza e l'arrivo pronto: la sola traslata, "
+     "oppure le due traslate piu' il tempo fermi nella vasca in mezzo. E' la "
+     "grandezza con cui si decide QUANDO partire, e il docstring dice "
+     "perche' la sosta ci entra: chi si ferma per strada deve muoversi "
+     "prima. Il max con zero impedisce che una durata negativa faccia "
+     "tornare indietro nel tempo."),
+    ("c", "model._perche_la_sosta_non_va"),
+    ("p",
+     "Perche' una sosta non si puo' disegnare, in italiano, o None. Le soste "
+     "del solutore sono sane per costruzione; queste arrivano dal FILE, dove "
+     "le puo' aver scritte una persona. Tre motivi, ciascuno col suo "
+     "messaggio: la stazione non esiste, e' fuori dalla zona -- 'un "
+     "carroponte che entra nel territorio del vicino' -- oppure coincide con "
+     "un estremo del viaggio."),
+    ("q",
+     "UNA SOSTA SU UN ESTREMO NON E' UNA SOSTA CORTA, E' UN DISEGNO ROTTO. "
+     "Il commento spiega cosa succederebbe: disegnarla vorrebbe dire emettere "
+     "una traslazione di lunghezza zero -- un movimento che non c'e', che si "
+     "ordina male fra i segmenti vicini e spezza la traiettoria. Li' il "
+     "carroponte aspetta gia', e quanto lo dice l'attesa dopo la consegna."),
+    ("p",
+     "Sta qui, e non dentro chi la usa, perche' la usano in due: _assembla "
+     "per non passare avanti la sosta, _build_zone_trajectory come ultima "
+     "rete. La stessa domanda fatta due volte in due modi diversi darebbe "
+     "due risposte diverse sullo stesso file."),
+
+    # ==================================================================
+    ("h2", "6. L'interblocco delle vasche"),
+    ("c", "model.vasche_in_interblocco"),
+    ("p",
+     "La regola del PLC dell'impianto, scritta come predicato su due vasche: "
+     "un carroponte che deve andare in una vasca interbloccata non parte "
+     "finche' il vicino non l'ha lasciata ed e' ARRIVATO su un'altra. Ogni "
+     "carroponte PRENOTA la vasca da quando comincia a muoversi verso di lei "
+     "a quando, ripartito, si ferma sulla successiva; due prenotazioni in "
+     "conflitto non si sovrappongono mai."),
+    ("p",
+     "Due casi sono in conflitto: la STESSA vasca servita da due carroponti "
+     "-- la vasca comune di un confine, dove uno consegna e l'altro preleva "
+     "-- e due vasche piu' vicine della distanza fra due ganci, quelle a "
+     "ridosso di un confine dove due carroponti non possono stare fermi "
+     "insieme. Con interblocco spento la risposta e' sempre no."),
+    ("q",
+     "E' PIU' SEVERA DELLA DISTANZA DI SICUREZZA, E LO E' APPOSTA. La "
+     "distanza guarda solo DOVE sono i due carroponti, e lascia che uno "
+     "arrivi mentre l'altro se ne sta andando, se lo spazio basta. "
+     "L'interblocco guarda se la vasca e' LIBERA. Sono due regole diverse, e "
+     "l'impianto vero applica la seconda: un ciclogramma che rispettasse "
+     "solo la prima sarebbe sicuro sulla carta e fermato dal PLC sulla "
+     "linea."),
+    ("c", "model.coppie_interblocco"),
+    ("p",
+     "Per ogni coppia di carroponti, le coppie di vasche in conflitto. Le "
+     "vasche di un carroponte sono tutte le tappe della sua zona: preleva da "
+     "ognuna tranne l'ultima, consegna in ognuna tranne la prima, e le soste "
+     "per strada stanno li' dentro. Le coppie senza conflitti non compaiono, "
+     "quindi un dizionario vuoto vuol dire 'niente da interbloccare' -- ed "
+     "e' cosi' che solve() decide se costruire il vincolo, e la diagnosi se "
+     "provare a toglierlo."),
 ]
 
 
@@ -900,8 +1211,8 @@ RIENTRI = [
 SOLVE = [
     ("h1", "model.py (4) -- solve() riga per riga"),
     ("p",
-     "Quarto dei documenti su model.py, e il piu' lungo: solve() occupa 643 "
-     "righe, un quarto del modulo. Costruisce il modello CP-SAT del problema e "
+     "Quarto dei documenti su model.py, e il piu' lungo: solve() occupa piu' "
+     "di 1200 righe, piu' di un quinto del modulo. Costruisce il modello CP-SAT del problema e "
      "lo risolve. Ogni blocco di codice e' estratto dal sorgente al momento "
      "della generazione: quello che si legge qui e' quello che c'e' nel file."),
     ("p",
@@ -913,9 +1224,12 @@ SOLVE = [
     ("p",
      "Dei gradi di liberta' di un ciclogramma, solve() ne riceve uno gia' "
      "deciso -- l'assegnazione, cioe' le zone -- e cerca gli altri: il takt "
-     "time, che minimizza, il tempo che ogni pezzo passa in ciascuna vasca, e "
-     "dove ogni carroponte passa il tempo morto del rientro a vuoto."),
-    ("p", "Il modello si compone di quattro blocchi, nell'ordine del codice:"),
+     "time, il tempo che ogni pezzo passa in ciascuna vasca, e dove ogni "
+     "carroponte passa il tempo morto del rientro a vuoto, compresa l'eventuale "
+     "sosta in una vasca in mezzo. Cosa MINIMIZZA dipende da takt_fisso: il "
+     "takt time, oppure -- col takt inchiodato al teorico -- lo scarto pesato "
+     "dei tempi in vasca dai teorici."),
+    ("p", "Il modello si compone di cinque blocchi, nell'ordine del codice:"),
     ("li", "1) la CATENA DEL PEZZO: quando ogni pezzo viene prelevato da ogni "
            "vasca, con i limiti di permanenza del processo;"),
     ("li", "1-bis e 2-bis) la CAPIENZA delle vasche: quanti pezzi ci stanno "
@@ -923,7 +1237,9 @@ SOLVE = [
     ("li", "2) il CIRCUITO di ciascun carroponte: il giro che compie in un "
            "periodo, con l'ordine di visita libero;"),
     ("li", "3) la NON COLLISIONE fra carroponti adiacenti, che e' il vincolo "
-           "difficile e occupa piu' della meta' della funzione."),
+           "difficile e occupa buona parte della funzione;"),
+    ("li", "3-bis) l'INTERBLOCCO delle vasche, quando c'e': le prenotazioni di "
+           "due carroponti sulle vasche in conflitto non si sovrappongono."),
     ("q",
      "UNITA' E TICK. Nel modello tutti i tempi sono TICK INTERI, non secondi: "
      "CP-SAT lavora su interi. Le posizioni restano millimetri in virgola "
@@ -958,6 +1274,20 @@ SOLVE = [
      "Il valore predefinito e' quello sicuro, ed e' giusto che lo sia -- ma "
      "vale la pena sapere che esiste, perche' e' il modo per vedere cosa "
      "succederebbe senza il controllo."),
+    ("p",
+     "Il terzo controllo, zone_fuori_portata, invece non si salta: il "
+     "commento distingue un'approssimazione del modello -- la geometria -- "
+     "dalla macchina, che non arriva dove non arriva. Poi un primo sguardo "
+     "all'Interruzione: se qualcuno ha gia' chiesto di fermarsi, non si "
+     "comincia nemmeno a costruire."),
+    ("p",
+     "Gli ultimi due parametri cominciano con un trattino basso perche' non "
+     "sono per chi chiama da fuori. `_rifinisci` e' il modo in cui "
+     "riduci_soste risolve lo STESSO modello con tutto inchiodato tranne i "
+     "rientri a vuoto; `_suggerimento_per_nome` e' il modo in cui "
+     "rifinisci_soluzione passa a CP-SAT, come punto di partenza, una "
+     "soluzione trovata su un modello diverso. Tutte e due sono "
+     "argomento della fine di questo documento."),
 
     ("h3", "L'import posticipato, e i tempi precalcolati"),
     ("c", "model.solve", "    # Import posticipato", "    # -- Variabili di takt time"),
@@ -972,7 +1302,10 @@ SOLVE = [
      "tick. Non sono variabili perche' non possono esserlo -- le vasche sono "
      "ferme e le cinematiche sono date. Precalcolarle qui evita di ricalcolare "
      "un profilo trapezoidale dentro cicli che girano decine di migliaia di "
-     "volte."),
+     "volte. travel_empty_ticks fa lo stesso per i rientri a vuoto, ma e' una "
+     "funzione e non una tabella: le coppie di stazioni possibili sono molte "
+     "piu' delle mosse, e passa comunque da empty_leg_seconds, l'unica "
+     "definizione."),
     ("q",
      "escape_ticks E' UNA MAGGIORAZIONE, E DEVE ESSERLO. Restituisce un limite "
      "SUPERIORE al tempo che serve a coprire i primi (o gli ultimi) x "
@@ -987,9 +1320,17 @@ SOLVE = [
     ("h3", "Domini e orizzonte"),
     ("c", "model.solve", "    # -- Variabili di takt time", "    # -- 1) Catena di flusso pezzo"),
     ("p",
-     "Tv e' la variabile del takt time, e l'unica che compare nell'obiettivo. "
-     "L'orizzonte e' una maggiorazione generosa del tempo che un pezzo impiega "
-     "ad attraversare la linea: serve solo a dare domini finiti."),
+     "Tv e' la variabile del takt time, con dominio [takt_min_ricerca, "
+     "takt_max_ricerca]. L'orizzonte e' una maggiorazione generosa del tempo "
+     "che un pezzo impiega ad attraversare la linea: serve solo a dare domini "
+     "finiti."),
+    ("q",
+     "COL TAKT FISSO Tv RESTA UNA VARIABILE. Il commento spiega il trucco: "
+     "il dominio diventa [T, T], e il presolve di CP-SAT la sostituisce con "
+     "la costante. Tutti i prodotti per Tv -- i giri, la capienza, le copie "
+     "traslate del vincolo di non collisione -- diventano cosi' termini noti "
+     "senza toccarli uno per uno. Lo stesso vale per `_rifinisci`, che "
+     "inchioda Tv al valore della soluzione da rifinire."),
     ("p",
      "DEP_MAX invece e' calcolato con attenzione, e il commento spiega "
      "perche': dep_hi e arr_lo sarebbero comunque limitati dai vincoli del "
@@ -1018,6 +1359,14 @@ SOLVE = [
      "tempo di gancio e stanno fuori, le corse a vuoto cadono dentro "
      "l'intervallo e sono gia' contate li'."),
     ("p",
+     "Col takt fisso ogni tappa riceve anche due variabili, `sotto` e "
+     "`sopra`, legate al bagno da bagno = teorico - sotto + sopra. Sono "
+     "separate perche' pesano in modo diverso, e il commento nota che "
+     "minimizzandole una delle due resta sempre a zero: pagare sotto e sopra "
+     "insieme non conviene mai. I loro domini sono gia' quelli che la banda "
+     "rigida consente, quindi non aggiungono nessuna liberta': misurano "
+     "soltanto."),
+    ("p",
      "La capienza a tappa singola e' tre righe e il commento la dimostra: i "
      "pezzi entrano ogni T e ciascuno occupa un posto per `slot_occupancy` "
      "secondi, quindi i presenti sono ceil(occupazione / T). Imporre "
@@ -1040,7 +1389,7 @@ SOLVE = [
      "time e' infattibile; con l'ordine libero, spesso no."),
 
     ("h3", "La fase locale, e come resta lineare"),
-    ("c", "model.solve", "    # -- 2) Per ciascun carroponte", "        if n_h == 1:"),
+    ("c", "model.solve", "    # -- 2) Per ciascun carroponte", "        def rientro("),
     ("p",
      "Il problema: actual_time[k] e' un istante ASSOLUTO, e due mosse della "
      "stessa zona possono essere separate da parecchi periodi -- succede "
@@ -1060,7 +1409,45 @@ SOLVE = [
      "n_shifts letterali per mossa."),
     ("p",
      "`finish[k]` e' semplicemente local_pick[k] piu' la durata della mossa: "
-     "l'istante in cui il pezzo e' stato consegnato e il carroponte e' libero."),
+     "l'istante in cui il pezzo e' stato consegnato e il carroponte e' libero. "
+     "In testa al ciclo sui carroponti c'e' anche il primo dei controlli "
+     "dell'Interruzione: la costruzione e' Python, e su una linea lunga dura "
+     "parecchi secondi."),
+
+    ("h3", "rientro -- le alternative di un viaggio a vuoto"),
+    ("c", "model.solve", "        def rientro(", "        if n_h == 1:"),
+    ("p",
+     "Lo spostamento a vuoto dell'arco k1 -> k2, con le sue ALTERNATIVE: il "
+     "rientro diretto e, una per vasca candidata (soste_candidate, terzo "
+     "documento), il rientro con una sosta in mezzo. `dep` e' l'istante in "
+     "cui il carroponte lascia la vasca dove ha consegnato, `arr` quello in "
+     "cui e' pronto su quella dove prelevera'; quando l'arco e' scelto, il "
+     "tempo fra i due deve bastare al percorso SCELTO, non al piu' corto."),
+    ("p",
+     "Senza candidati non c'e' niente da scegliere, e l'arco si riduce a "
+     "`arr == dep + t_dir`: il modello che la linea aveva prima che le soste "
+     "esistessero. Con dei candidati, ogni alternativa ha il suo selettore "
+     "booleano; nell'alternativa con sosta l'arrivo nella vasca in mezzo e' "
+     "un'espressione incollata alla partenza, mentre la RIPARTENZA `dep_m` e' "
+     "una variabile -- quanto si resta fermi li' e' proprio la scelta in "
+     "piu'."),
+    ("q",
+     "ESATTAMENTE UNA SE L'ARCO E' SCELTO, NESSUNA SE NO. La riga che "
+     "uguaglia la somma dei selettori al letterale dell'arco dice tutte e "
+     "due le cose insieme, e il commento "
+     "spiega la seconda meta': senza, il solutore potrebbe accendere una "
+     "sosta su un arco che non percorre, e i suoi intervalli entrerebbero "
+     "nel vincolo di non collisione come se il carroponte fosse in due giri "
+     "insieme. Per lo stesso motivo dep_m viene inchiodato a zero quando la "
+     "sua alternativa e' spenta: una variabile intera libera per ogni "
+     "alternativa scartata e' solo spazio di ricerca sprecato."),
+    ("p",
+     "Ogni alternativa si racconta come una lista di TAPPE (stazione da, "
+     "stazione a, partenza, arrivo): da queste, e non da una stima, "
+     "discendono sia il disegno sia gli intervalli del vincolo di non "
+     "collisione. `t_min`, il piu' breve dei percorsi possibili, serve ai "
+     "vincoli di sola necessita', che devono valere qualunque alternativa "
+     "venga poi scelta."),
 
     ("h3", "Il caso di una sola mossa"),
     ("c", "model.solve", "        if n_h == 1:", "        # -- circuito generale"),
@@ -1069,7 +1456,10 @@ SOLVE = [
      "giro e' andata e ritorno. Il codice lo tratta a parte perche' AddCircuit "
      "su un solo nodo non ha senso, e produce comunque la stessa struttura "
      "dati -- un unico 'arco' -- cosi' che il vincolo di non collisione, piu' "
-     "sotto, non debba distinguere i due casi."),
+     "sotto, non debba distinguere i due casi. Anche qui il ritorno passa da "
+     "rientro: con un solo trasporto, il viaggio a vuoto fra la consegna e "
+     "il prelievo del periodo dopo puo' comunque fermarsi in una vasca in "
+     "mezzo."),
     ("p",
      "E' un caso frequentissimo: una linea con un carroponte per ogni "
      "trasporto, o le zone di estremita' di una linea lunga."),
@@ -1145,10 +1535,12 @@ SOLVE = [
      "servono a due cose insieme: ricostruire la traiettoria e costruire il "
      "vincolo di non collisione ai confini."),
     ("p",
-     "dep_hi e' vincolato a stare dopo la consegna della mossa hi_h, e a "
-     "permettere l'arrivo in tempo a qualunque mossa l'arco uscente da hi_h "
-     "punti. arr_lo, simmetricamente, deve essere dopo l'arrivo da qualunque "
-     "mossa l'arco entrante in lo_h provenga, e prima del prelievo di lo_h."),
+     "Qui se ne fissano solo i limiti che non dipendono dall'arco: dep_hi "
+     "dopo la consegna della mossa hi_h, arr_lo entro il prelievo di lo_h. "
+     "Il resto -- arrivare in tempo dovunque punti l'arco uscente da hi_h, "
+     "arrivare dopo la partenza da dovunque venga l'arco entrante in lo_h -- "
+     "lo dicono gli archi e i vincoli di sola necessita' del blocco "
+     "seguente."),
     ("q",
      "DEL PRELIEVO DI QUESTO PERIODO O DEL PROSSIMO? E' esattamente la domanda "
      "a cui risponde `bersaglio[lo_h]`, e infatti il vincolo si scrive "
@@ -1157,12 +1549,6 @@ SOLVE = [
      "-- e' su quelle che si costruisce la non collisione -- mentre il +T "
      "riguarda il PERIODO. Per un lungo tratto hanno condiviso la stessa "
      "condizione perche' il modello obbligava le due mosse a coincidere."),
-    ("p",
-     "L'ultimo blocco tratta il caso in cui l'arco hi_h -> lo_h sia proprio "
-     "quello scelto: allora dep_hi e arr_lo descrivono lo STESSO spostamento, "
-     "e vanno legati esattamente invece che con due disuguaglianze "
-     "indipendenti. Senza, il modello potrebbe piazzarli a distanza arbitraria "
-     "e la traiettoria ricostruita avrebbe un buco."),
 
     ("h3", "Gli archi, e la convenzione che va tenuta"),
     ("c", "model.solve", "        # Istanti di partenza/arrivo", "    # -- 2-bis)"),
@@ -1174,18 +1560,47 @@ SOLVE = [
      "divergessero, il vincolo di non collisione proteggerebbe una traiettoria "
      "diversa da quella poi disegnata -- e il disegno sarebbe quello vero."),
     ("p",
+     "DOVE il carroponte passa il tempo che gli avanza lo sceglie il "
+     "solutore, non una convenzione: `dep` e' una variabile libera fra la "
+     "consegna e l'ultimo istante utile per arrivare in tempo. Partire "
+     "subito vuol dire aspettare a destinazione, partire tardi aspettare "
+     "dove si e' consegnato, e ogni via di mezzo e' ammessa. Sui due archi "
+     "di confine la stessa liberta' ce l'hanno gia' dep_hi e arr_lo, che "
+     "sono la partenza e l'arrivo condivisi col vicino."),
+    ("p",
+     "Il codice ha due rami. Se l'arco non ha vasche candidate per una "
+     "sosta, si scrive con le sole espressioni che servono: dep_hi se si "
+     "parte dal confine alto, arr_lo meno la durata se si arriva a quello "
+     "basso, altrimenti UNA variabile di partenza vincolata fra la consegna e "
+     "il bersaglio. Il commento dice che non e' un risparmio di righe: e' il "
+     "modello che la linea aveva prima che le soste esistessero, identico, "
+     "cosi' su una linea a cui la novita' non serve non cambia nemmeno il "
+     "tempo di calcolo. Se l'arco ha candidati, partenza e arrivo diventano "
+     "variabili e il resto lo fa rientro."),
+    ("p",
+     "Quando l'arco scelto e' proprio hi_h -> lo_h, dep_hi e arr_lo "
+     "descrivono lo STESSO viaggio, e vanno legati esattamente: senza, "
+     "resterebbero liberi l'uno dall'altro e la traiettoria ricostruita "
+     "avrebbe un buco."),
+    ("q",
+     "QUESTE SCELTE VANNO SALVATE. Il commento lo dice in chiusura: nessuna "
+     "discende dalle fasi, e riaprendo il file si ricostruirebbe una "
+     "traiettoria diversa da quella verificata. E' il motivo per cui la "
+     "ricostruzione, piu' in basso, legge l'istante di partenza di ogni arco "
+     "e lo porta nel piano come `attese`."),
+    ("p",
      "`span_end` chiude l'attesa dopo l'arrivo, ed e' `bersaglio[k2]`: un "
      "estremo che dipende da una scelta del solutore, ma che resta UNA "
      "variabile. L'arco porta quindi un solo intervallo di attesa, condizionato "
      "al solo letterale dell'arco -- che e' anche l'unica condizione di "
      "presenza che un intervallo opzionale di CP-SAT accetta."),
     ("p",
-     "Le tre convenzioni sono: chi parte dal confine alto parte a dep_hi; chi "
-     "arriva al confine basso arriva ad arr_lo (e quindi parte a arr_lo meno "
-     "la durata); tutti gli altri ripartono appena consegnato. L'ultima e' una "
-     "scelta arbitraria fra le tante possibili -- il carroponte potrebbe anche "
-     "aspettare -- ed e' arbitraria in modo SICURO solo finche' chi disegna fa "
-     "la stessa scelta."),
+     "In coda, i vincoli di sola NECESSITA' (cut). Non dicono niente che "
+     "gli archi non dicano gia', ma lo dicono in una forma che il solutore "
+     "propaga subito, senza passare dalle variabili di partenza e arrivo. "
+     "Usano `t_min`, il percorso piu' BREVE fra le alternative: un cut "
+     "tarato sul rientro diretto taglierebbe le soluzioni con una sosta, che "
+     "durano di piu'."),
 
     # ==================================================================
     ("h2", "4. La capienza quando una vasca compare piu' volte"),
@@ -1352,13 +1767,24 @@ SOLVE = [
     ("h3", "Gli archi"),
     ("c", "model.solve", '        for arco in zd["archi"].values():', "    # Quante traslazioni di T servono"),
     ("p",
-     "Per ogni arco possibile, e per ogni ALTERNATIVA di quell'arco: l'attesa "
-     "prima di partire, le tappe del rientro una per una, la sosta nella vasca "
-     "in mezzo se l'alternativa ne prevede una, l'attesa dopo essere arrivati. "
-     "Tutto sotto il letterale dell'alternativa, quindi vincolante solo se il "
-     "solutore sceglie quell'arco percorso in quel modo. Con "
-     "max_soste_intermedie a zero -- o su un arco senza vasche candidate -- "
-     "l'alternativa e' una sola e questo giro e' identico a quello di prima."),
+     "Per ogni arco possibile, prima le due attese: quella PRIMA di partire, "
+     "sulla vasca dove si e' consegnato, e quella DOPO essere arrivati, su "
+     "quella dove si preleva. Non dipendono da come si viaggia -- partenza e "
+     "arrivo sono gli stessi per tutte le alternative -- e si scrivono una "
+     "volta sola sotto il letterale dell'ARCO."),
+    ("q",
+     "RIPETERLE PER OGNI ALTERNATIVA COSTEREBBE CARO. Darebbe intervalli "
+     "identici con letterali diversi, e il commento nota che sono le "
+     "finestre piu' LUNGHE, quindi quelle che generano piu' coppie nel "
+     "vincolo di non collisione."),
+    ("p",
+     "Poi, per ogni ALTERNATIVA, il viaggio: le tappe del rientro una per "
+     "una e, fra una tappa e la successiva, la sosta nella vasca in mezzo, "
+     "che e' una finestra ferma come le altre. Tutto sotto il selettore "
+     "dell'alternativa, quindi vincolante solo se il solutore sceglie "
+     "quell'arco percorso in quel modo. Con max_soste_intermedie a zero -- o "
+     "su un arco senza vasche candidate -- l'alternativa e' una sola e "
+     "questo giro e' identico a quello di prima."),
     ("p",
      "Le tratte si distinguono per forma: `xa == xb` e' una corsa verticale, e "
      "va trattata come una sosta -- lungo la rotaia il carroponte e' fermo. E' "
@@ -1387,7 +1813,7 @@ SOLVE = [
      "di vincoli generati. E' il consiglio pratico piu' utile del modulo, "
      "perche' il sintomo -- un modello che non finisce -- non suggerisce da "
      "solo la causa."),
-    ("c", "model.solve", "    n_sep_constraints = 0", "    # -- Obiettivo"),
+    ("c", "model.solve", "    n_sep_constraints = 0", "    # -- 3-bis) Interblocco delle vasche"),
     ("p",
      "Per ogni coppia di zone adiacenti si genera la griglia di soglie. Il "
      "commento su `delta` argomenta una scelta di interfaccia: il passo si "
@@ -1412,13 +1838,139 @@ SOLVE = [
      "motivo per cui n_sep_constraints puo' arrivare a decine di migliaia."),
 
     # ==================================================================
-    ("h2", "8. Risolvere, e ricostruire"),
-    ("c", "model.solve", "    # -- Obiettivo", "    segments_per_hoist = []"),
+    ("h2", "7-bis. L'interblocco delle vasche"),
+    ("c", "model.solve", "    # -- 3-bis) Interblocco delle vasche", "    def prenotazioni"),
     ("p",
-     "L'obiettivo e' una riga: minimizzare il takt time. Tutto il resto sono "
-     "vincoli. num_workers=8 fa lavorare in parallelo otto strategie di "
-     "ricerca diverse, che e' il modo in cui CP-SAT ottiene le sue "
-     "prestazioni."),
+     "La regola del PLC (terzo documento, vasche_in_interblocco) tradotta in "
+     "vincoli. Ogni carroponte PRENOTA la vasca in cui si ferma, da quando "
+     "parte verso di lei a quando, ripartito, arriva sulla successiva; se "
+     "due vasche sono in conflitto, le prenotazioni dei due carroponti non "
+     "si sovrappongono mai, modulo T."),
+    ("q",
+     "LE PRENOTAZIONI SI LEGGONO DALLE STESSE TAPPE DELLA NON COLLISIONE. "
+     "Presa, traslazione col pezzo, rilascio, rientro con o senza sosta: "
+     "sono le tappe che near_boundary usa, e il verificatore le ricostruisce "
+     "dai segmenti con la stessa definizione (verify.prenotazioni). Due "
+     "definizioni diverse della stessa prenotazione vorrebbero dire un "
+     "solutore che protegge una cosa e un verificatore che ne controlla "
+     "un'altra."),
+    ("c", "model.solve", "    def prenotazioni", "    n_il_constraints = 0"),
+    ("p",
+     "Per ogni mossa k le prenotazioni sono due: sulla vasca k, dove "
+     "preleva, dalla partenza del rientro che ce lo porta fino all'arrivo "
+     "sulla k+1 col pezzo; sulla vasca k+1, dove consegna, dalla fine della "
+     "presa fino all'arrivo sulla vasca dopo. L'inizio della prima e la fine "
+     "della seconda dipendono dall'arco scelto, e diventano variabili "
+     "(`il_s`, `il_e`) legate all'alternativa vera; una sosta in mezzo e' "
+     "una terza prenotazione, opzionale sul suo selettore."),
+    ("p",
+     "Il caso particolare e' il carroponte che riprende dalla STESSA vasca in "
+     "cui ha consegnato: non raggiunge nessun'altra vasca in mezzo, e le due "
+     "prenotazioni diventano una sola, dalla fine della presa precedente "
+     "all'arrivo della mossa dopo. Si costruiscono solo le prenotazioni delle "
+     "vasche che compaiono in qualche coppia in conflitto: le altre non "
+     "servirebbero a nessun vincolo."),
+    ("c", "model.solve", "    n_il_constraints = 0", "    # -- Obiettivo"),
+    ("p",
+     "Le copie traslate si contano come per la non collisione: tutti gli "
+     "estremi stanno fra meno il rientro piu' lungo e DEP_MAX piu' il "
+     "rientro piu' lungo, e oltre quel numero di periodi due copie non "
+     "possono piu' toccarsi. `intervallo` costruisce ogni prenotazione "
+     "traslata una volta sola anche se serve a piu' coppie, e il vincolo si "
+     "impone A COPPIE per la stessa ragione della non collisione: le "
+     "prenotazioni di uno stesso carroponte si sovrappongono fra loro "
+     "durante ogni traslazione."),
+
+    # ==================================================================
+    ("h2", "8. L'obiettivo"),
+    ("c", "model.solve", "    # -- Obiettivo", "    # -- Attese sopra il carico e lo scarico"),
+    ("p",
+     "Tre criteri, in ordine rigido. Il primo e' il takt time -- oppure, con "
+     "takt_fisso, lo scarto pesato dai tempi teorici. Il secondo, a parita' "
+     "del primo, sono le SOSTE in una vasca in mezzo: meno sono, meglio e'."),
+    ("q",
+     "PERCHE' CONTARE LE SOSTE. Fermarsi in una vasca in mezzo e' una "
+     "traiettoria piu' complicata e piu' lenta, e quando non serve a niente "
+     "il solutore la sceglierebbe comunque -- una qualunque fra le tante "
+     "soluzioni ottime -- mettendo nel file una sosta di zero secondi che "
+     "nessuno ha voluto. E non la si puo' togliere a posteriori: il vincolo "
+     "di non collisione protegge il percorso CON la sosta, non quello "
+     "diritto."),
+    ("p",
+     "Il peso n_moves + 1 sul primo criterio e' quello che rende l'ordine "
+     "GARANTITO invece che sperato: le soste vere non possono essere piu' di "
+     "una per mossa, quindi un'unita' del primo criterio vale sempre piu' di "
+     "qualunque numero di soste risparmiate."),
+
+    ("h3", "Le attese sopra il carico e lo scarico"),
+    ("c", "model.stazioni_presidiate"),
+    ("p",
+     "Le stazioni del percorso che stanno sul carico o sullo scarico: dove "
+     "il pezzo viene appeso e staccato, e un carroponte fermo sopra intralcia "
+     "l'operatore. Si riconoscono per POSIZIONE, con un millimetro di "
+     "tolleranza, e non per indice: se la ricetta ci ripassa a meta' "
+     "percorso, la vasca resta quella presidiata."),
+    ("c", "model.solve", "    # -- Attese sopra il carico e lo scarico", "    obiettivo_scarti = 0"),
+    ("p",
+     "Il tempo che avanza a un carroponte lo passa fermo da qualche parte, e "
+     "al takt time e alle soste e' indifferente dove: il solutore sceglieva a "
+     "caso, e il commento racconta il risultato -- spesso il primo carro "
+     "restava minuti sopra il carico e l'ultimo sopra lo scarico, proprio "
+     "dove l'operatore lavora. Qui si MISURA quel tempo, arco per arco: "
+     "l'attesa prima di partire se si e' consegnato su una stazione "
+     "presidiata, quella dopo l'arrivo se si deve prelevare li', e una sosta "
+     "'in mezzo' che cada proprio li'."),
+    ("q",
+     "MISURATO QUI, MINIMIZZATO ALTROVE. Le variabili `attpres_` non entrano "
+     "nell'obiettivo di questa risoluzione: le minimizza riduci_soste sulla "
+     "soluzione finale, subito dopo il takt time e PRIMA delle soste, perche' "
+     "fermarsi altrove e' meglio che fermarsi li'. Si creano comunque, perche' "
+     "il modello di riduci_soste deve avere le STESSE variabili di quello "
+     "da cui viene il suggerimento (_firma_modello). Se un'attesa sopra il "
+     "carico serve a non collidere, resta: la impone il vincolo di non "
+     "collisione."),
+    ("c", "model.solve", "    obiettivo_scarti = 0", "    solver = cp_model.CpSolver()"),
+    ("p",
+     "Tre obiettivi possibili. Con `_rifinisci` il primo criterio e' gia' "
+     "inchiodato, e si minimizzano le attese sopra carico e scarico e, sotto "
+     "di loro, le soste -- con lo stesso trucco del peso, che qui vale "
+     "len(sel_soste) + 1. Altrimenti il primo criterio pesato piu' le soste, "
+     "oppure il primo criterio da solo se non ci sono soste possibili. I "
+     "pesi dello scarto vengono da _pesi_scarto, interi perche' CP-SAT vuole "
+     "coefficienti interi."),
+
+    # ==================================================================
+    ("h2", "9. Risolvere, e ricostruire"),
+    ("c", "model.deterministico"),
+    ("c", "model.configura_solutore"),
+    ("p",
+     "Il limite di tempo e i thread di un CpSolver si decidono in un punto "
+     "solo, perche' ci sono due modi di risolvere. Quello normale fa lavorare "
+     "in parallelo NUM_WORKERS strategie -- otto, ma mai piu' dei processori "
+     "della macchina: il commento racconta che sul runner della CI, che ne ha "
+     "quattro, otto thread si contendevano quattro processori e il calcolo "
+     "andava piu' di tre volte piu' piano."),
+    ("q",
+     "LA MODALITA' DETERMINISTICA E' SOLO PER I TEST. La accende la "
+     "variabile d'ambiente CRANESTRIKE_DETERMINISTICO, e chi usa il "
+     "programma non la vede mai. Il problema che risolve: le strategie in "
+     "parallelo corrono ciascuna per conto suo e il limite si misura con "
+     "l'orologio, quindi quale soluzione esce dipende dalla macchina, e un "
+     "test che passa sul PC puo' fallire sulla CI. Con `interleave_search` le "
+     "strategie si alternano a turni fissi e il limite diventa una quantita' "
+     "di LAVORO (max_deterministic_time): la stessa linea da' la stessa "
+     "soluzione dovunque. Costa circa tre volte il tempo."),
+    ("p",
+     "LAVORO_PER_SECONDO converte il limite in secondi in unita' di lavoro, "
+     "misurato perche' un limite di 60 s resti piu' o meno un minuto anche in "
+     "modalita' deterministica. Il limite in tempo vero resta, molto largo, "
+     "come rete contro una macchina lentissima -- e il commento avverte che "
+     "se scattasse lui il risultato tornerebbe a dipendere dalla macchina."),
+    ("c", "model.solve", "    solver = cp_model.CpSolver()", "    segments_per_hoist = []"),
+    ("p",
+     "Con `_rifinisci` si aggiungono i PARAMETRI_RIFINITURA -- oggi solo "
+     "linearization_level a zero: col modello ridotto ai rientri il "
+     "rilassamento lineare non serve, e costruirlo e' la parte lenta."),
     ("p",
      "Se lo stato non e' OPTIMAL o FEASIBLE si restituisce una Solution vuota "
      "col solo stato. Non si solleva: 'non c'e' soluzione' e' una risposta "
@@ -1445,20 +1997,169 @@ SOLVE = [
      "E' la stessa proprieta' che verify.py controlla: le fasi devono crescere "
      "lungo il giro."),
     ("p",
-     "Poi _build_zone_trajectory trasforma i valori risolti in segmenti "
-     "disegnabili. E' la funzione le cui convenzioni devono coincidere con "
-     "quelle degli archi, ed e' argomento del documento successivo."),
+     "Poi, arco per arco del giro scelto, si leggono le due parti della "
+     "traiettoria che non discendono dalle fasi: quanto il carroponte e' "
+     "rimasto fermo dove ha consegnato (`attese`, dalla partenza dell'arco) "
+     "e, se l'alternativa accesa ha una sosta, dove e per quanto si e' "
+     "fermato (`soste`). Finiscono nel HoistPlan, e da li' nel file."),
+    ("p",
+     "_build_zone_trajectory trasforma infine i valori risolti in segmenti "
+     "disegnabili, ricevendo `attese` e `soste`: disegna quindi la "
+     "traiettoria che il solutore ha scelto, non una ricostruita con una "
+     "convenzione. E' argomento del documento successivo."),
     ("c", "model.solve", "    raw = {", None),
     ("p",
      "`raw` porta i valori diagnostici: il tempo di calcolo, il takt in tick, "
-     "la separazione richiesta, e il numero di vincoli di separazione "
-     "generati. Quest'ultimo e' il piu' utile quando un modello e' lento: dice "
-     "quanto e' grande la parte che costa."),
+     "la separazione richiesta, il numero di vincoli di separazione e di "
+     "interblocco generati. Questi ultimi sono i piu' utili quando un modello "
+     "e' lento: dicono quanto e' grande la parte che costa."),
+    ("p",
+     "Poi quello che serve alle passate successive: quante soste e quanta "
+     "attesa sopra carico e scarico ha la soluzione (i criteri di "
+     "riduci_soste), lo scarto pesato dai teorici quando takt_fisso e' "
+     "acceso, e `_suggerimento`, cioe' tutti i valori della soluzione con "
+     "l'impronta e i nomi delle variabili del modello."),
+    ("q",
+     "LO SCARTO SI RICALCOLA, NON SI LEGGE. Il commento spiega perche' "
+     "errore_pesato non viene dalle variabili `sotto` e `sopra`: quelle "
+     "vedono i trasporti arrotondati al tick, e il numero differirebbe di "
+     "qualche centesimo da quello che scrivono il riepilogo e il file, che "
+     "partono dai tempi in vasca veri. Si ricalcola dagli istanti con "
+     "scarti_dal_teorico, cosi' i numeri mostrati sono uno solo."),
     ("p",
      "actual_time viene riconvertito in secondi e restituito per intero. E' "
      "quello che permette a verify.py di controllare le permanenze in modo "
      "assoluto invece che modulo T -- e senza, come si e' visto, il controllo "
      "sarebbe ambiguo per multipli interi del periodo."),
+
+    # ==================================================================
+    ("h2", "10. Lo scarto dai tempi teorici"),
+    ("c", "model", "# I pesi dello scarto sono decimali nel file", "def scarti_dal_teorico"),
+    ("p",
+     "I pesi nel file sono decimali, i coefficienti di CP-SAT interi: si "
+     "moltiplicano per SCALA_PESI, cento. Due decimali bastano a qualunque "
+     "peso che abbia senso scrivere a mano."),
+    ("c", "model.scarti_dal_teorico"),
+    ("p",
+     "Di quanto il bagno di ogni vasca in mezzo si scosta dal teorico, in "
+     "secondi: positivo sopra, negativo sotto. Lavora sugli ISTANTI di "
+     "prelievo e non sulle variabili del solutore, e il docstring dice "
+     "perche': cosi' vale per qualunque ciclogramma, trovato dal calcolo o "
+     "composto a mano."),
+    ("c", "model.scarto_pesato"),
+    ("c", "model.errore_pesato"),
+    ("p",
+     "Lo scarto pesato di una tappa e' il suo valore assoluto per il peso "
+     "del lato su cui cade; quello di un ciclogramma e' la somma. "
+     "errore_pesato riceve gli scarti e non gli istanti, perche' chi compone "
+     "a mano ha in mano i tempi in vasca. E' l'OBIETTIVO del calcolo a takt "
+     "fisso, ed e' il numero su cui la ricerca sceglie la suddivisione "
+     "migliore."),
+    ("c", "model.scarto_totale"),
+    ("p",
+     "La stessa somma SENZA pesi: i secondi di distacco dai teorici, e "
+     "basta. E' questo il numero che il programma MOSTRA -- nell'avanzamento "
+     "della ricerca, nel messaggio a fine calcolo, nel riepilogo scritto nel "
+     "file."),
+    ("q",
+     "DUE NUMERI, DUE USI, E NON VANNO SCAMBIATI. Quello pesato e' in secondi "
+     "per peso: serve a decidere, perche' dice quanto conta lo scarto, ma "
+     "non si legge come una durata -- un peso 3 su una vasca triplica un "
+     "secondo vero. Quello senza pesi si legge come una durata, ma non dice "
+     "quale scarto e' grave. La scelta resta sul pesato; a chi guarda si "
+     "dice quello in secondi veri. Per un periodo si mostrava il pesato, ed "
+     "e' il motivo per cui scarto_totale esiste."),
+
+    # ==================================================================
+    ("h2", "11. Le rifiniture sulla soluzione scelta"),
+    ("p",
+     "Dopo la ricerca, sulla soluzione che si tiene, si risolve ancora: una "
+     "volta per avvicinare i bagni ai teorici a takt invariato, una volta "
+     "per togliere soste inutili e attese sopra carico e scarico. Tutte e due "
+     "le passate partono dalla soluzione gia' in mano, e le funzioni che "
+     "seguono servono a passargliela."),
+    ("c", "model", "# Le variabili che `riduci_soste` inchioda", "def _nomi_variabili"),
+    ("p",
+     "Le variabili decise fuori dai rientri, riconosciute dal PREFISSO del "
+     "nome: takt time, istanti di prelievo, fasi, periodi di ogni mossa, "
+     "ordine del giro. Il commento da' la misura che giustifica "
+     "l'inchiodatura: libero tutto, su una linea da 14 mosse e 6 carroponti, "
+     "CP-SAT non toglieva nessuna sosta in 20 s, perche' solo il presolve "
+     "dei vincoli di non collisione se ne prendeva 18."),
+    ("c", "model._nomi_variabili"),
+    ("c", "model._firma_modello"),
+    ("p",
+     "Un'impronta delle variabili, in ordine: due modelli con la stessa "
+     "impronta hanno le stesse variabili agli stessi indici, e una soluzione "
+     "dell'uno si puo' passare all'altro per posizione. E' il motivo per cui "
+     "solve crea le variabili delle attese anche quando non le minimizza."),
+    ("c", "model._suggerisci"),
+    ("p",
+     "I valori di una soluzione precedente come punto di partenza, ma solo "
+     "se l'impronta coincide. Il docstring motiva la prudenza: un "
+     "suggerimento sbagliato non rende il risultato sbagliato, lo rende "
+     "lento a trovarsi. Con `fissa` le variabili decise fuori dai rientri "
+     "non si suggeriscono, si INCHIODANO."),
+    ("c", "model._suggerisci_per_nome"),
+    ("p",
+     "La stessa cosa da un modello DIVERSO, abbinando per nome. Serve a "
+     "rifinisci_soluzione, il cui modello a takt fisso ha variabili nuove "
+     "(gli scarti) e altre in numero diverso (le traslazioni, che dipendono "
+     "dal takt). Quelle che non si ritrovano restano senza suggerimento, e "
+     "il docstring precisa che va bene cosi': il suggerimento serve a "
+     "partire da una soluzione buona, non deve essere completo per "
+     "funzionare."),
+    ("c", "model.riduci_soste"),
+    ("p",
+     "Si risolve di nuovo lo stesso modello con `_rifinisci`: tutto "
+     "inchiodato alla soluzione trovata tranne i rientri a vuoto, che "
+     "partono dalla soluzione come suggerimento. Il modello che resta e' "
+     "piccolo, e il limite di tempo (TEMPO_RIDUCI_SOSTE_S, venti secondi) e' "
+     "un tetto che di solito non si raggiunge."),
+    ("p",
+     "Due cose da togliere, in quest'ordine: il tempo FERMO sopra il carico "
+     "e lo scarico, poi le soste. L'attesa si sposta dove ha consegnato, "
+     "dove prelevera' o in una vasca in mezzo, se la non collisione lo "
+     "permette -- anche a costo di una sosta in piu'. Per questo si "
+     "rifinisce anche una soluzione OPTIMAL: l'ottimo e' dimostrato su takt "
+     "e soste, non su dove si aspetta. Le soste da sole invece si toccano "
+     "solo su una soluzione FEASIBLE, l'unica in cui possono essere rimaste "
+     "per mancanza di tempo."),
+    ("q",
+     "SI TIENE LA NUOVA SOLO SE E' MEGLIO. Stesso takt in tick e, "
+     "nell'ordine, meno attesa sopra carico e scarico oppure, a parita', "
+     "meno soste: il confronto fra le due coppie e' lessicografico. "
+     "Altrimenti -- tempo scaduto, modello che non si costruisce, calcolo "
+     "fermato -- si restituisce `sol` com'e'. Il docstring lo riassume: non "
+     "c'e' un caso in cui si peggiori. Lo stato resta quello della "
+     "soluzione originale, perche' il takt non e' stato ottimizzato di "
+     "nuovo."),
+    ("c", "model.rifinisci_soluzione"),
+    ("p",
+     "Le passate che seguono il calcolo automatico, e il docstring spiega "
+     "cosa manca al calcolo a takt LIBERO: ha cercato il takt piu' corto e "
+     "basta, e fra i tanti giri che lo raggiungono ne ha preso uno "
+     "qualunque, senza guardare i teorici. Qui si risolve di nuovo con il "
+     "takt INCHIODATO a quello trovato, sulle stesse zone, minimizzando lo "
+     "scarto pesato -- lo stesso obiettivo di takt_fisso. Poi riduci_soste "
+     "sulla soluzione che si tiene."),
+    ("p",
+     "Col takt FISSO lo scarto e' gia' stato l'obiettivo del calcolo, e "
+     "resta solo riduci_soste. Chi ha premuto Ferma ha rinunciato al resto "
+     "del lavoro, e riceve la soluzione cosi' com'e'."),
+    ("q",
+     "NON SI SPEGNE, PERCHE' NON C'E' NIENTE DA PERDERCI. Il takt non cambia; "
+     "la soluzione di partenza e' valida anche per il nuovo modello e gli "
+     "si passa come suggerimento, quindi una soluzione c'e' sempre; e la "
+     "nuova si tiene solo se lo scarto SCENDE. La banda della copia a takt "
+     "fisso si allarga se serve a contenere T: e' gia' dentro per "
+     "costruzione, ma un estremo fuori dalla griglia dei tick potrebbe "
+     "lasciarlo fuori di un soffio, e ProblemData lo rifiuterebbe."),
+    ("p",
+     "Le soste si tolgono sul modello su cui la nuova e' stata trovata, "
+     "quello a takt fisso: e' l'unico su cui il suo suggerimento vale. In "
+     "`raw` restano `errore_pesato` sempre valorizzato e, se la passata ha "
+     "migliorato, `errore_pesato_prima` con il punto di partenza."),
 ]
 
 
@@ -1470,7 +2171,7 @@ COSTRUZIONE = [
     ("h1", "model.py (5) -- costruire un ciclogramma senza risolvere"),
     ("p",
      "Quinto dei documenti su model.py. Qui c'e' la meta' del modulo che NON "
-     "usa CP-SAT: come si costruisce una Solution completa dai soli tre gradi "
+     "usa CP-SAT: come si costruisce una Solution completa dai soli gradi "
      "di liberta', e come da quei valori si ricavano le traiettorie."),
     ("p",
      "E' la parte che rende possibile l'editor manuale, il salvataggio "
@@ -1510,6 +2211,20 @@ COSTRUZIONE = [
      "composto a mano, un file scritto prima che la colonna esistesse) si "
      "ripiega sulla regola predefinita, che almeno non sosta sulle vasche di "
      "confine."),
+    ("q",
+     "'ASSENTE' VUOL DIRE 'DECIDI TU', NON 'RIPARTI SUBITO'. Il ripiego vale "
+     "mossa per mossa, non per tutto il ciclogramma: un dizionario `attese` "
+     "a cui manca una chiave -- una cella vuota nel file, un rientro nato da "
+     "una modifica a mano -- applica la regola predefinita a QUELLA mossa e "
+     "usa i valori dati per le altre. Prima una chiave mancante valeva zero, "
+     "cioe' partenza immediata: era una scelta, presa al posto dell'utente "
+     "e senza dirlo."),
+    ("p",
+     "`passaggi` e' l'ultimo ingresso, e il piu' recente: i punti (istante, "
+     "posizione) per cui l'utente, disegnando a mano, vuole che un carroponte "
+     "passi durante i rientri a vuoto. L'istante e' qualunque, perche' conta "
+     "solo dove cade nel periodo. In un rientro che ne ha, attesa e sosta in "
+     "mezzo non contano: il percorso lo decidono i punti (sezione 3-bis)."),
     ("p",
      "`tollerante` e' l'interruttore che spegne i rifiuti: con la lista delle "
      "incoerenze valorizzata, i valori impossibili vengono descritti invece "
@@ -1578,20 +2293,46 @@ COSTRUZIONE = [
      "che il carroponte serve per prima dentro il periodo."),
     ("q",
      "PRIMA LA LISTA VENIVA RUOTATA per farla cominciare dalla mossa di indice "
-     "piu' basso, che e' la convenzione del solutore -- ed era un difetto. Nel "
-     "modello quella convenzione regge perche' il modello COSTRINGE la mossa "
-     "di confine basso a essere anche la prima in ordine di tempo: lungo il "
-     "giro le fasi crescono, e il giro parte da lei. Componendo a mano nessuno "
+     "piu' basso, che era la convenzione del solutore -- ed era un difetto. "
+     "Nel modello di allora quella convenzione reggeva perche' il modello "
+     "COSTRINGEVA la mossa di confine basso a essere anche la prima in "
+     "ordine di tempo (oggi non piu': il punto in cui il giro si richiude lo "
+     "sceglie il solutore, quarto documento). Componendo a mano nessuno "
      "lo costringe. Se il carroponte serve prima la mossa 6 e poi la 5, la "
      "rotazione produce il giro [5, 6] e pretende che dalla 5 si arrivi alla 6 "
      "SENZA cambiare periodo, cioe' indietro nel tempo: ne usciva un 'non "
      "arriva in tempo' sfasato di esattamente un takt time, su un giro che "
      "sta benissimo in piedi, e una traiettoria disegnata a pezzi scambiati."),
     ("p",
-     "dep_hi e arr_lo si calcolano con la stessa convenzione del modello: "
-     "'parte appena consegnato'. Il commento lo dichiara, ed e' la terza volta "
-     "che quella convenzione compare -- nel modello, qui, e in "
-     "_build_zone_trajectory. Le tre devono restare d'accordo."),
+     "Il cuore e' `quando(k1, k2)`: partenza e arrivo del rientro a vuoto "
+     "fra due mosse. Tre regole, in ordine di precedenza. Se il rientro ha "
+     "dei punti di passaggio decidono loro (orario_passaggi). Se `attese` ha "
+     "un valore per k1, si parte a fine consegna piu' quell'attesa. "
+     "Altrimenti la regola predefinita: si aspetta dove si e' consegnato "
+     "solo se la destinazione e' una vasca di confine e la partenza no "
+     "(_aspetta_dove_ha_consegnato), se no si parte subito. La durata del "
+     "viaggio e' quella di _durata_rientro, quindi comprende un'eventuale "
+     "sosta in mezzo."),
+    ("q",
+     "dep_hi E arr_lo ESCONO DALLA STESSA FUNZIONE. Il commento lo dice: "
+     "i due istanti di confine si calcolano con la regola che usa il "
+     "disegno, altrimenti descriverebbero una traiettoria diversa da quella "
+     "che si vede. Riguardano le STAZIONI agli estremi della zona, non il "
+     "giro, e con un'assegnazione parziale si ripiega sulle mosse che ci "
+     "sono."),
+    ("p",
+     "Prima di calcolare qualunque tempo si controllano le soste arrivate "
+     "dal file, con _perche_la_sosta_non_va: una sosta che non sta in piedi "
+     "solleva, oppure -- in modalita' tollerante -- finisce fra le "
+     "incoerenze e il rientro torna diritto. Poi i punti di passaggio "
+     "vengono assegnati ai rientri in cui cadono (assegna_passaggi); quelli "
+     "che cadono mentre il carroponte trasporta un pezzo sono segnalati, e "
+     "dove ci sono punti la sosta in mezzo si toglie."),
+    ("p",
+     "Le attese finiscono nel piano comunque, calcolate o ricevute: chi salva "
+     "il ciclogramma ha sempre il quarto grado di liberta' da scrivere. A "
+     "_build_zone_trajectory si passa `attesa_alla_partenza` solo quando "
+     "`attese` non e' arrivato da fuori."),
     ("p",
      "Una zona senza mosse attive produce una traiettoria VUOTA invece di un "
      "errore: e' lo stato normale del disegno manuale a meta'."),
@@ -1618,6 +2359,12 @@ COSTRUZIONE = [
      "tolleranza compresa. Devono coincidere: n_min e' il numero di periodi "
      "che la ricostruzione dedurra' da sola, e `extra` e' solo la differenza "
      "fra quello e il numero vero."),
+    ("p",
+     "Gli ultimi due valori restituiti sono le attese e le soste in mezzo, "
+     "raccolte dai piani cosi' come sono. Il docstring dice di entrambe la "
+     "stessa cosa: non si deducono dalle fasi, e senza la traiettoria "
+     "ricostruita non e' quella verificata -- per le soste nemmeno nei "
+     "tempi, perche' il rientro tornerebbe diritto e piu' corto."),
 
     ("h3", "proposta_semplice"),
     ("c", "model.proposta_semplice"),
@@ -1640,8 +2387,9 @@ COSTRUZIONE = [
      "verificatore. E' la scelta giusta -- meglio partire da qualcosa di "
      "concreto e verificabile che da un foglio bianco."),
     ("p",
-     "Il takt time, se non imposto, si sceglie dentro la banda dichiarata "
-     "quando ci sta; altrimenti si prende il ciclo minimo, e sara' di nuovo il "
+     "Il takt time, se non imposto, si sceglie dentro la banda in cui si "
+     "cerca -- col takt fisso, il solo teorico -- quando ci sta; altrimenti "
+     "si prende il ciclo minimo, e sara' di nuovo il "
      "verificatore a segnalare che il takt non e' rispettato."),
 
     # ==================================================================
@@ -1689,6 +2437,78 @@ COSTRUZIONE = [
      "leggono le stesse LiftPhase."),
 
     # ==================================================================
+    ("h2", "3-bis. I punti di passaggio"),
+    ("p",
+     "Nel disegno manuale l'utente puo' dire di un carroponte: in "
+     "quell'istante deve trovarsi li'. Sono i PUNTI DI PASSAGGIO, e valgono "
+     "solo nei rientri a vuoto. Le cinque funzioni di questa sezione "
+     "decidono a quale rientro appartiene ciascun punto, quando il "
+     "carroponte si muove per toccarli, e come lo si disegna."),
+    ("c", "model.assegna_passaggi"),
+    ("p",
+     "A quale rientro appartiene ogni punto. L'istante e' qualunque -- il "
+     "ciclogramma si ripete -- e si riporta sulla scala del rientro col "
+     "modulo T. Un punto che non cade in nessun rientro e' un punto in cui "
+     "il carroponte sta trasportando un pezzo, e torna indietro nella "
+     "seconda lista invece di sparire."),
+    ("q",
+     "LA STESSA TRAPPOLA DEL MULTIPLO ESATTO. Un istante un capello prima "
+     "di un multiplo di T, riportato col modulo, finirebbe in fondo al "
+     "periodo invece che all'inizio del rientro. La riga che lo riporta "
+     "all'inizio quando manca meno di `eps` alla fine del periodo e' la "
+     "stessa idea di _fase_nel_periodo, e per la stessa ragione."),
+    ("c", "model.gambe_via_passaggi"),
+    ("p",
+     "Il rientro attraverso i punti come GAMBE: una per arrivare al primo, "
+     "una fra ogni coppia, una dall'ultimo alla stazione di arrivo. Le gambe "
+     "e non un percorso unico perche' ognuna va fatta in tempo per il "
+     "proprio punto, e chi le usa deve sapere quanto dura ciascuna. Ogni "
+     "tratta porta anche se e' verticale, e in che verso: `(stazione, sale)`."),
+    ("q",
+     "PRUDENTE APPOSTA. Se un ostacolo cade lungo il percorso -- o se ne "
+     "parte, o vi si arriva -- si sale sullo svincolo della partenza, si fa "
+     "tutto il giro in alto e si scende su quello dell'arrivo. Il docstring "
+     "spiega perche' non si prova a restare bassi fra un punto e l'altro: un "
+     "punto libero puo' stare sopra una vasca qualunque, e da li' scendere "
+     "non e' detto si possa. `ostacolo` e `trasla` sono due abbreviazioni "
+     "locali, non logica in piu'."),
+    ("c", "model._segmenti_gamba"),
+    ("p",
+     "Le tratte di una gamba come Segment: `empty` per le traslazioni, "
+     "`lift_empty` per le corse verticali, con il verso e la cinematica "
+     "verticale orientata -- come fa _segmenti_rientro. Le tratte di durata "
+     "nulla non si emettono: un movimento lungo zero si ordina male fra i "
+     "vicini."),
+    ("c", "model.orario_passaggi"),
+    ("p",
+     "Quando il carroponte si muove. La regola e' quella del punto di "
+     "passaggio: la linea fa un vertice ESATTAMENTE sul punto. Il tempo che "
+     "avanza si passa fermi prima di ogni gamba -- si parte all'ultimo "
+     "momento utile per arrivare puntuali -- e dall'ultimo punto si riparte "
+     "subito, aspettando poi sulla vasca dove si deve prelevare."),
+    ("p",
+     "Una sosta in un posto, osserva il docstring, e' semplicemente due "
+     "punti alla stessa posizione: non serve un meccanismo a parte. I punti "
+     "che non si fanno in tempo a raggiungere tornano fra i ritardi, con "
+     "l'istante voluto e quello possibile; li' si arriva appena si puo', e "
+     "da li' si prosegue."),
+    ("c", "model._rientro_via_passaggi"),
+    ("p",
+     "Il disegno dello stesso rientro, con la stessa regola di "
+     "orario_passaggi: attesa prima di ogni gamba, poi la gamba. Restituisce "
+     "l'istante in cui il carroponte e' pronto sulla stazione di arrivo, che "
+     "_build_zone_trajectory usa come ogni altro arrivo. Un punto mancato "
+     "non blocca niente: lo si dice fra le incoerenze e si va avanti, come "
+     "per ogni altra cosa composta a mano."),
+    ("q",
+     "MEZZO TICK, NON EPS. Un'attesa si disegna da mezzo tick in su, e il "
+     "commento racconta perche' la soglia non e' piu' eps_seconds: le attese "
+     "del solutore sono tick interi, e anche una di un tick e' vera. Con EPS "
+     "come soglia un'attesa lunga proprio EPS spariva, e lasciava un buco "
+     "nella traiettoria che il verificatore -- con la stessa tolleranza -- "
+     "vedeva per un soffio. La stessa soglia vale in _build_zone_trajectory."),
+
+    # ==================================================================
     ("h2", "4. _build_zone_trajectory"),
     ("c", "model._build_zone_trajectory", None, "    for i, k in enumerate(order):"),
     ("p",
@@ -1721,22 +2541,33 @@ COSTRUZIONE = [
     ("h3", "Quando parte e quando arriva"),
     ("c", "model._build_zone_trajectory", "        is_last = i == n - 1", "        if depart_t < t1 - EPS:"),
     ("p",
-     "Quattro casi, e sono ESATTAMENTE i quattro del blocco `arcs` dentro "
-     "solve(). Chi parte dal confine alto parte a dep_hi; chi torna alla PRIMA "
-     "mossa del giro arriva ad arr_lo; se vale l'una e l'altra, entrambe; "
-     "altrimenti si riparte appena consegnati."),
+     "Il rientro si decide in un ordine di precedenza preciso. Se l'utente "
+     "ha messo dei punti di passaggio, il rientro e' il loro e lo disegna "
+     "_rientro_via_passaggi. Altrimenti si guarda la sosta in mezzo -- "
+     "controllata un'ultima volta con _perche_la_sosta_non_va -- e se ne "
+     "ricava `travel_e`, il tempo fra partenza e arrivo, sosta compresa: e' "
+     "con quel totale che si decide quando partire."),
+    ("p", "Poi QUANDO partire, ancora in ordine:"),
+    ("li", "con `attese` -- la scelta del solutore, o quella letta dal file -- "
+           "si parte a fine consegna piu' l'attesa, e basta. Vale anche sugli "
+           "archi di confine: il commento nota che dep_hi e arr_lo dicono la "
+           "stessa cosa ma non finiscono nel file, e la traiettoria deve "
+           "venire uguale anche ricostruita da quello che il file porta;"),
+    ("li", "con `attesa_alla_partenza` -- il DISEGNO MANUALE, che non deve "
+           "combaciare con nessun vincolo del modello -- si sceglie arco per "
+           "arco con la regola della funzione qui sotto;"),
+    ("li", "altrimenti la vecchia convenzione: chi parte dal confine alto parte "
+           "a dep_hi, chi arriva al confine basso arriva ad arr_lo, e tutti "
+           "gli altri ripartono appena consegnato."),
     ("q",
-     "arr_lo E' LEGATO A order[0], NON A zone.lo. Per il solutore sono la "
-     "stessa mossa -- il modello costringe quella di confine basso a essere "
-     "anche la prima in ordine di tempo -- ma un giro composto a mano puo' "
-     "cominciare da un'altra, e li' i due indici divergono. Guardare zone.lo "
-     "attaccava l'istante di richiusura del periodo alla mossa sbagliata."),
-    ("p",
-     "Il primo ramo, `attesa_alla_partenza`, e' quello del DISEGNO MANUALE, e "
-     "non guarda ne' dep_hi ne' arr_lo: sceglie arco per arco dove far passare "
-     "il tempo morto, con la regola della funzione qui sotto. Puo' farlo "
-     "perche' li' non c'e' nessun vincolo del modello da rispettare -- e' il "
-     "verificatore a controllare cio' che si vede."),
+     "dep_hi E arr_lo SONO LEGATI A zone.hi E zone.lo, IL +T A order[0]. Il "
+     "commento separa le due cose: i due istanti di confine riguardano le "
+     "STAZIONI agli estremi della zona -- e' su quelle che il modello "
+     "costruisce il vincolo di non collisione -- mentre il +T riguarda il "
+     "PERIODO, e sta sull'arco che si richiude sulla prima mossa del giro. "
+     "Per un po' hanno condiviso la stessa condizione, perche' il modello "
+     "obbligava la prima mossa del giro a coincidere con zone.lo; da quando "
+     "il punto di richiusura e' libero, non coincidono piu'."),
     ("c", "model._aspetta_dove_ha_consegnato"),
     ("q",
      "NON SOSTARE SU UNA VASCA DI CONFINE. Le stazioni agli estremi della zona "
@@ -1755,17 +2586,15 @@ COSTRUZIONE = [
      "tratto in mezzo lo si percorre presto invece di restare fermi in mezzo "
      "alla rotaia."),
     ("q",
-     "IL SOLUTORE TIENE LA CONVENZIONE VECCHIA, E DEVE. Il vincolo di non "
-     "collisione e' costruito su di essa (in solve, blocco `arcs`) e protegge "
-     "quella traiettoria: disegnarne un'altra vorrebbe dire garantire una cosa "
-     "e mostrarne un'altra. E' il motivo per cui il comportamento e' un "
-     "parametro con valore predefinito, e non la nuova regola per tutti."),
-    ("p",
-     "Il commento sull'ultimo caso dichiara che e' una convenzione per la "
-     "VISUALIZZAZIONE: nessuna attesa gratuita prima della partenza, e "
-     "l'eventuale margine mostrato come attesa DOPO l'arrivo. E' arbitraria, "
-     "ed e' arbitraria in modo sicuro solo perche' solve() ha fatto la stessa "
-     "scelta."),
+     "LA CONVENZIONE VECCHIA NON LA USA PIU' NESSUNO DEI CHIAMANTI DEL "
+     "MODULO. Un tempo era quella del solutore, e il vincolo di non "
+     "collisione era costruito su di essa. Adesso la partenza e' una "
+     "variabile, e solve() passa le `attese` che ha scelto; _assembla passa "
+     "o `attese` o `attesa_alla_partenza`. L'ultimo ramo resta come ripiego "
+     "per chi chiama la funzione senza nessuno dei due. Il docstring, alla "
+     "voce attesa_alla_partenza, descrive ancora il mondo di prima -- 'il "
+     "solutore deve tenere il valore predefinito' -- e va letto con questo "
+     "in mente."),
 
     ("h3", "Le due incoerenze possibili"),
     ("c", "model._build_zone_trajectory", "        if depart_t < t1 - EPS:", "        # `target_pick` e' calcolato sopra"),
@@ -1788,8 +2617,14 @@ COSTRUZIONE = [
      "questa condizione scatta senza la lista, significa che il MODELLO ha "
      "prodotto valori impossibili, ed e' un difetto del programma."),
     ("p",
-     "Il tratto fra le due mosse si emette come rientro solo se le due "
-     "posizioni differiscono. Il commento spiega il caso opposto: sulla stessa "
+     "Con una sosta in mezzo il rientro si disegna in due pezzi, con fra i "
+     "due un tratto fermo nella vasca della sosta: il commento la chiama "
+     "un'attesa come le altre, che si distingue solo per DOVE avviene. Le "
+     "attese si disegnano solo sopra mezzo tick, la soglia spiegata con "
+     "_rientro_via_passaggi."),
+    ("p",
+     "Senza sosta, il tratto fra le due mosse si emette come rientro solo se "
+     "le due posizioni differiscono. Il commento spiega il caso opposto: sulla stessa "
      "stazione un 'empty' di lunghezza nulla creerebbe un segmento degenere "
      "che, con lo scarto di arrotondamento sui tick, si ordina male rispetto "
      "ai vicini e SPEZZA la traiettoria."),
@@ -1802,10 +2637,11 @@ COSTRUZIONE = [
     ("q",
      "IL +T STA SULL'ARCO CHE CHIUDE IL PERIODO, cioe' quello che riporta alla "
      "PRIMA mossa del giro: quel prelievo appartiene al ciclo dopo. La stessa "
-     "riga sta in solve() e in verify.py -- tre punti che devono dire la stessa "
-     "cosa -- e per un po' l'hanno detta in un modo che regge solo per il "
-     "solutore: il +T sulla mossa di CONFINE BASSO. Coincidono finche' il giro "
-     "comincia da li', che il modello garantisce e la composizione a mano no. "
+     "cosa sta in solve() (`bersaglio`) e in verify.py -- tre punti che "
+     "devono dire la stessa cosa -- e per un po' l'hanno detta in un modo che "
+     "reggeva solo per il solutore di allora: il +T sulla mossa di CONFINE "
+     "BASSO. Coincidono finche' il giro comincia da li', che il modello di "
+     "allora garantiva e la composizione a mano no. "
      "Su un giro manuale che cominci da un'altra mossa, il +T finiva sull'arco "
      "sbagliato e il ciclogramma veniva dichiarato irrealizzabile per esattamente "
      "un takt time."),
@@ -1845,14 +2681,23 @@ AUTOMATICA = [
      "max_candidates come limite di sicurezza. E' l'onesta' che serve: la "
      "strategia e' esponenziale, e lo dice."),
 
-    ("h3", "I due prefiltri, in un posto solo"),
+    ("h3", "I prefiltri, in un posto solo"),
     ("c", "model._scarto_prefiltro"),
     ("p",
      "Restituisce None se la suddivisione va provata col solutore, altrimenti "
-     "il motivo per cui si scarta. I due filtri sono economici -- una somma e "
-     "un confronto fra intervalli -- e tolgono di mezzo moltissimo: su una "
-     "linea di dieci vasche con il takt time stretto, 176 suddivisioni "
-     "diventano 10."),
+     "il motivo per cui si scarta, come coppia (motivo, spiegazione). I tre "
+     "filtri sono economici -- una somma e qualche confronto fra intervalli -- "
+     "e tolgono di mezzo moltissimo: su una linea di dieci vasche con il takt "
+     "time stretto, 176 suddivisioni diventano 10."),
+    ("li", "CARICO: una zona il cui solo trasporto a carico supera gia' il "
+           "takt time massimo -- quello in cui si CERCA, che col takt fisso e' "
+           "il teorico;"),
+    ("li", "GEOMETRIA: zone_layout_conflicts trova qualcosa che il modello non "
+           "sa rappresentare;"),
+    ("li", "PORTATA: zone_fuori_portata trova un carroponte che dovrebbe "
+           "servire una vasca oltre la sua corsa. Il commento lo distingue "
+           "dagli altri due: non e' una suddivisione difficile, e' una che la "
+           "macchina non puo' fare."),
     ("q",
      "PERCHE' NON DENTRO solve_auto_zones. Il docstring lo dice: servono a due "
      "cose, scartare e CONTARE. Il conteggio a priori -- quante risoluzioni si "
@@ -1892,10 +2737,25 @@ AUTOMATICA = [
     ("h2", "1. solve_auto_zones"),
     ("c", "model.solve_auto_zones", None, "    travel_loaded_seconds ="),
     ("p",
-     "I controlli d'ingresso sono due e riguardano solo la coerenza: "
-     "n_hoists positivo e non superiore al numero di mosse. Il tetto sul "
-     "numero di suddivisioni non e' qui -- si applica piu' avanti, quando si "
-     "sa quante ne restano davvero da risolvere."),
+     "I controlli d'ingresso riguardano solo la coerenza: n_hoists positivo, "
+     "non superiore al numero di mosse e, se le portate sono dichiarate, "
+     "uguale al loro numero -- le portate dicono gia' quanti carroponti ci "
+     "sono, e il messaggio dice dove cambiarle. Il tetto sul numero di "
+     "suddivisioni non e' qui: si applica piu' avanti, quando si sa quante "
+     "ne restano davvero da risolvere."),
+    ("q",
+     "IL LIMITE DI TEMPO PREDEFINITO NON E' QUELLO DEL FILE. "
+     "time_limit_per_candidate vale 8 secondi nella firma, mentre il foglio "
+     "Parametri ha tempo_limite_per_tentativo_s a 120. Chi chiama la "
+     "funzione da Python senza passarlo ottiene una ricerca molto piu' "
+     "corta di quella del programma."),
+    ("c", "model._chiave_migliore"),
+    ("p",
+     "Su cosa si confrontano due soluzioni fattibili, piu' piccolo e' meglio. "
+     "Col takt time libero conta il takt time. Col takt FISSO il takt e' lo "
+     "stesso per tutte, e conta lo scarto PESATO dai teorici; il takt resta "
+     "in coda solo per completezza. La presenza di `errore_pesato` in raw e' "
+     "il segno di riconoscimento: solve lo valorizza solo col takt fisso."),
 
     ("h3", "Filtrare tutto, poi risolvere"),
     ("c", "model.solve_auto_zones", "    travel_loaded_seconds =", "    if best_solution is None:"),
@@ -1920,7 +2780,9 @@ AUTOMATICA = [
      "suddivisione valida quando esiste: lasciando fallire solve(), la prima "
      "geometria patologica farebbe abortire tutta la ricerca -- e su una linea "
      "con vasche non perfettamente ordinate sarebbe la norma, non "
-     "l'eccezione."),
+     "l'eccezione. Il terzo, la portata, ha un contatore e un esempio suoi, "
+     "separati da quelli della geometria: sono due motivi diversi, e chi "
+     "legge il resoconto deve poterli distinguere."),
     ("q",
      "IL TETTO SI APPLICA A QUELLO CHE SI RISOLVE. E' l'unica cosa che ha "
      "senso contare, e contare le combinazioni sulla carta e' costato caro: su "
@@ -1946,7 +2808,8 @@ AUTOMATICA = [
     ("p",
      "`su_tentativo` viene chiamata prima di ogni risoluzione, con l'indice e "
      "il totale gia' al netto dei prefiltri, piu' quante suddivisioni "
-     "fattibili si sono trovate finora e il takt time della migliore. Gira "
+     "fattibili si sono trovate finora, il takt time della migliore e il suo "
+     "scarto dai teorici. Gira "
      "nel thread del chiamante, quindi "
      "-- come avverte il docstring -- non deve toccare widget: chi la usa "
      "dall'interfaccia grafica ci mette dentro solo un accodamento."),
@@ -1964,14 +2827,33 @@ AUTOMATICA = [
      "ricerca va avanti -- si tiene la piu' veloce fra quelle provate -- "
      "quindi chi ha in mente il valore che gli serve vede da se' quando e' "
      "arrivato, invece di aspettare la fine per scoprire che ci era gia'."),
+    ("q",
+     "LO SCARTO MOSTRATO NON E' QUELLO CON CUI SI SCEGLIE. La migliore si "
+     "sceglie sullo scarto PESATO (_chiave_migliore), ma a chi guarda si "
+     "passa scarto_totale, i secondi veri di distacco dai teorici: il "
+     "commento nel codice lo dice in una riga. Prima si passava il pesato, "
+     "che in secondi per peso non si legge come una durata. Col takt libero "
+     "vale None, perche' li' lo scarto non e' stato cercato."),
+    ("p",
+     "La PAUSA vale solo qui dentro, ed e' il blocco `with "
+     "interruzione._ricerca()` a delimitarla. Prima di ogni tentativo "
+     "_attendi_ripresa ferma il thread di lavoro finche' la pausa dura; un "
+     "tentativo durante il quale e' stata chiesta una pausa -- il contatore "
+     "_n_pause e' cambiato -- ha un esito che non vale niente, e si rifa' "
+     "da capo. Si perde al massimo un tentativo, e le soluzioni gia' trovate "
+     "restano in mano."),
     ("p",
      "`log_progress` stampa una riga per candidata, ed e' il modo per capire "
      "da terminale perche' una ricerca non trova niente."),
     ("c", "model.solve_auto_zones", "    if best_solution is None:", None),
     ("p",
-     "Fallendo, si restituisce un INFEASIBLE che porta con se' i CONTATORI: "
-     "quante provate, quante scartate dal primo filtro, quante dal secondo, e "
-     "un esempio di problema di geometria."),
+     "In ogni caso raw riceve i CONTATORI: quante provate, quante valide, "
+     "quante scartate da ciascun filtro con un esempio per geometria e "
+     "portata, quante volte ciascun esito del solutore (`per_stato`), e la "
+     "suddivisione col carico piu' equilibrato, su cui ha senso indagare se "
+     "non funziona niente. Fallendo, si restituisce INFEASIBLE -- o UNKNOWN "
+     "se la ricerca e' stata fermata: le suddivisioni non provate non sono "
+     "state dimostrate impossibili."),
     ("q",
      "I CONTATORI SONO LA DIAGNOSI. Senza di essi 'INFEASIBLE' non "
      "distinguerebbe tre situazioni molto diverse: nessuna suddivisione "
@@ -1979,7 +2861,10 @@ AUTOMATICA = [
      "tutte scartate per geometria (le vasche non sono ordinate lungo la "
      "rotaia), oppure provate tutte e nessuna fattibile (e' il takt time o "
      "sono le permanenze). Sono tre azioni diverse per l'utente, e sono "
-     "distinguibili solo grazie a quei numeri."),
+     "distinguibili solo grazie a quei numeri. `per_stato` aggiunge la "
+     "quarta, che il commento separa con cura: INFEASIBLE e' una "
+     "dimostrazione, e va cambiata la linea; UNKNOWN e' tempo scaduto, e "
+     "basta darne di piu'."),
 
     # ==================================================================
     ("h2", "2. Perche' non si riesce"),
@@ -2006,9 +2891,19 @@ AUTOMATICA = [
      "sulla prova piu' utile."),
     ("c", "model.diagnosi_zone"),
     ("p",
-     "Quattro prove in ordine, e ciascuna esce appena conclude. La prima cosa "
-     "che fa pero' non e' una prova: e' chiedersi se ci sia qualcosa da "
+     "Le prove sono in ordine, e ciascuna esce appena conclude: il takt "
+     "time (prima piu' lungo, poi piu' corto), l'interblocco delle vasche, "
+     "la non collisione, i tempi massimi di processo, la capienza. La prima "
+     "cosa che fa pero' non e' una prova: e' chiedersi se ci sia qualcosa da "
      "diagnosticare."),
+    ("p",
+     "Ancora prima, il takt FISSO. La diagnosi lavora sulla stessa linea a "
+     "takt libero nella banda [teorico, teorico]: il commento osserva che "
+     "per la fattibilita' e' identica -- cambia solo l'obiettivo, che qui "
+     "non interessa -- e che le prove che spostano il takt non devono "
+     "portarsi dietro l'inchiodatura. I messaggi poi distinguono i due casi, "
+     "perche' le correzioni da suggerire sono diverse: col takt fisso "
+     "c'e' un solo numero da alzare o abbassare, il teorico."),
     ("q",
      "SU UNA LINEA CHE FUNZIONA, OGNI RILASSAMENTO RIESCE. Senza il controllo "
      "iniziale, la prima prova verrebbe scambiata per la causa e la diagnosi "
@@ -2032,6 +2927,18 @@ AUTOMATICA = [
      "il takt time dichiarato piu' del necessario. E' la stessa disciplina del limite "
      "d'errore nel verificatore: si dichiara quello che si sa, con "
      "l'incertezza attaccata."),
+    ("p",
+     "L'interblocco si prova PRIMA della non collisione, e il commento dice "
+     "perche': e' il vincolo piu' specifico dei due, e se basta togliere lui "
+     "la risposta giusta e' quali vasche liberare, non quanto spazio "
+     "lasciare. Si prova solo se ci sono coppie in conflitto, e il messaggio "
+     "elenca le vasche in gioco."),
+    ("q",
+     "LA PROVA SULLA NON COLLISIONE SPEGNE ANCHE L'INTERBLOCCO. Ingombri e "
+     "sicurezza a zero non bastano: le vasche a ridosso di un confine sono "
+     "interbloccate PROPRIO PERCHE' vicine, e con l'interblocco acceso la "
+     "prova lascerebbe in piedi i vincoli delle vasche comuni -- e "
+     "risponderebbe a una domanda diversa da quella che fa."),
     ("c", "model._vasche_che_bloccano"),
     ("p",
      "Quando a bloccare sono i tempi di processo, dire 'i tempi sono stretti' "
@@ -2066,10 +2973,27 @@ AUTOMATICA = [
      "garantisce di migliorare. Fermarsi al primo N fattibile e' quindi la "
      "risposta alla domanda 'quanti me ne servono', non a 'quale numero da' il "
      "ciclogramma piu' veloce'."),
+    ("p",
+     "Col takt FISSO la logica resta la stessa, e il commento spiega perche' "
+     "non si cerca oltre: un carroponte in piu' potrebbe avvicinare i bagni "
+     "ai teorici, ma costa una macchina. E' una scelta da fare guardando i "
+     "numeri, alzando min_hoists, non qualcosa da decidere in automatico."),
+    ("p",
+     "voce_registro scrive la voce del registro dei tentativi per un numero "
+     "di carroponti: stato, takt, scarto pesato, quante suddivisioni "
+     "risolte e con che esito, la suddivisione su cui indagare e -- solo se "
+     "ce ne sono stati -- gli scarti per portata e per geometria con un "
+     "esempio. Il docstring spiega perche' non sta dentro solve_auto_hoists: "
+     "la scrive anche chi chiama solve_auto_zones da solo, con il numero di "
+     "carroponti scelto, e senza la voce il resoconto di un fallimento non "
+     "avrebbe niente da raccontare."),
     ("c", "model.solve_auto_hoists"),
     ("p",
-     "max_hoists viene limitato al numero di mosse: piu' carroponti che mosse "
-     "non ha senso, ogni carroponte deve averne almeno una."),
+     "Con le portate dichiarate non c'e' un numero da cercare: min_hoists e "
+     "max_hoists diventano entrambi il numero delle portate, e resta solo la "
+     "scelta delle suddivisioni che le rispettano. In ogni caso max_hoists "
+     "viene limitato al numero di mosse: piu' carroponti che mosse non ha "
+     "senso, ogni carroponte deve averne almeno una."),
     ("q",
      "UN ValueError DI solve_auto_zones NON FERMA LA RICERCA. Il blocco "
      "try/except intercetta il caso 'troppe suddivisioni possibili per questo "
@@ -2088,6 +3012,12 @@ AUTOMATICA = [
      "ricerca per quel numero di carroponti e' FALLITA: se ha trovato una "
      "soluzione, che qualche geometria sia stata scartata e' un dettaglio "
      "interno che non interessa nessuno."),
+    ("p",
+     "Una ricerca fermata dall'utente non passa al numero di carroponti "
+     "successivo: chi ha premuto Ferma non vuole che se ne provi uno in "
+     "piu'. Se col numero in corso c'era gia' una soluzione la si "
+     "restituisce -- l'ha gia' fatto il ramo OPTIMAL/FEASIBLE -- altrimenti "
+     "UNKNOWN col registro e `interrotto`."),
 ]
 
 

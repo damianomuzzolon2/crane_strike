@@ -1,9 +1,9 @@
 """
 Il testo dei documenti di interfaccia.py.
 
-Settantasei fra funzioni e metodi in una classe sola. Divisi non per posizione
-nel file ma per GESTO dell'utente: costruire la finestra, calcolare, comporre a
-mano, guardare.
+Centoventitre fra funzioni e metodi, quasi tutti in una classe sola. Divisi
+non per posizione nel file ma per GESTO dell'utente: costruire la finestra,
+calcolare, comporre a mano, guardare.
 """
 
 from __future__ import annotations
@@ -122,6 +122,41 @@ FINESTRA = [
      "`finestra_simulazione` non e' una scheda, ed e' voluto: la si guarda "
      "ACCANTO al ciclogramma, non al posto suo, e cosi' si puo' modificare da "
      "una parte e vedere l'effetto dall'altra."),
+    ("p",
+     "`righe_linea` tiene la linea COM'E' SCRITTA, accanto alla Configurazione "
+     "che ne e' la lettura: il commento spiega che una cella 'posti' vuota "
+     "nella Configurazione diventa 1, e la finestra 'Dati linea' deve "
+     "mostrare il file dell'utente, non l'interpretazione del programma. "
+     "`linea_modificata` dice quando la linea in uso viene da quella finestra "
+     "e non corrisponde piu' al file: lo si scrive in barra e nel file dei "
+     "risultati, che altrimenti indicherebbe come origine un file che dice "
+     "un'altra cosa."),
+    ("p",
+     "`passaggi` sono i punti di passaggio aggiunti a mano (documento 3): un "
+     "grado di liberta' in piu' del giro dei carroponti, che non va confuso "
+     "con i punti del pettine -- quelli vengono dalla ricetta e non si "
+     "tolgono."),
+
+    ("h3", "La schermata di benvenuto"),
+    ("p",
+     "Con `con_splash` vero -- lo passa main, non l'autotest -- la finestra "
+     "principale si nasconde con withdraw() e davanti compare _Splash. La "
+     "ragione e' nel commento: la finestra si costruisce DIETRO, nascosta, e "
+     "i tre secondi del benvenuto si contano da prima della costruzione, "
+     "cosi' il tempo che serve a costruirla ci sta dentro invece di "
+     "sommarsi. In fondo a __init__ si chiede allo splash quanto deve ancora "
+     "restare (restante_ms) e si programma la chiusura dopo quel tempo."),
+    ("q",
+     "IL FILE INIZIALE SI APRE DOPO LO SPLASH. Il caricamento del file "
+     "passato da riga di comando e' rimandato di 100 ms oltre la chiusura "
+     "del benvenuto: un errore di lettura aprirebbe altrimenti un messaggio "
+     "sopra una finestra che ancora non si vede."),
+    ("c", "interfaccia.Applicazione._chiudi_splash"),
+    ("p",
+     "Distrugge il benvenuto e mostra la finestra vera: deiconify la rimette "
+     "a schermo, lift e focus_force la portano davanti e le danno la "
+     "tastiera, che altrimenti potrebbe restare a un'altra applicazione "
+     "mentre lo splash era in primo piano."),
 
     ("h3", "La costruzione"),
     ("c", "interfaccia.Applicazione._costruisci_interfaccia"),
@@ -129,6 +164,42 @@ FINESTRA = [
      "La finestra e' divisa in tre: la barra dei comandi in alto, il grafico a "
      "sinistra, e a destra un verdetto sempre in vista con sotto tre schede. "
      "In basso una barra di stato."),
+    ("p",
+     "I comandi sono raggruppati per gesto, e i commenti spiegano le "
+     "posizioni: 'Dati linea...' accanto ad 'Apri linea...', sempre acceso "
+     "perche' senza una linea parte da quella d'esempio; 'Fattibilita'' "
+     "PRIMA di 'Calcola auto', perche' dice in un istante se il takt "
+     "richiesto e' irraggiungibile e risparmia un calcolo lungo che non "
+     "troverebbe niente; 'Ferma' e 'Pausa' subito dopo, perche' ne sono il "
+     "contrario. Dopo il secondo separatore stanno le cose che si fanno a un "
+     "ciclogramma gia' fatto: Simulazione, il pulsante che scorre i punti di "
+     "avvio, 'Allinea avvio' e il salvataggio."),
+    ("q",
+     "LA BARRA DI STATO SI IMPACCHETTA PER PRIMA. Sta in fondo, ma pack da' "
+     "lo spazio nell'ordine in cui i widget sono stati impacchettati: se il "
+     "pannello di destra chiede piu' altezza di quella che c'e', l'ultimo "
+     "resta schiacciato a zero. Era la barra di stato, e con lei la stima "
+     "del tempo. Per questo `before=self.pack_slaves()[0]`."),
+    ("c", "interfaccia._cornice_scorrevole"),
+    ("p",
+     "La scheda Ciclogramma e' la piu' alta, e Tk non scorre da se': taglia. "
+     "Il docstring dice cosa veniva tagliato -- i pulsanti in fondo, Annulla, "
+     "Verifica, Ottimizza, cioe' proprio quelli che si cercano. La funzione "
+     "mette il contenuto in una tela con una barra di scorrimento e "
+     "restituisce la cornice INTERNA, in cui si impacchetta come in una "
+     "cornice qualsiasi."),
+    ("p",
+     "`adatta` da' alla cornice interna la larghezza della tela, cosi' i "
+     "fill=X funzionano come prima, e ALMENO la sua altezza, cosi' gli "
+     "expand=True si allargano quando lo spazio c'e' e si scorre solo quando "
+     "non c'e'."),
+    ("q",
+     "LA ROTELLA ARRIVA DA OVUNQUE. `rotella` e' legata con bind_all, quindi "
+     "riceve gli eventi di tutta l'applicazione, e deve scegliere da se' "
+     "quando agire: solo se il puntatore sta sopra questa cornice, non se sta "
+     "su una tabella che ha righe nascoste (si scorre da sola, e muovere "
+     "anche la cornice farebbe muovere due cose insieme), non su uno spinbox "
+     "o una combobox, e solo se c'e' davvero qualcosa da scorrere."),
     ("p",
      "Il grafico sta FUORI dalle schede, e non e' un dettaglio di "
      "impaginazione: e' la ragione per cui _su_pressione deve rifare da solo "
@@ -149,8 +220,19 @@ FINESTRA = [
     ("c", "interfaccia.Applicazione._mostra_percorso"),
     ("p",
      "Cinque metodi brevi. `_mostra_percorso` fa comparire il percorso "
-     "completo del file: il titolo mostra solo il nome, che su un PC con venti "
-     "linee in cartelle diverse non basta a sapere quale si sta guardando."),
+     "completo del file, in barra e anche nel titolo della finestra: la barra "
+     "dei comandi ha spazio limitato e un percorso lunghissimo li' viene "
+     "tagliato, mentre il titolo lo mostra comunque. Completo e non solo il "
+     "nome perche', come dice il commento nella costruzione, su un PC di "
+     "stabilimento lo stesso file esiste in piu' copie, e sapere QUALE si sta "
+     "guardando conta piu' del nome."),
+    ("c", "interfaccia.Applicazione._descrizione_linea"),
+    ("p",
+     "Il testo che _mostra_percorso scrive, e lo stesso che finisce nel "
+     "riepilogo e come `sorgente` nel file dei risultati. Distingue tre casi "
+     "perche' il nome del file da solo ingannerebbe: una linea scritta nella "
+     "finestra 'Dati linea' e mai salvata non ha un file, e una linea "
+     "modificata li' non e' piu' quel file."),
     ("c", "interfaccia.Applicazione.destroy"),
     ("p",
      "La chiusura deve fare tre cose in ordine: chiudere la finestra della "
@@ -198,11 +280,36 @@ FINESTRA = [
      "perche': la seconda chiamata toglie alla finestra l'icona PICCOLA, che "
      "e' proprio quella del titolo. Con uno solo dei due file l'icona c'e'. "
      "Il test dell'interfaccia ora controlla quel dato, non il caricamento."),
+    ("c", "interfaccia._cartella_risorse"),
     ("p",
-     "La cartella si cerca in sys._MEIPASS quando il programma e' "
+     "La cartella `risorse/` si cerca in sys._MEIPASS quando il programma e' "
      "impacchettato -- e' li' che PyInstaller mette i file dichiarati in "
-     "`datas` -- e accanto al modulo altrimenti. Tutto sta in un try: "
-     "un'icona che manca non e' un motivo per non aprire il programma."),
+     "`datas` -- e accanto al modulo altrimenti. La usano l'icona e lo "
+     "splash, ed e' per questo una funzione a parte. In _applica_icona tutto "
+     "sta in un try: un'icona che manca non e' un motivo per non aprire il "
+     "programma."),
+    ("c", "interfaccia._icona_barra_nitida"),
+    ("p",
+     "Su Windows, dopo l'ICO, _applica_icona chiama questa. Il problema e' "
+     "un'icona SFOCATA sulla barra delle applicazioni: il docstring racconta "
+     "che Windows 11 ci disegna l'icona grande della classe di finestra, Tk "
+     "ci mette quella da 32 pixel, e la barra -- che al 100% ne vuole 24 -- "
+     "la rimpicciolisce da se'. L'ICO ha gia' la misura giusta disegnata a "
+     "mano: si carica quella con LoadImageW e la si mette sulla CLASSE con "
+     "SetClassLongPtrW, perche' misurando si e' visto che WM_SETICON sulla "
+     "finestra non cambia niente."),
+    ("p",
+     "`dpi_vero` esiste perche' il processo non dichiara di gestire i dpi, e "
+     "Windows gli risponderebbe sempre 96: per un attimo si mette il thread "
+     "in modalita' consapevole, si chiede, e si rimette com'era. Il lato e' "
+     "24 pixel per la scala; se qualcosa va storto si torna a 96."),
+    ("q",
+     "SI ASPETTA LA PRIMA COMPARSA. `applica` e' legata all'evento <Map> e si "
+     "slega da sola al primo giro: la cornice esterna della finestra, a cui "
+     "si chiede l'handle con wm_frame(), esiste solo quando la finestra e' "
+     "mappata. Basta farlo una volta, perche' la classe e' comune a tutte le "
+     "finestre di primo livello di Tk. Un fallimento lascia l'icona di Tk: "
+     "sfocata, ma c'e'."),
     ("p",
      "Quello che restituisce va TENUTO: __init__ lo mette in self.icona. Su "
      "Windows e' solo il percorso dell'ICO, ma altrove e' una PhotoImage, e "
@@ -224,6 +331,43 @@ FINESTRA = [
      "finestra invece di eseguire il figlio. Un difetto che si manifesta solo "
      "nella versione impacchettata, cioe' proprio dove e' piu' scomodo "
      "diagnosticarlo."),
+    ("p",
+     "Poi, nell'ordine: l'identita' per Windows, la finestra di ACCESSO "
+     "(accesso.chiedi_accesso, che riceve _applica_icona per avere la stessa "
+     "icona), e solo se si e' entrati l'Applicazione, con lo splash. Il "
+     "commento e' esplicito: senza utente e password giusti la finestra "
+     "principale non si costruisce nemmeno, e main restituisce 1. L'autotest "
+     "non passa da qui -- esce prima, con --autotest -- e quindi non chiede "
+     "credenziali e non mostra il benvenuto."),
+
+    ("h3", "Il benvenuto"),
+    ("c", "interfaccia._immagine_ridotta"),
+    ("p",
+     "Un PNG portato alla larghezza voluta. Con Pillow, che c'e' sempre "
+     "perche' lo porta matplotlib, il ridimensionamento e' filtrato "
+     "(LANCZOS); il ripiego e' `subsample` di Tk, che prende un pixel ogni "
+     "tanti e sui bordi dei loghi lascia la seghettatura. Se non riesce "
+     "nemmeno quello restituisce None, e chi la chiama mostra quello che "
+     "c'e'."),
+    ("c", "interfaccia._Splash"),
+    ("p",
+     "Una finestra senza bordi (overrideredirect), sempre in primo piano, al "
+     "centro dello schermo: il logo del programma, il nome, e sotto 'powered "
+     "by' col logo IMEL. Le misure sono pensate a 96 dpi e crescono con la "
+     "scala dello schermo. Le immagini stanno in attributi per la ragione "
+     "solita: senza riferimenti Tk le cancella. Se il logo IMEL manca, manca "
+     "anche la scritta 'powered by', che da sola non vorrebbe dire niente."),
+    ("q",
+     "UPDATE() IN FONDO AL COSTRUTTORE. Subito dopo lo splash parte la "
+     "costruzione dell'interfaccia, che tiene occupato il ciclo degli eventi: "
+     "senza disegnarlo subito, il benvenuto resterebbe a schermo vuoto "
+     "proprio per il tempo in cui deve farsi vedere."),
+    ("p",
+     "`restante_ms` dice quanto manca a DURATA_MS (tre secondi) dall'istante "
+     "in cui lo splash e' nato, mai meno di zero: il benvenuto resta almeno "
+     "tre secondi anche se la finestra e' pronta prima, e non di piu' se la "
+     "costruzione ci mette di piu'. L'orologio e' monotono, come quello del "
+     "calcolo."),
 ]
 
 
@@ -242,15 +386,57 @@ CALCOLO = [
     ("c", "interfaccia.Applicazione._chiedi_file"),
     ("c", "interfaccia.Applicazione._carica"),
     ("p",
-     "Legge il file e ne ricava una Configurazione. Gli errori di compilazione "
-     "arrivano gia' pronti da excel_io -- tutti insieme, con foglio e cella -- "
-     "e qui si mostrano e basta, senza riscriverli."),
+     "Legge il file e ne ricava una Configurazione. Prima pero' chiede "
+     "(_dati_linea_scartabili) se si possono perdere le modifiche non "
+     "applicate della finestra 'Dati linea', se ce ne sono. Il percorso si "
+     "rende assoluto e normalizzato: la finestra di dialogo di Tk restituisce "
+     "le barre al contrario e dalla riga di comando puo' arrivare un percorso "
+     "relativo, mentre quello che si legge in barra deve essere copiabile in "
+     "Esplora risorse. Accanto alla Configurazione si leggono le RIGHE del "
+     "file (righe_da_file); un file del vecchio formato, che non le da', si "
+     "mostra come lo si e' letto, con righe_da_configurazione. Se la finestra "
+     "'Dati linea' e' aperta, la si ricarica con la linea nuova."),
+    ("c", "interfaccia.Applicazione._file_illeggibile"),
+    ("p",
+     "Gli errori di compilazione arrivano gia' pronti da excel_io -- tutti "
+     "insieme, con foglio e cella -- e non si riscrivono. Ma un file che non "
+     "passa i controlli (ValueError) si puo' correggere nella finestra 'Dati "
+     "linea' invece che in Excel, e il messaggio lo propone. Un file che non "
+     "e' nemmeno un Excel leggibile no: si dice perche' e basta."),
+    ("q",
+     "GLI ERRORI SI RICALCOLANO SULLE TABELLE. Il commento: le tabelle della "
+     "finestra non hanno le righe vuote del foglio, e le celle indicate "
+     "dall'errore del file punterebbero a righe sbagliate. Per questo si "
+     "rilegge con leggi_righe e si mostra quell'errore."),
+    ("c", "interfaccia.Applicazione._usa_linea"),
+    ("p",
+     "Il punto di passaggio di ogni linea nuova, che venga da un file o dalla "
+     "finestra 'Dati linea': tutto cio' che dipendeva dalla linea di prima si "
+     "azzera -- soluzione, tempi in vasca, assegnazione, attese, soste, punti "
+     "di passaggio, origine, zoom -- e la simulazione aperta si CHIUDE: "
+     "mostrava altre vasche e altre distanze, e non e' aggiornabile. Il "
+     "riepilogo descrive la linea, compreso l'obiettivo che il calcolo "
+     "inseguira': takt FISSO al teorico con i tempi in vasca vicini ai "
+     "teorici, oppure il takt piu' corto nella banda e poi, a quel takt, i "
+     "tempi in vasca. Se la linea porta con se' un ciclogramma, lo si "
+     "riprende."),
+    ("p",
+     "Il commento su `attese` e `soste` dice cosa sono: dove ogni carroponte "
+     "passa il tempo morto del rientro a vuoto, quando qualcuno (il solutore "
+     "o il file) l'ha gia' deciso, e le soste in una vasca IN MEZZO al "
+     "rientro. Per le attese None vuol dire 'regola predefinita'; per le "
+     "soste non c'e' regola predefinita, una sosta per strada la sa proporre "
+     "solo il solutore."),
     ("c", "interfaccia.Applicazione._riprendi_ciclogramma"),
     ("p",
      "Se il file porta con se' un ciclogramma, lo si rimette in piedi. E' la "
      "controparte del foglio Ciclogramma di excel_io: takt time, tempi in "
-     "vasca, assegnazione, e da quei tre valori build_solution ricostruisce "
-     "tutto."),
+     "vasca, assegnazione -- piu' le attese, le soste e i punti di passaggio, "
+     "quando ci sono -- e da quei valori _ricomponi ricostruisce tutto con "
+     "manuale.componi. Una tappa che manca nel file prende il tempo teorico. "
+     "La vista e' il ciclogramma se tutte le mosse sono assegnate, il "
+     "pettine altrimenti: un ciclogramma a meta' ha trasporti che sulle "
+     "traiettorie non comparirebbero."),
     ("q",
      "RIAPRIRE DEVE DARE LO STESSO CICLOGRAMMA. E' la proprieta' che "
      "test_interfaccia verifica esplicitamente, ed e' anche quella che ha "
@@ -263,6 +449,58 @@ CALCOLO = [
      "'Nuovo modello Excel...': crea un file gia' compilato con la linea "
      "d'esempio. E' la risposta alla prima domanda di chi non ha ancora "
      "niente."),
+
+    # ==================================================================
+    ("h2", "1 bis. La finestra 'Dati linea'"),
+    ("p",
+     "Le stesse tabelle del file, da guardare e modificare senza passare da "
+     "Excel. La finestra vera e propria e' editor_linea.FinestraDatiLinea; "
+     "qui c'e' solo il dialogo fra lei e l'applicazione."),
+    ("c", "interfaccia.Applicazione._finestra_dati_aperta"),
+    ("p",
+     "Non basta che l'attributo non sia None: la finestra puo' essere stata "
+     "chiusa dall'utente, e allora il riferimento c'e' ma il widget no. "
+     "winfo_exists() lo dice."),
+    ("c", "interfaccia.Applicazione._apri_dati_linea"),
+    ("p",
+     "Senza argomenti mostra la linea in uso, o quella d'esempio se non ce "
+     "n'e' una. Con `righe` mostra quelle -- un file che non si e' riusciti a "
+     "leggere, da correggere -- che NON sono la linea in uso, e infatti "
+     "`applicate` e' falso. Se la finestra e' gia' aperta la si porta "
+     "davanti invece di aprirne una seconda, e la si ricarica solo se le "
+     "righe sono state passate esplicitamente o se non ha modifiche: chi "
+     "preme di nuovo il pulsante non deve perdere quello che stava "
+     "scrivendo."),
+    ("c", "interfaccia.Applicazione._applica_dati_linea"),
+    ("p",
+     "La finestra la chiama quando l'utente applica le tabelle. Rifiuta se "
+     "c'e' un calcolo in corso, e il messaggio dice di aspettare che finisca "
+     "o di fermarlo: il calcolo sta lavorando sulla linea di prima. Gli errori di "
+     "compilazione li solleva leggi_righe come ValueError, con foglio e "
+     "cella, ed e' la finestra a mostrarli."),
+    ("q",
+     "IL CICLOGRAMMA DI PRIMA SI BUTTA, E LO SI CHIEDE. Come per un file "
+     "nuovo: era della linea di prima, con altre vasche o altri tempi, e "
+     "tenerlo vorrebbe dire mostrare traiettorie che i dati non giustificano "
+     "piu'. Per questo, se un ciclogramma c'e', si chiede conferma prima di "
+     "chiamare _usa_linea."),
+    ("p",
+     "La linea e' 'modificata' solo se ha un file di origine a cui non "
+     "corrisponde piu'. Una linea scritta da zero nella finestra non ha "
+     "file, e la descrizione lo dice gia' (vedi _descrizione_linea)."),
+    ("c", "interfaccia.Applicazione._dati_linea_salvati"),
+    ("p",
+     "La finestra ha scritto le sue tabelle in un file. Se sono le stesse "
+     "della linea in uso -- confrontate in forma normalizzata, non per "
+     "identita' -- la linea in uso adesso E' quel file: cambia il percorso e "
+     "smette di essere 'modificata'. Se sono diverse non si tocca niente: "
+     "un file salvato non diventa la linea in uso finche' non lo si "
+     "applica."),
+    ("c", "interfaccia.Applicazione._dati_linea_scartabili"),
+    ("p",
+     "La domanda che _carica fa prima di aprire un altro file: le modifiche "
+     "non applicate della finestra andrebbero perse. Se la finestra e' "
+     "chiusa, o non ha modifiche, non c'e' niente da chiedere."),
 
     # ==================================================================
     ("h2", "2. Il calcolo in background"),
@@ -278,6 +516,43 @@ CALCOLO = [
      "avvertimento in tre parole: niente widget qui dentro. Tkinter non e' "
      "sicuro da usare da piu' thread, e toccare un widget da qui produce "
      "blocchi e sparizioni che non si riproducono mai due volte uguali."),
+    ("p",
+     "Trovata una soluzione, prima di restituirla la si rifinisce con "
+     "rifinisci_soluzione: col takt libero, a takt trovato, si avvicinano i "
+     "tempi in vasca ai teorici; se CP-SAT e' scaduto prima dell'ottimo, si "
+     "tolgono le soste per strada che non servono. Poi _allinea_nel_lavoro "
+     "prova a rendere esatto il punto di avvio. Ognuna di queste fasi mette "
+     "nella coda un messaggio 'stato' -- l'unico modo di parlare con la "
+     "barra da questo thread -- perche' non hanno tentativi da contare e "
+     "altrimenti la barra resterebbe ferma sull'ultimo tentativo della "
+     "ricerca. Se una fase non riesce, la soluzione resta quella di prima."),
+    ("c", "interfaccia.Applicazione._allinea_nel_lavoro"),
+    ("p",
+     "Il calcolo automatico rende esatto il punto di avvio da solo, cosi' "
+     "l'utente non deve premere 'Allinea avvio' su ogni risultato (il "
+     "pulsante resta per i ciclogrammi riletti da file o composti a mano, "
+     "documento 4). Non lo fa se il calcolo e' stato fermato: chi ha premuto "
+     "Ferma non vuole aspettare altro."),
+    ("q",
+     "UN RITOCCO NON DEVE MAI FAR PERDERE IL CALCOLO. L'except cattura tutto "
+     "e restituisce la soluzione com'era: un allineamento che fallisce "
+     "lascia un punto di avvio approssimato, mentre un'eccezione qui "
+     "butterebbe via minuti di ricerca riuscita."),
+
+    ("h3", "Prima di calcolare: la fattibilita'"),
+    ("c", "interfaccia.Applicazione._mostra_fattibilita"),
+    ("p",
+     "Il pulsante 'Fattibilita'' sta prima di 'Calcola auto', e il commento "
+     "nella costruzione dice perche': risponde in un istante se il takt "
+     "richiesto e' irraggiungibile, cosi' non si aspetta mezz'ora un calcolo "
+     "che non puo' trovare niente. Calcola i limiti inferiori del takt con "
+     "fattibilita.valuta, con lo stesso numero massimo di carroponti che "
+     "userebbe 'Calcola auto', e mostra il referto in una finestra a parte "
+     "in carattere a spaziatura fissa, perche' e' un testo incolonnato. Non "
+     "passa dal thread di lavoro: e' un conto e non una ricerca."),
+    ("p",
+     "La prima riga del referto va anche nella barra di stato: e' la "
+     "conclusione, e resta leggibile dopo aver chiuso la finestra."),
     ("c", "interfaccia.Applicazione._avvia_lavoro"),
     ("p",
      "Il meccanismo e' una CODA: il thread ci mette dentro il risultato, e la "
@@ -339,6 +614,30 @@ CALCOLO = [
      "pausabile -- durante la ricerca delle suddivisioni -- e lo si ricontrolla "
      "a ogni giro di _controlla_coda. Un tentativo rifatto dopo la pausa si "
      "riannuncia con lo stesso indice, e non si conta due volte nella stima."),
+    ("p",
+     "Cosa vuol dire 'pausa' lo dice il commento nella costruzione: vale fra "
+     "un tentativo e l'altro della ricerca, il tentativo in corso si ferma "
+     "subito e alla ripresa si rifa' da capo, le soluzioni gia' trovate "
+     "restano. Il pulsante ha larghezza fissa perche' l'etichetta cambia."),
+    ("c", "interfaccia.Applicazione._aggiorna_pulsante_pausa"),
+    ("q",
+     "NESSUNO AVVISA QUANDO SI PUO' METTERE IN PAUSA. La ricerca entra ed "
+     "esce dal tratto pausabile senza dirlo -- le rifiniture che seguono la "
+     "ricerca non lo sono -- e per questo il metodo non e' chiamato da un "
+     "evento ma a ogni giro di _controlla_coda, quando la coda e' vuota. "
+     "Acceso se la pausa si puo' fare davvero, o se ce n'e' una in corso da "
+     "finire; 'Riprendi' solo se si e' in pausa e nessuno ha chiesto lo "
+     "stop. Si riconfigura il pulsante solo quando testo o stato cambiano: "
+     "lo si chiama ogni 80 ms."),
+    ("c", "interfaccia.Applicazione._mostra_pausa"),
+    ("p",
+     "La risposta al messaggio 'pausa' del thread di lavoro. Entrando in "
+     "pausa si segna l'ora, si ferma la barra e si scrive cosa succede alla "
+     "ripresa. Uscendo, il tempo passato in pausa si aggiunge a "
+     "_inizio_lavoro: il docstring spiega che cosi' la durata finale e la "
+     "stima di quanto manca lo ignorano senza doverlo sapere, perche' "
+     "entrambe partono da quell'istante. 'Riprendo il calcolo...' non si "
+     "scrive se nel frattempo e' stato chiesto lo stop: sarebbe falso."),
 
     ("h3", "L'avanzamento: quanto manca"),
     ("p",
@@ -365,6 +664,23 @@ CALCOLO = [
      "I tentativi rimasti si sanno esattamente; quanto durera' ciascuno lo si "
      "MISURA su quelli gia' fatti. Al tentativo k ne sono conclusi k-1, e il "
      "tempo trascorso diviso quelli da' la durata media."),
+    ("p",
+     "Accanto al tempo, le SOLUZIONI GIA' TROVATE: il tempo che manca dice "
+     "quanto costa aspettare, non cosa si perde a non aspettare. Con Ferma "
+     "si tiene la migliore trovata, ma finche' non ce n'e' nessuna fermarsi "
+     "vuol dire restare a mani vuote, e il testo lo dice anche e soprattutto "
+     "quando il conteggio e' zero. Con il conteggio va il numero che dice "
+     "quanto e' buona la migliore: il takt time, oppure -- col takt FISSO, "
+     "uguale per tutte -- il suo scarto dai tempi teorici, in secondi veri e "
+     "SENZA i pesi."),
+    ("q",
+     "LO SCARTO MOSTRATO NON E' QUELLO CHE IL CALCOLO MINIMIZZA. Il solutore "
+     "lavora con lo scarto pesato (i pesi del foglio Percorso decidono dove "
+     "spenderlo), ma un numero pesato non si legge come una durata. A "
+     "schermo va quindi la somma degli scostamenti in secondi, come la "
+     "passa il solutore in `best_errore`, con la sua unita' di misura. Prima "
+     "si mostrava il pesato, senza unita': un numero che non diceva se il "
+     "distacco fosse molto o poco."),
     ("q",
      "LA STIMA NON COMPARE SUBITO. Con meno di due tentativi conclusi la media "
      "e' un numero solo, e su una grandezza cosi' dispersa non vuol dire "
@@ -402,14 +718,21 @@ CALCOLO = [
      "ragione: i messaggi di avanzamento arrivano piu' in fretta di quanto si "
      "controlli, e leggerne uno per giro li farebbe accumulare. La barra "
      "resterebbe indietro rispetto al calcolo, che e' peggio di non averla. Il "
-     "ciclo consuma tutti i 'progresso' e si ferma al primo messaggio di "
-     "esito, che e' quello che chiude il lavoro."),
+     "ciclo consuma tutti i messaggi intermedi e si ferma al primo messaggio "
+     "di esito, che e' quello che chiude il lavoro."),
+    ("p",
+     "I messaggi intermedi sono di tre tipi: 'progresso' (un tentativo "
+     "della ricerca, va a _mostra_avanzamento), 'stato' (una fase senza "
+     "tentativi da contare, come la rifinitura: la barra torna a oscillare "
+     "e si scrive la fase) e 'pausa' (va a _mostra_pausa). Quando la coda e' "
+     "vuota, prima di riarmarsi si aggiorna il pulsante Pausa."),
     ("c", "interfaccia.Applicazione._controlla_coda",
      "        esito, sol, dati, report = carico",
      "        self.soluzione, self.dati, self.report = sol, dati, report"),
     ("q",
-     "IL CASO PIU' CURATO E' QUELLO IN CUI NON SI TROVA NIENTE. Sei "
-     "suggerimenti in ordine di quanto e' probabile che siano loro il "
+     "IL CASO PIU' CURATO E' QUELLO IN CUI NON SI TROVA NIENTE. Il riepilogo "
+     "lo scrive _resoconto_fallimento, poco sotto: cinque leve in ordine di "
+     "quanto e' probabile che siano loro il "
      "problema, e uno di essi -- infittire passo_controllo_distanza_mm -- si "
      "porta dietro la spiegazione di cosa sia, perche' e' il piu' oscuro e "
      "perche' e' facile scambiarlo per un margine di sicurezza. L'ultima riga "
@@ -446,9 +769,13 @@ CALCOLO = [
      "con un avviso a parte."),
     ("c", "interfaccia.Applicazione._diagnostica"),
     ("p",
-     "Gira nel thread di lavoro, subito dopo un calcolo fallito, e indaga "
-     "sulla suddivisione col carico piu' equilibrato fra quelle provate con il "
-     "numero PIU' ALTO di carroponti: e' quella che aveva piu' margine."),
+     "Gira nel thread di lavoro, subito dopo un calcolo fallito -- di "
+     "'Calcola auto' come di 'Ottimizza con questi carroponti' (documento 3) "
+     "-- e indaga sulla suddivisione col carico piu' equilibrato fra quelle "
+     "provate con il numero PIU' ALTO di carroponti: e' quella che aveva piu' "
+     "margine, quindi cio' che blocca lei blocca a maggior ragione le altre. "
+     "Ogni risoluzione della diagnosi ha al massimo 20 secondi, o meno se il "
+     "limite per tentativo della linea e' piu' corto."),
     ("p",
      "Costa qualche risoluzione in piu' su un calcolo che e' gia' fallito. "
      "Sembra molto e non lo e': l'alternativa e' che l'utente ripeta lo stesso "
@@ -471,6 +798,15 @@ CALCOLO = [
      "L'`origine` distingue OPTIMAL da FEASIBLE con parole, non con la sigla: "
      "'ottimo' contro 'soluzione valida, non dimostrata ottima'. E' una "
      "differenza che conta per chi deve decidere se fidarsi del numero."),
+    ("p",
+     "La barra di stato riassume il risultato: quanto e' durato, il takt "
+     "time, e -- quando il calcolo ha lavorato sullo scarto dai teorici, "
+     "cioe' quando la soluzione porta `errore_pesato` -- lo scarto dai "
+     "teorici in secondi, ricalcolato SENZA pesi con scarti_dal_teorico e "
+     "scarto_totale: lo stesso numero, con la stessa unita', che il "
+     "Riepilogo mostra e che la stima mostrava durante la ricerca. Se "
+     "l'avvio e' stato reso esatto (_allinea_nel_lavoro) si dice anche "
+     "quali carroponti sono stati spostati, e di quanti secondi."),
 
     # ==================================================================
     ("h2", "3. Quali pulsanti sono accesi"),
@@ -495,15 +831,30 @@ CALCOLO = [
      "passano `cfg` e il dizionario del ciclogramma, e cosi' lo stesso file si "
      "riapre con 'Apri linea...'. E' lo stesso formato che produce il comando "
      "da terminale -- uno solo, non due."),
+    ("p",
+     "Nel dizionario del ciclogramma ci sono anche attese, soste e punti di "
+     "passaggio: senza, il file riaperto ricomporrebbe i rientri con la "
+     "regola predefinita, e il ciclogramma non sarebbe piu' quello salvato. "
+     "Il punto di avvio passato e' quello che si sta GUARDANDO, non il "
+     "primo: se l'utente ha scorso i punti di avvio, il file deve dire "
+     "quello che ha scelto, come il PNG che esce insieme. Se il ciclogramma "
+     "non e' ancora stato verificato, la verifica si fa prima di salvare: il "
+     "file dei risultati porta il referto."),
     ("c", "interfaccia.Applicazione._salva_immagine"),
     ("q",
      "SI SALVA IL CICLOGRAMMA, NON QUELLO CHE E' A SCHERMO. Il docstring lo "
      "dice in maiuscolo. Se l'utente sta componendo, a schermo c'e' il "
      "PETTINE: salvarlo darebbe un'immagine che non e' il ciclogramma e che "
      "nessuno saprebbe leggere fuori dal programma. L'immagine si costruisce "
-     "quindi da capo, sempre come traiettorie dei carroponti. E' una delle "
-     "poche volte in cui il programma NON fa quello che sembra -- e la scelta "
-     "e' giusta, perche' quello che si consegna e' il ciclogramma."),
+     "quindi da capo, come traiettorie dei carroponti, col punto di avvio "
+     "che si sta guardando e il logo. E' una delle poche volte in cui il "
+     "programma NON fa quello che sembra -- e la scelta e' giusta, perche' "
+     "quello che si consegna e' il ciclogramma."),
+    ("p",
+     "L'unica eccezione e' quando non c'e' nessuna traiettoria da tracciare "
+     "-- per esempio nessun trasporto assegnato -- e plot_cyclogram solleva "
+     "ValueError: allora si salva la figura a schermo, perche' meglio "
+     "l'immagine di quello che si vede che nessuna immagine."),
 ]
 
 
@@ -545,6 +896,28 @@ MODIFICA = [
      "controlli proprio dove si e' scelto di toglierli -- e il verificatore li "
      "fa meglio. E' la stessa filosofia di manuale.py, applicata "
      "all'interfaccia: si mostra cosa non torna invece di impedirlo."),
+    ("p",
+     "L'unico caso in cui non fa niente e' un calcolo in corso, e il "
+     "commento lo chiama 'ultima rete': qui passa OGNI modifica, quindi "
+     "basta questa riga perche' nessuna possa infilarsi mentre il solutore "
+     "lavora -- anche da una strada che oggi non esiste."),
+    ("q",
+     "LE PAUSE DEI RIENTRI SI TENGONO, RIENTRO PER RIENTRO. Attese e soste "
+     "per strada erano state scelte per il ciclogramma di PRIMA. Buttarle "
+     "tutte a ogni ritocco -- com'era una volta -- faceva sparire anche "
+     "quelle dei rientri che la modifica non toccava, e il ciclogramma "
+     "cambiava ben oltre il ritocco fatto. Adesso si compone una versione "
+     "provvisoria con la regola predefinita, e manuale.adatta_rientri riporta "
+     "su di lei "
+     "quelle di prima, confrontando l'assegnazione di prima (prima[2], "
+     "nell'istantanea) con quella nuova: restano dov'erano, accorciate se il "
+     "tempo libero non basta piu', e solo i rientri nuovi passano alla "
+     "regola predefinita."),
+    ("p",
+     "`tieni_rientri` salta del tutto quel passaggio: lo passano le "
+     "modifiche che toccano solo i punti di passaggio, e 'Allinea avvio'. Il "
+     "docstring: chi sposta una pausa su un rientro non deve vedersi "
+     "cambiare tutte le altre."),
 
     # ==================================================================
     ("h2", "1. Entrare e uscire dalla modifica"),
@@ -583,14 +956,31 @@ MODIFICA = [
     ("p",
      "`verifica_viva` resta falsa: si riparte da uno stato dichiaratamente "
      "provvisorio, e il verdetto arriva quando lo si chiede."),
+    ("p",
+     "Si buttano anche attese, soste e punti di passaggio. Il commento: dove "
+     "i carri sostavano era una scelta fatta per il ciclogramma di prima, e "
+     "qui non c'e' piu' nemmeno una mossa assegnata -- tenerla vorrebbe dire "
+     "far aspettare un carro in un posto deciso per un giro che non esiste. "
+     "Il numero di carroponti di partenza e' quello del foglio Zone, se la "
+     "linea dichiara le portate, altrimenti due (o uno, se c'e' una mossa "
+     "sola)."),
 
     # ==================================================================
     ("h2", "2. La scheda, e i campi"),
     ("c", "interfaccia.Applicazione._costruisci_scheda_ciclogramma"),
     ("p",
      "La pagina unica in cui il ciclogramma si modifica: takt time, numero di "
-     "carroponti, la tabella dei tempi in vasca e quella dell'assegnazione. "
-     "Gli stessi tre gradi di liberta', in forma di campi."),
+     "carroponti e carroponte attivo, la tabella dei tempi in vasca e quella "
+     "dell'assegnazione. Gli stessi tre gradi di liberta', in forma di campi. "
+     "Sotto, la tabella dei punti di passaggio (sezione 3 bis) e i tre "
+     "pulsanti: Annulla modifica, Verifica adesso, Ottimizza con questi "
+     "carroponti."),
+    ("p",
+     "La tabella dei tempi in vasca porta accanto al tempo il teorico, lo "
+     "scarto e i limiti min e max. Il testo sotto la tabella dice la cosa "
+     "importante: i limiti vengono dal teorico piu' o meno i delta, si "
+     "possono sforare, e la verifica lo dira'. E' di nuovo il principio di "
+     "_ricomponi: la tabella informa, non rifiuta."),
     ("c", "interfaccia.Applicazione._sincronizza_campi"),
     ("p",
      "Riporta nei campi i valori dello stato. Serve dopo ogni modifica fatta "
@@ -605,17 +995,37 @@ MODIFICA = [
     ("c", "interfaccia.Applicazione._modifica_takt"),
     ("c", "interfaccia.Applicazione._modifica_permanenza"),
     ("c", "interfaccia.Applicazione._cambia_carroponti"),
+    ("q",
+     "CAMBIARE IL NUMERO NON RIDISTRIBUISCE LE MOSSE. La prima riga del "
+     "docstring dice ancora 'ridistribuisce in blocchi contigui', ma il resto "
+     "del docstring e il codice dicono il contrario: l'assegnazione la fa "
+     "l'utente, e rifargliela sotto sarebbe buttare via il suo lavoro. "
+     "Aggiungendo un carroponte lo si rende solo disponibile nel menu "
+     "'attivo'; togliendone uno, le sue mosse -- e i suoi punti di passaggio "
+     "-- passano all'ultimo rimasto, che e' l'unico modo di non scavalcare i "
+     "vicini. Chi vuole una suddivisione gia' fatta ha il pulsante apposta."),
     ("p",
-     "Lo spinbox dei carroponti ridistribuisce le mosse in blocchi contigui. "
-     "E' l'unico comando che tocca l'assegnazione tutta insieme, e lo fa "
-     "perche' cambiare il numero di carroponti senza ridistribuire lascerebbe "
-     "mosse assegnate a un carroponte che non esiste piu'."),
+     "Se la linea dichiara le portate nel foglio Zone il numero non si "
+     "cambia affatto: i carroponti sono quelli delle righe del foglio, uno "
+     "in piu' non avrebbe una portata, e togliendone uno le sue mosse "
+     "andrebbero a un vicino che magari non ci arriva. Lo spinbox torna al "
+     "valore di prima e la barra dice dove si cambia davvero."),
     ("c", "interfaccia.Applicazione._modifica_numero_carroponti"),
     ("p",
      "'Ottimizza con questi carroponti': rifa' il calcolo tenendo fisso il "
      "numero e lasciando scegliere le zone. E' la via di mezzo fra il calcolo "
      "completamente automatico e la composizione a mano -- si sa quanti "
-     "carroponti si hanno, non come dividerli."),
+     "carroponti si hanno, non come dividerli. Le modifiche fatte a mano si "
+     "perdono, e per questo e' un pulsante e non un effetto collaterale "
+     "dello spinbox."),
+    ("p",
+     "Il lavoro segue la stessa strada di _risolvi, in piccolo: se non trova "
+     "niente scrive nel registro dei tentativi la sua unica voce "
+     "(voce_registro) e lancia la diagnosi -- il commento ricorda che senza, "
+     "il resoconto diceva solo 'nessun registro dei tentativi' -- e se trova "
+     "una soluzione prova a renderne esatto il punto di avvio con "
+     "_allinea_nel_lavoro. Il risultato torna dalla coda e lo gestisce "
+     "_controlla_coda, come quello di 'Calcola auto'."),
     ("c", "interfaccia.Applicazione._assegna"),
     ("q",
      "LO STESSO GESTO ASSEGNA E TOGLIE. Il docstring: si da' la mossa al "
@@ -630,9 +1040,48 @@ MODIFICA = [
      "composizione, e il messaggio spiega quali carroponti e quali vasche."),
     ("c", "interfaccia.Applicazione._assegna_da_tabella"),
     ("p",
-     "Lo stesso, dalla tabella invece che dal grafico. Due strade per lo "
-     "stesso gesto: il grafico e' piu' rapido, la tabella e' piu' precisa "
+     "Lo stesso gesto, dalla tabella invece che dal grafico, ma con una "
+     "differenza: il doppio clic non usa il carroponte attivo, fa GIRARE la "
+     "mossa al carroponte successivo, e dopo l'ultimo la riporta a nessuno. "
+     "Il commento spiega perche': cosi' il giro comprende anche il togliere, "
+     "che dalla tabella altrimenti non si potrebbe fare. Un carroponte che "
+     "scavalcherebbe i vicini si salta, quindi il doppio clic propone solo "
+     "cose possibili; se nessuno puo', lo dice la barra. Due strade per lo "
+     "stesso scopo: il grafico e' piu' rapido, la tabella e' piu' precisa "
      "quando i trasporti sono fitti."),
+
+    # ==================================================================
+    ("h2", "3 bis. I punti di passaggio"),
+    ("p",
+     "Un punto di passaggio dice: il carroponte deve trovarsi in questa "
+     "posizione a questo istante, durante un rientro a vuoto. Due punti alla "
+     "stessa posizione sono una sosta. Il commento nella scheda spiega perche' "
+     "si inseriscono scrivendo tempo e posizione: e' cosi' che li si legge su "
+     "un ciclogramma di carta, 'a 40 s deve essere a 4000 mm'. Nascono di "
+     "nessuno, come i trasporti del pettine, e si danno a un carroponte con "
+     "lo stesso gesto."),
+    ("c", "interfaccia.Applicazione._aggiungi_passaggio"),
+    ("p",
+     "Il punto nuovo entra nella lista tenuta in ordine di tempo e "
+     "posizione, i campi si svuotano per il prossimo, e la barra dice come "
+     "proseguire: clic sul grafico per darlo al carroponte attivo. Come tutte "
+     "le modifiche ai punti, passa da _ricomponi con `tieni_rientri`: un "
+     "punto di nessuno non cambia nessun rientro."),
+    ("c", "interfaccia.Applicazione._togli_passaggi"),
+    ("p",
+     "Toglie i punti selezionati (anche col tasto Canc). Solo quelli "
+     "aggiunti a mano: i punti del pettine non stanno in questa tabella e "
+     "non si tolgono, perche' vengono dalla ricetta. Senza selezione non "
+     "toglie niente e dice cosa fare."),
+    ("c", "interfaccia.Applicazione._passaggio_da_tabella"),
+    ("c", "interfaccia.Applicazione._assegna_passaggio"),
+    ("p",
+     "Doppio clic sulla riga, o clic secco sul rombo nel grafico: in tutti e "
+     "due i casi si arriva qui, che fa per i punti quello che _assegna fa per "
+     "i trasporti -- il punto va al carroponte attivo, o gli viene tolto se "
+     "era gia' suo. A differenza dei trasporti non si chiede niente a "
+     "manuale.perche_non_va: vale il principio di _ricomponi, si mostra cosa "
+     "non torna invece di impedirlo."),
 
     # ==================================================================
     ("h2", "4. Annullare"),
@@ -640,13 +1089,22 @@ MODIFICA = [
     ("c", "interfaccia.Applicazione._annulla_modifica"),
     ("p",
      "L'annullamento e' una pila di ISTANTANEE dello stato -- takt, "
-     "permanenze, assegnazione -- non di comandi inversi. E' molto piu' "
-     "semplice da rendere corretto: uno stato ripristinato e' esattamente "
-     "quello di prima, mentre un comando inverso puo' sempre avere un caso "
-     "che non copre."),
+     "permanenze, assegnazione, numero di carroponti, punti di passaggio, "
+     "attese e soste -- non di comandi inversi. E' molto piu' semplice da "
+     "rendere corretto: uno stato ripristinato e' esattamente quello di "
+     "prima, mentre un comando inverso puo' sempre avere un caso che non "
+     "copre."),
+    ("q",
+     "LE PAUSE STANNO NELL'ISTANTANEA. Da quando _ricomponi le adatta invece "
+     "di buttarle, una modifica puo' accorciarle; senza attese e soste "
+     "nell'istantanea, il commento lo dice, annullare la modifica le avrebbe "
+     "lasciate come la modifica le aveva ridotte. I dizionari e i punti si "
+     "COPIANO: un'istantanea che condivide gli oggetti con lo stato verrebbe "
+     "cambiata dalla modifica successiva."),
     ("p",
-     "Costa memoria, e qui non e' un problema: lo stato sono tre dizionari "
-     "piccoli, e le modifiche in una sessione sono decine, non milioni."),
+     "Costa memoria, e qui non e' un problema: lo stato sono pochi "
+     "dizionari piccoli, e le modifiche in una sessione sono decine, non "
+     "milioni."),
 
     # ==================================================================
     ("h2", "5. Il verdetto"),
@@ -659,12 +1117,66 @@ MODIFICA = [
      "gravita' peggiore trovata. E' la scelta che rende la composizione a mano "
      "praticabile: si vede subito se l'ultima modifica ha risolto o rotto "
      "qualcosa, senza dover andare a cercare."),
+    ("c", "interfaccia.Applicazione._banner_neutro"),
+    ("p",
+     "Il banner quando non c'e' niente da giudicare: una linea appena "
+     "caricata, un calcolo fallito. Grigio e senza verdetto, perche' quello "
+     "del ciclogramma di prima, letto accanto a un'altra linea o a un "
+     "calcolo che non ha trovato niente, direbbe una cosa falsa."),
     ("p",
      "Il riepilogo raccoglie tutto quello che si vorrebbe sapere di un "
-     "ciclogramma: takt, produttivita', carroponti, separazione minima, "
-     "permanenza piu' stretta, tempo di calcolo, e da dove viene il "
-     "ciclogramma che si sta guardando. E' anche il testo che finisce nel "
-     "foglio Riepilogo del file dei risultati."),
+     "ciclogramma: da dove viene (e se e' stato poi modificato a mano), il "
+     "tempo di calcolo, takt e produttivita', lo scarto dai teorici, i "
+     "carroponti con le loro mosse, i tempi in vasca, il punto di avvio, le "
+     "soste per strada, le mosse ancora da assegnare, e alla fine la "
+     "distanza minima fra i carroponti e il verdetto. I numeri sono scritti "
+     "come nel foglio Riepilogo del file dei risultati -- i secondi del "
+     "punto di avvio con due decimali, per esempio -- perche' le due scritte "
+     "si confrontano, e '16.6' accanto a '16,60' fa dubitare."),
+    ("q",
+     "LE INCOERENZE VENGONO PRIMA DI TUTTO. Se manuale.componi ne ha "
+     "trovate, il banner diventa arancione e il riepilogo parla solo di "
+     "quelle. Il commento racconta perche': il disegno le assorbe allungando "
+     "un'attesa e tirando dritto, e il risultato e' una riga orizzontale "
+     "lunghissima che sembra una stranezza del grafico, mentre e' il "
+     "sintomo. Si calcolavano gia' e non si mostravano: chi riapriva un file "
+     "rotto vedeva la riga e non sapeva cosa fosse."),
+    ("c", "interfaccia.Applicazione._scarto_corrente"),
+    ("p",
+     "Lo scarto dai teorici del ciclogramma a schermo, in secondi e SENZA "
+     "pesi: la somma di quanto ogni bagno si scosta dal suo teorico, sopra o "
+     "sotto. Il docstring spiega la scelta: i pesi decidono dove il calcolo "
+     "spende lo scarto, ma il numero pesato non si legge come una durata, "
+     "mentre questo dice quanti secondi di distacco ci sono davvero."),
+    ("p",
+     "Si calcola dai tempi in vasca e non dalla soluzione del solutore: "
+     "cosi' vale anche per un ciclogramma composto o ritoccato a mano, ed e' "
+     "il numero con cui confrontarlo con quello del calcolo automatico."),
+    ("q",
+     "LA NOTA ACCANTO AL NUMERO. Col takt fisso il riepilogo aggiunge 'e' "
+     "cio' che Calcola auto rende minimo'; col takt libero, su un risultato "
+     "del calcolo non ritoccato, 'minimo a parita' di takt'. A essere "
+     "minimizzato, pero', e' lo scarto PESATO (model.scarto_totale lo dice: "
+     "il pesato resta l'obiettivo del calcolo). Con tutti i pesi uguali, "
+     "sopra e sotto, i due "
+     "minimi coincidono, con pesi diversi il numero mostrato puo' non essere "
+     "il piu' piccolo possibile. La nota va letta come 'e' la grandezza su "
+     "cui il calcolo lavora', non come una garanzia sul valore."),
+    ("c", "interfaccia.Applicazione._tabella_tempi_in_vasca"),
+    ("p",
+     "Teorico, effettivo, scarto e sgocciolamento di ogni vasca, come righe "
+     "incolonnate. La stessa cosa sta nella tabella della scheda "
+     "Ciclogramma, ma quella si apre solo per modificare: qui la si legge "
+     "accanto al takt time e allo scarto dai teorici, che sono i numeri con "
+     "cui la si giudica. Lo sgocciolamento sta accanto e non dentro "
+     "l'effettivo: e' tempo che il telaio passa sopra la vasca DOPO il "
+     "bagno."),
+    ("p",
+     "Le vasche fuori tolleranza si segnano con '< min' o '> max', perche' "
+     "in una colonna di numeri non si vedono: il verdetto lo da' la "
+     "verifica, il segno dice dove guardare. Con mezzo centesimo di "
+     "tolleranza, lo stesso dei valori mostrati: un bagno sul minimo, "
+     "arrotondato, non deve sembrare fuori."),
 ]
 
 
@@ -692,8 +1204,13 @@ GRAFICO = [
     ("p",
      "Gli istanti da cui la linea si puo' mettere in marcia (vedi avvio.py) non "
      "sono uno: sono tutti quelli che sbagliano uguale, e stanno lontani fra "
-     "loro. Nessuno e' migliore degli altri, quindi il programma non ne sceglie "
-     "uno -- li mostra e lascia scegliere."),
+     "loro. Quale convenga lo sa chi conosce l'impianto, quindi il programma "
+     "li mostra tutti e lascia scegliere. Uno pero' lo propone per primo: "
+     "avvio.trova_avvii mette in testa alla lista l'istante con PIU' "
+     "MARGINE -- un avvio esatto ma lungo un attimo non lascia tempo ne' "
+     "prima ne' dopo -- e gli altri a seguire in ordine di tempo lungo il "
+     "giro. E' quello che la finestra mostra appena calcolato e quello che "
+     "finisce nel file, se non se ne sceglie un altro."),
     ("c", "interfaccia.Applicazione._aggiorna_avvii"),
     ("q",
      "SI RICALCOLANO DA UN POSTO SOLO. Il grafico, il riepilogo e il "
@@ -709,6 +1226,12 @@ GRAFICO = [
      "sui TEMPI e non sul numero: due liste lunghe uguale ma con istanti diversi "
      "sono due cose diverse."),
     ("c", "interfaccia.Applicazione._avvio_corrente"),
+    ("c", "interfaccia.Applicazione._t_avvio"),
+    ("p",
+     "Due letture dello stesso dato. L'Avvio intero serve al grafico, al "
+     "riepilogo e al salvataggio; la simulazione vuole solo l'istante da cui "
+     "ripartire, e _t_avvio glielo da' senza che chi la chiama debba "
+     "controllare se un avvio c'e'."),
     ("c", "interfaccia.Applicazione._prossimo_avvio"),
     ("p",
      "Scorre in tondo: dopo l'ultimo si torna al primo. Sono tutti equivalenti, "
@@ -717,8 +1240,9 @@ GRAFICO = [
     ("p",
      "Non passa da _mostra_ciclogramma: gli istanti sono gli stessi, cambia "
      "solo quale si guarda, e ricalcolarli azzererebbe l'indice appena mosso. "
-     "Per la stessa ragione non tocca la simulazione: il punto di avvio non "
-     "cambia il ciclogramma, dice solo da dove lo si legge."),
+     "Per la stessa ragione non RICOSTRUISCE la simulazione: il punto di "
+     "avvio non cambia il ciclogramma, dice solo da dove lo si legge. Le "
+     "dice pero' da dove ripartire, con imposta_avvio."),
     ("c", "interfaccia.Applicazione._aggiorna_pulsante_avvio"),
     ("p",
      "A parte e non dentro _aggiorna_stato_pulsanti, che dipende da cosa c'e' "
@@ -730,6 +1254,34 @@ GRAFICO = [
      "altri, che altrimenti non si saprebbe. Larghezza fissa nel costruttore, se "
      "no ballerebbe passando da 'di 5' a 'di 1'. Spento quando ce n'e' uno solo: "
      "non c'e' niente dove andare."),
+    ("p",
+     "Qui si decide anche 'Allinea avvio', perche' dipende dalla stessa "
+     "cosa: acceso solo se il punto di avvio corrente e' APPROSSIMATO e non "
+     "c'e' un calcolo in corso. Un avvio gia' esatto non ha niente da "
+     "allineare."),
+    ("c", "interfaccia.Applicazione._allinea_avvio"),
+    ("p",
+     "Quando nessun istante del giro ha errore zero, allinea_avvio cerca "
+     "uno spostamento rigido nel tempo del giro di qualche carroponte che lo "
+     "renda esatto, restando nelle tolleranze e senza collisioni. Il "
+     "calcolo automatico lo fa da solo (_allinea_nel_lavoro, documento 2); "
+     "il pulsante serve ai ciclogrammi riletti da file o composti a mano."),
+    ("p",
+     "Per la finestra e' una modifica come le altre, e il docstring elenca "
+     "cosa vuol dire: i tempi in vasca si rileggono dalla soluzione "
+     "allineata, come in _stato_da_soluzione; si annulla con Annulla; i "
+     "punti di passaggio si spostano col loro carroponte, della stessa "
+     "quantita'. Attese e soste si prendono dalla soluzione allineata e si "
+     "tengono (`tieni_rientri`): dentro il giro di un carroponte non cambia "
+     "niente, quindi sono ancora giuste, e ricadere sulla regola "
+     "predefinita disegnerebbe rientri diversi da quelli appena verificati."),
+    ("p",
+     "A differenza del calcolo gira nel thread della finestra, senza Ferma "
+     "ne' Pausa: il puntatore diventa una clessidra finche' non ha finito, "
+     "e un errore si mostra senza toccare niente. La barra di stato dice quali "
+     "carroponti sono stati spostati e lo scarto dai teorici prima e dopo, "
+     "in secondi senza pesi; se nessuno spostamento funziona lo dice, e non "
+     "cambia niente."),
     ("c", "interfaccia.Applicazione._disegna_traiettorie"),
     ("p",
      "Il ciclogramma vero e proprio, delegato a plotting.plot_cyclogram sullo "
@@ -771,6 +1323,24 @@ GRAFICO = [
      "Sono piu' piccoli e senza bordo bianco di quelli dei carroponti: il "
      "pettine e' lo sfondo su cui si lavora, e deve restare leggibile SOTTO il "
      "giro che si sta componendo invece di contendergli l'occhio."),
+    ("p",
+     "Sopra il pettine, il giro di ogni carroponte, ripetuto sui cicli: "
+     "colore del carroponte, linea spessa, e punti sugli stessi istanti del "
+     "ciclogramma (sui rientri, gli estremi delle traslazioni). Poi i punti "
+     "di passaggio aggiunti a mano, come ROMBI: tondi sono i punti del "
+     "pettine, che vengono dalla ricetta, a rombo quelli dell'utente, e solo "
+     "questi si tolgono. Vuoti finche' non sono di nessuno, pieni del colore "
+     "del carroponte che ci passa. Le posizioni ripetute le da' "
+     "_ripetizioni_passaggi, la stessa funzione che usa il mouse per "
+     "trovarli."),
+    ("p",
+     "Infine la linea nera del punto di avvio, su tutte le ripetizioni "
+     "disegnate e con la stessa funzione del ciclogramma "
+     "(plotting.disegna_avvio), cosi' le due viste non possono metterla in "
+     "due punti diversi. Il commento dice perche' serve anche qui: "
+     "componendo si sposta il ciclogramma, e vedere dove va a finire "
+     "l'istante di avvio mentre lo si fa e' meta' del motivo per cui "
+     "esiste."),
     ("q",
      "UN DISEGNO SOLO, CON I NaN A SEPARARE I TRATTI. Vale per il pettine come "
      "per i carroponti poco piu' sotto: con dieci scalinate e diciassette "
@@ -796,6 +1366,19 @@ GRAFICO = [
      "assurda. Una soglia di 12 pixel vuol dire la stessa cosa a qualunque "
      "ingrandimento, mentre una soglia in secondi diventerebbe enorme "
      "ingrandendo e microscopica allargando."),
+    ("c", "interfaccia.Applicazione._ripetizioni_passaggi"),
+    ("p",
+     "Dove si vede ogni punto di passaggio: ripetuto a ogni takt time, "
+     "perche' il carroponte ci ripassa a ogni giro. Il docstring aggiunge "
+     "che vale anche per un punto ancora di nessuno, che e' periodico quanto "
+     "quello che diventera'. Solo sul pettine, che e' la vista in cui si "
+     "modifica: sul ciclogramma la lista e' vuota, e i rombi non si "
+     "disegnano."),
+    ("c", "interfaccia.Applicazione._passaggio_sotto"),
+    ("p",
+     "La stessa misura in pixel dei trasporti, con un raggio piu' stretto -- "
+     "9 pixel invece di 12 -- perche' il bersaglio e' un punto e non un "
+     "tratto."),
     ("c", "interfaccia.Applicazione._su_pressione"),
     ("q",
      "IL GRAFICO STA FUORI DALLA SCHEDA. Il commento spiega perche' qui si "
@@ -805,8 +1388,14 @@ GRAFICO = [
      "detto di volerlo. E' la stessa difesa che _vai_a_modifica costruisce, "
      "rifatta dove serve."),
     ("p",
-     "Il commento lungo distingue DUE bersagli con due raggi diversi, e la "
-     "ragione e' nel gesto:"),
+     "Prima di tutto si cerca un punto di passaggio, e il commento spiega "
+     "l'ordine: e' piccolo e sta spesso sopra un tratto del pettine, e chi "
+     "lo centra vuole proprio lui. Se c'e', il trascinamento lo ricorda con "
+     "le coordinate di partenza in dati e in pixel, su tutti e due gli assi: "
+     "un punto si sposta nel tempo E nella posizione."),
+    ("p",
+     "Altrimenti il commento lungo distingue DUE bersagli con due raggi "
+     "diversi, e la ragione e' nel gesto:"),
     ("li", "il PUNTO DI PRELIEVO e' la maniglia per trascinare -- il tempo in "
            "vasca si allunga da li', quindi il trascinamento ha senso solo "
            "prendendolo per quell'estremo. Raggio stretto, 18 pixel;"),
@@ -824,7 +1413,9 @@ GRAFICO = [
      "scrive lo spostamento nella barra di stato. Non si ricompone niente: "
      "ricostruire il ciclogramma a ogni pixel sarebbe lento e "
      "illeggibile. Due casi non trascinano affatto -- una pressione a meta' "
-     "tratto (nessuna maniglia) e la mossa 0, che e' l'origine dei tempi."),
+     "tratto (nessuna maniglia) e la mossa 0, che e' l'origine dei tempi. "
+     "Un punto di passaggio trascinato non ha guida: la barra scrive dove "
+     "finirebbe, in secondi e millimetri."),
     ("c", "interfaccia.Applicazione._su_rilascio"),
     ("q",
      "CLIC SECCO O TRASCINAMENTO? SI MISURA IN PIXEL. Il commento: in secondi "
@@ -836,6 +1427,15 @@ GRAFICO = [
      "Trascinare la mossa 0 non da' un errore: da' una spiegazione. Il primo "
      "prelievo fissa l'origine dei tempi, e per spostarlo si cambiano i tempi "
      "in vasca a valle."),
+    ("c", "interfaccia.Applicazione._rilascia_passaggio"),
+    ("p",
+     "La fine di un gesto cominciato su un punto di passaggio, a cui "
+     "_su_rilascio passa la mano. La stessa distinzione dei trasporti, "
+     "ma su tutti e due gli assi: fermo entro 4 pixel in orizzontale E in "
+     "verticale e' un clic, e il punto va al carroponte attivo (o gli viene "
+     "tolto, _assegna_passaggio); altrimenti e' un trascinamento, e il punto "
+     "si sposta di quanto si e' mosso il mouse, in tempo e in posizione. La "
+     "lista si rimette in ordine, e si ricompone tenendo i rientri."),
     ("c", "interfaccia.Applicazione._mostra_dettaglio"),
 
     # ==================================================================
@@ -855,12 +1455,21 @@ GRAFICO = [
      "passaggio da ciclogramma a pettine -- l'inquadratura precedente non "
      "vuol piu' dire niente, perche' cambia la scala dei tempi. Conservarla "
      "lascerebbe l'utente a guardare un rettangolo vuoto senza capire "
-     "perche'."),
+     "perche'. E non basta azzerare lo zoom: si butta anche la cronologia "
+     "di navigazione della barra, perche' le viste memorizzate si "
+     "riferiscono a un disegno che non c'e' piu', e 'indietro' porterebbe "
+     "su una fetta a caso di quello nuovo."),
     ("c", "interfaccia.Applicazione._su_rotella"),
     ("p",
      "Zoom con la rotella, centrato dove sta il puntatore. E' il gesto che "
      "tutti si aspettano da un grafico, e senza si e' costretti a passare "
      "dalla barra ogni volta."),
+    ("p",
+     "Agisce sul solo asse dei TEMPI, e il docstring dice perche': le vasche "
+     "sono poche e fisse, mentre il tempo e' la direzione in cui si cerca il "
+     "dettaglio. Con Shift si zooma sulle posizioni, con Ctrl su tutti e "
+     "due. Ogni rotellata segna l'inquadratura come scelta dall'utente, "
+     "cosi' sopravvive al ridisegno come quella fatta con la barra."),
     ("c", "interfaccia.Applicazione._navigazione_attiva"),
     ("p",
      "Vero quando e' selezionato lo zoom a rettangolo o lo spostamento. "

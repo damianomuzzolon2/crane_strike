@@ -22,28 +22,34 @@ RIGA_PER_RIGA = [
      "chiamando le stesse funzioni. Non c'e' un solo calcolo qui dentro: e' "
      "tutto lettura degli argomenti, ordine delle chiamate e messaggi. Ed e' "
      "il motivo per cui vale la pena leggerlo per primo fra i programmi -- si "
-     "vede il giro completo in centottanta righe, senza il rumore di una "
-     "finestra."),
+     "vede il giro completo in poco piu' di duecentocinquanta righe, senza il "
+     "rumore di una finestra."),
 
     # ==================================================================
     ("h2", "Che cosa fa, in una pagina"),
-    ("p", "Il giro e' sempre lo stesso, in sei passi:"),
+    ("p", "Il giro e' sempre lo stesso, in otto passi:"),
     ("li", "leggere il file Excel e trasformarlo in un ProblemData;"),
-    ("li", "decidere i carroponti -- o accettare le zone scritte a mano, o "
-           "cercarne numero e suddivisione;"),
-    ("li", "risolvere con CP-SAT;"),
+    ("li", "cercare con CP-SAT carroponti e zone -- il numero di carroponti "
+           "lo fissa il foglio Zone, se c'e', altrimenti lo si cerca -- "
+           "risolvendo ogni suddivisione provata;"),
+    ("li", "rifinire la soluzione trovata: tempi in vasca piu' vicini ai "
+           "teorici a takt invariato, e niente soste per strada inutili;"),
+    ("li", "se il punto di avvio e' solo approssimato, provare a renderlo "
+           "esatto spostando di qualche secondo il giro di qualche "
+           "carroponte;"),
+    ("li", "stampare il punto di avvio;"),
     ("li", "far ricontrollare il risultato dal verificatore indipendente;"),
     ("li", "scrivere il file Excel dei risultati;"),
     ("li", "disegnare il ciclogramma in un PNG."),
     ("p",
-     "Gli ultimi due si possono saltare (--niente-excel, --niente-grafico). I "
-     "primi quattro no: un ciclogramma non verificato non esce da questo "
+     "Gli ultimi due si possono saltare (--niente-excel, --niente-grafico). "
+     "Gli altri no: un ciclogramma non verificato non esce da questo "
      "programma."),
 
     ("q",
      "IL CODICE D'USCITA E' UN'INTERFACCIA. Chi mette questo comando in uno "
      "script guarda il numero che restituisce, non quello che stampa. Sono "
-     "quattro, e vogliono dire cose diverse: 0 tutto bene; 1 il calcolo e' "
+     "tre, e vogliono dire cose diverse: 0 tutto bene; 1 il calcolo e' "
      "andato ma il risultato non va (nessuna soluzione, oppure una soluzione "
      "che non supera la verifica); 2 non si e' nemmeno partiti (file "
      "inesistente o compilato male). La distinzione fra 1 e 2 e' quella utile: "
@@ -84,9 +90,9 @@ RIGA_PER_RIGA = [
      "scritto: dice da quale foglio partire e stampa il comando successivo, "
      "gia' pronto da copiare."),
     ("p",
-     "E' la regola dei messaggi del progetto, e vale in tutti e tre i punti in "
-     "cui questa funzione parla all'utente: non dire soltanto cosa e' "
-     "successo, dire cosa fare adesso."),
+     "E' la regola dei messaggi del progetto, e vale in tutti i punti in cui "
+     "questa funzione si ferma o avverte di un problema: non dire soltanto "
+     "cosa e' successo, dire cosa fare adesso."),
 
     ("h3", "Le due porte chiuse: file assente, file sbagliato"),
     ("c", "ciclogramma.main", "    if not os.path.exists", "    data = cfg.data"),
@@ -108,21 +114,37 @@ RIGA_PER_RIGA = [
      "'errore nella lettura del file', quel lavoro andrebbe perso e l'utente "
      "correggerebbe una cella alla volta rilanciando ogni volta."),
 
+    ("h3", "La linea letta"),
+    ("c", "ciclogramma.main", "    data = cfg.data", "    # -- risoluzione"),
+    ("p",
+     "Un riassunto di quello che il programma ha capito del file, prima di "
+     "metterci sopra minuti di calcolo. Il takt time si scrive come lo "
+     "scrive l'utente -- il valore teorico con le due tolleranze, in meno e "
+     "in piu' -- e subito dopo come intervallo ammesso: e' la banda dentro "
+     "cui il solutore cerchera', ed e' il primo numero da guardare se poi "
+     "non trova niente."),
+
     ("h3", "La risoluzione, e le due strade"),
     ("c", "ciclogramma.main", "    # -- risoluzione", "    if solution.status not in"),
     ("p",
      "Qui si vede la separazione piu' importante del progetto. Le ZONE -- "
      "quale carroponte esegue quali trasporti -- non fanno parte del modello "
-     "CP-SAT: solve() le riceve gia' decise."),
-    ("li", "Se il file Excel le dichiara, si chiama direttamente solve()."),
-    ("li", "Se non le dichiara, si chiama solve_auto_hoists(), che prova un "
-           "numero crescente di carroponti e, per ciascuno, le suddivisioni "
-           "possibili, chiamando solve() su ognuna."),
+     "CP-SAT: solve() le riceve gia' decise. A deciderle e' "
+     "solve_auto_hoists(), che si chiama in tutti e due i casi e cambia solo "
+     "quello che cerca:"),
+    ("li", "Se il file Excel ha il foglio Zone, le PORTATE dei carroponti -- "
+           "fin dove ciascuno puo' arrivare, dalla vasca minima alla massima "
+           "-- dicono gia' quanti carroponti ci sono: si provano soltanto le "
+           "suddivisioni che le rispettano."),
+    ("li", "Se non ce l'ha, si prova un numero crescente di carroponti, fino "
+           "a max_carroponti, e per ciascuno le suddivisioni possibili; ci si "
+           "ferma al primo numero che funziona."),
     ("p",
-     "Nel secondo caso il costo e' molte risoluzioni invece di una, ed e' per "
-     "questo che il limite di tempo si chiama tempo_limite_per_tentativo_s: "
-     "vale per ogni tentativo, non per l'insieme. Chi si aspetta che il "
-     "comando finisca in quel tempo resta sorpreso."),
+     "In entrambi i casi solve() viene chiamata su ogni suddivisione provata, "
+     "e il costo e' molte risoluzioni invece di una: e' per questo che il "
+     "limite di tempo si chiama tempo_limite_per_tentativo_s. Vale per ogni "
+     "tentativo, non per l'insieme. Chi si aspetta che il comando finisca in "
+     "quel tempo resta sorpreso."),
 
     ("h3", "Quando non si trova niente"),
     ("c", "ciclogramma.main", "    if solution.status not in",
@@ -130,7 +152,12 @@ RIGA_PER_RIGA = [
     ("p",
      "Non basta dire che non c'e' soluzione: il messaggio elenca le quattro "
      "leve su cui si puo' agire, in ordine di quanto e' probabile che siano "
-     "loro il problema. Poi stampa il registro dei tentativi (hoist_sweep) se "
+     "loro il problema. La seconda dipende da come sono stati decisi i "
+     "carroponti: col foglio Zone si suggerisce di allargare le portate o di "
+     "aggiungere una riga, cioe' un carroponte; senza, di aumentare "
+     "max_carroponti. I nomi dei parametri sono quelli che l'utente trova nel "
+     "file (takt_delta_negativo_s, takt_delta_positivo_s), cosi' sa dove "
+     "andare a cambiarli. Poi stampa il registro dei tentativi (hoist_sweep) se "
      "c'e', che dice cosa e' stato provato e con che esito -- utile per capire "
      "se il limite era il numero di carroponti o il takt time."),
     ("q",
@@ -141,11 +168,60 @@ RIGA_PER_RIGA = [
      "secondo basta dare piu' tempo. Lo stato stampato le distingue, ma i "
      "quattro suggerimenti sono gli stessi in entrambi i casi."),
 
+    ("h3", "La rifinitura, e il punto di avvio reso esatto"),
+    ("c", "ciclogramma.main", "    data_finale = dataclasses.replace",
+     "    # -- il punto di avvio"),
+    ("p",
+     "La prima riga attacca al ProblemData le zone appena trovate: da qui in "
+     "poi ogni funzione -- rifinitura, allineamento, verifica, risultati, "
+     "grafico -- lavora su `data_finale`, che descrive la linea CON i suoi "
+     "carroponti."),
+    ("p",
+     "Poi due ritocchi, che cambiano il ciclogramma senza cambiarne il takt "
+     "time e che si tengono solo se migliorano qualcosa: altrimenti resta la "
+     "soluzione di prima, cosi' com'era."),
+    ("li", "rifinisci_soluzione(): col takt time libero la ricerca ha cercato "
+           "il takt piu' corto e basta. Qui si risolve di nuovo col takt "
+           "inchiodato a quello trovato, cercando i tempi in vasca piu' vicini "
+           "ai teorici; poi si tolgono le soste per strada che nessuno ha "
+           "voluto, rimaste quando CP-SAT e' scaduto prima di dimostrare "
+           "l'ottimo. Quest'ultima passata ha un limite suo, mai piu' lungo "
+           "di TEMPO_RIDUCI_SOSTE_S."),
+    ("li", "allinea_avvio(): se il punto di avvio e' solo approssimato, "
+           "sposta rigidamente di qualche secondo il giro di qualche "
+           "carroponte finche' tutti si trovano a riposo nello stesso "
+           "istante. Restituisce None se non serve, se non si puo' o se il "
+           "ciclogramma spostato non passa la verifica, e allora non cambia "
+           "niente."),
+    ("p",
+     "Le righe stampate dicono che cosa e' cambiato, e compaiono solo se "
+     "qualcosa e' cambiato davvero: lo scarto pesato dai tempi teorici prima "
+     "e dopo, quante soste sono state tolte, quali carroponti sono stati "
+     "anticipati o ritardati e di quanto (descrivi)."),
+
+    ("h3", "Il punto di avvio a terminale"),
+    ("c", "ciclogramma.main", "    # -- il punto di avvio",
+     "    # -- verifica indipendente"),
+    ("p",
+     "Le righe sono quelle di avvio.righe_di_riepilogo, le stesse del foglio "
+     "Riepilogo e del pannello della finestra, e l'istante e' quello di "
+     "trova_avvio: il primo, quello con piu' margine. Qui non c'e' nessuno "
+     "che possa scorrere gli altri, e la nota dice comunque quanti ce ne "
+     "sono. Le tre colonne si scrivono su una riga sola, e i valori decimali "
+     "con due cifre come nel foglio."),
+    ("p",
+     "Il commento spiega perche' si stampa: chi lancia il comando da "
+     "terminale non apre necessariamente ne' il file ne' il grafico, e "
+     "questo e' il dato con cui si va all'impianto."),
+
     ("h3", "La verifica indipendente"),
     ("c", "ciclogramma.main", "    # -- verifica indipendente", "    # -- risultati in Excel"),
     ("p",
-     "Il solutore ha appena dichiarato OPTIMAL, e nonostante questo la "
-     "soluzione viene ricontrollata da capo, in Python puro, senza CP-SAT. La "
+     "Il solutore ha appena dichiarato OPTIMAL (o FEASIBLE), e nonostante "
+     "questo la soluzione viene ricontrollata da capo, in Python puro, senza "
+     "CP-SAT. Si ricontrolla quella FINALE, dopo la rifinitura e "
+     "l'eventuale allineamento del punto di avvio: e' quella che finisce nel "
+     "file e nel grafico. La "
      "ragione e' che 'ottimale' vuol dire soltanto 'il migliore fra quelli che "
      "rispettano i vincoli che gli ho scritto': se un vincolo e' formulato "
      "male, il solutore restituisce comunque OPTIMAL e nessuno se ne "
@@ -162,13 +238,24 @@ RIGA_PER_RIGA = [
     ("p",
      "Il blocco piu' denso della funzione, e non per il salvataggio in se': "
      "per il dizionario `ciclogramma` che gli si passa accanto. Quel "
-     "dizionario contiene i TRE GRADI DI LIBERTA' della soluzione, ed e' cio' "
+     "dizionario contiene i GRADI DI LIBERTA' della soluzione, ed e' cio' "
      "che rende il file dei risultati riapribile."),
     ("li", "T -- il takt time;"),
+    ("li", "n_carroponti -- quanti carroponti ha la linea;"),
     ("li", "permanenze -- quanto ogni pezzo sta in ciascuna vasca;"),
-    ("li", "assegnazione -- quale carroponte esegue quale trasporto."),
+    ("li", "assegnazione -- quale carroponte esegue quale trasporto;"),
+    ("li", "attese -- quanto ogni carroponte resta fermo dove ha consegnato, "
+           "prima di rientrare a vuoto;"),
+    ("li", "soste -- dove un carroponte si ferma in una vasca in mezzo "
+           "durante il rientro, e per quanto."),
     ("p",
-     "Da questi tre soli dati build_solution() sa ricostruire l'intero "
+     "Gli ultimi due non discendono dagli altri: a parita' di tutto il resto "
+     "un carroponte puo' ripartire subito o restare fermo e partire "
+     "all'ultimo, e sono traiettorie diverse, con collisioni diverse. Per "
+     "questo i commenti dicono che senza di loro il file riaperto sarebbe un "
+     "ciclogramma diverso da questo."),
+    ("p",
+     "Da questi soli dati build_solution() sa ricostruire l'intero "
      "ciclogramma, traiettorie comprese. Tutto il resto -- istanti di "
      "prelievo, giri a vuoto, profili -- e' conseguenza, e salvarlo sarebbe "
      "sia ridondante sia rischioso, perche' un file modificato a mano potrebbe "
@@ -199,6 +286,10 @@ RIGA_PER_RIGA = [
            "pyplot venga importato. Metterla in testa al file la farebbe "
            "valere anche quando questo modulo viene importato da altri, "
            "rubando la scelta del motore a chi invece una finestra la vuole."),
+    ("p",
+     "A plot_cyclogram non si passa nessun istante di avvio: senza, la linea "
+     "del punto di avvio la ricava da se' con trova_avvio, e quindi e' la "
+     "stessa stampata a terminale e scritta nel Riepilogo."),
     ("p",
      "L'ultima riga e' il codice d'uscita, e dice una cosa precisa: il "
      "comando riesce solo se la verifica INDIPENDENTE e' passata. Non se il "

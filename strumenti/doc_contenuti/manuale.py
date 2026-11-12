@@ -1,7 +1,7 @@
 """
 Il testo dei documenti di manuale.py.
 
-Dodici funzioni, tutte piccole, ma il modulo regge una scelta di fondo del
+Quattordici funzioni, quasi tutte piccole, ma il modulo regge una scelta di fondo del
 programma: durante il disegno a mano NON si rifiuta niente. Quasi tutti i
 docstring del file spiegano un controllo che si e' deciso di non fare, ed e'
 quella la parte che questo documento riprende.
@@ -153,7 +153,9 @@ RIGA_PER_RIGA = [
      "In un modulo che non rifiuta niente, questa e' l'unica funzione che dice "
      "di no. E il suo docstring spiega esattamente perche' questo caso e' "
      "diverso da tutti gli altri: non e' un controllo sul CICLOGRAMMA -- quelli "
-     "sono sospesi durante il disegno -- ma sulla GEOMETRIA."),
+     "sono sospesi durante il disegno -- ma sulla MACCHINA. I divieti sono "
+     "due, e nessuno dei due si aggira dando piu' tempo: l'ordine sulla "
+     "rotaia e la portata di ciascun carroponte."),
     ("p",
      "I carroponti stanno tutti sulla stessa rotaia e non possono scavalcarsi. "
      "Se il carroponte 2 dovesse servire una vasca che sta prima di quelle del "
@@ -162,11 +164,21 @@ RIGA_PER_RIGA = [
      "rotaia. Un ciclogramma cosi' non e' 'difficile', e' impossibile da "
      "costruire, e disegnarlo non aiuterebbe l'utente a capire niente."),
     ("p",
-     "Il controllo e' semplicissimo: scorre le mosse in ordine e verifica che "
-     "il numero di carroponte non torni mai indietro. Il messaggio pero' non "
-     "si limita a dire che c'e' un incrocio: nomina i due carroponti, la mossa "
-     "e le due vasche coinvolte, perche' l'utente possa vedere sul disegno di "
-     "cosa si sta parlando."),
+     "Il primo ciclo e' la PORTATA, dichiarata nel foglio Zone: il tratto di "
+     "rotaia, da una vasca a un'altra, che ciascun carroponte puo' "
+     "raggiungere. Per ogni mossa assegnata si controllano tutte e due le "
+     "tappe che tocca, quella di partenza e quella di arrivo (k e k + 1), con "
+     "data.raggiunge. Un carroponte con un numero oltre quelli dichiarati nel "
+     "foglio viene rifiutato prima ancora: per la macchina non esiste. Se le "
+     "portate non sono dichiarate affatto (data.portate e' None) il ciclo non "
+     "rifiuta niente, perche' raggiunge risponde sempre di si'."),
+    ("p",
+     "Il secondo ciclo e' l'ORDINE: scorre le mosse assegnate in ordine e "
+     "verifica che il numero di carroponte non torni mai indietro. In tutti "
+     "e due i casi il messaggio non si limita a dire che qualcosa non va: "
+     "nomina il carroponte, la mossa e le vasche coinvolte -- e per la "
+     "portata anche le due vasche che la delimitano -- perche' l'utente possa "
+     "vedere sul disegno di cosa si sta parlando."),
     ("q",
      "LE MOSSE NON ASSEGNATE NON SONO UN ERRORE. Il secondo paragrafo del "
      "docstring difende un'assenza. Si parte da niente assegnato e si assegna "
@@ -203,9 +215,25 @@ RIGA_PER_RIGA = [
     ("c", "manuale.componi"),
     ("p",
      "E' la funzione che chiude il giro. Prende i gradi di liberta' -- takt "
-     "time, permanenze, assegnazione, e le soste se qualcuno le ha gia' "
-     "scelte -- e ne ricava una Solution vera, con le traiettorie "
-     "ricostruite, chiamando lo stesso build_solution che usa il solutore."),
+     "time, permanenze, assegnazione, e le pause dei rientri a vuoto se "
+     "qualcuno le ha gia' scelte -- e ne ricava una Solution vera, con le "
+     "traiettorie ricostruite, chiamando lo stesso build_solution che usa il "
+     "solutore."),
+    ("p",
+     "Le pause sono di due tipi, e il docstring le descrive una per una. Le "
+     "`attese` dicono dove il carroponte passa il tempo morto del rientro; "
+     "le `soste` sono fermate in un'altra vasca IN MEZZO al rientro "
+     "(model.SostaIntermedia). Tutte e due arrivano gia' fatte -- da un "
+     "calcolo automatico, da un file, o da adatta_rientri dopo un ritocco -- "
+     "e il disegno manuale non ne inventa: sostare per strada ha senso solo "
+     "guardando dov'e' il carroponte vicino. Assenti, vale la regola "
+     "predefinita."),
+    ("p",
+     "I `passaggi` sono invece i punti che l'utente aggiunge a mano sul "
+     "grafico, per cui un carroponte deve passare durante un rientro a "
+     "vuoto. Arrivano come dizionari con il carroponte a cui sono stati dati; "
+     "build_solution li vuole per zona, e la conversione la fa "
+     "passaggi_per_zona, spiegata qui sotto."),
     ("p", "Tre argomenti di quella chiamata meritano attenzione:"),
     ("li", "status='MANUALE' -- la soluzione si dichiara per quello che e'. "
            "Non e' una decorazione: plotting.py e verify.py filtrano sugli "
@@ -223,6 +251,82 @@ RIGA_PER_RIGA = [
      "quella che spiega quasi sempre tutte le altre: un ciclogramma con dei "
      "buchi ha i tempi che non tornano ovunque, e mettere quel messaggio in "
      "fondo a venti righe lo renderebbe invisibile."),
+    ("p",
+     "In coda va invece un'incoerenza per ogni carroponte che ha dei punti "
+     "di passaggio ma nessun trasporto: non fa nessun rientro a vuoto, e "
+     "quindi non c'e' dove passarci. Anche questo e' descritto e non "
+     "rifiutato: i punti restano sul grafico, e basta dare una mossa a quel "
+     "carroponte perche' contino."),
+
+    ("h3", "passaggi_per_zona -- dal carroponte alla zona"),
+    ("c", "manuale.passaggi_per_zona"),
+    ("p",
+     "L'utente da' un punto di passaggio a un CARROPONTE; build_solution "
+     "ragiona per ZONE. Con un'assegnazione completa i due numeri "
+     "coincidono, con una parziale no: le zone sono quelle di zone_coprenti, "
+     "e un carroponte che non ha ancora nessuna mossa non ha nemmeno una "
+     "zona. Per questo la corrispondenza non si indovina dal numero ma si "
+     "ricava dalle mosse: la zona di un carroponte e' quella che contiene una "
+     "mossa assegnata a lui."),
+    ("p",
+     "setdefault tiene la PRIMA zona trovata per ogni carroponte. Le zone "
+     "sono costruite dall'assegnazione stessa, quindi le mosse di un "
+     "carroponte stanno in una zona sola e la scelta non e' mai fra due "
+     "candidate diverse."),
+    ("p",
+     "I punti con carro None si saltano: sono solo appoggiati sul grafico, in "
+     "attesa di essere dati a qualcuno, e non vincolano nessun rientro. Quelli "
+     "di un carroponte senza zona finiscono fra gli ORFANI, che la funzione "
+     "restituisce a parte perche' componi() li possa elencare fra le "
+     "incoerenze invece di perderli in silenzio."),
+
+    ("h3", "adatta_rientri -- le pause sopravvivono ai ritocchi"),
+    ("c", "manuale.adatta_rientri"),
+    ("p",
+     "Le attese e le soste sono state scelte per un ciclogramma preciso, "
+     "quello di PRIMA della modifica. Buttarle a ogni ritocco era la "
+     "soluzione semplice, e il docstring racconta perche' e' stata tolta: si "
+     "spostava un tempo in vasca e sparivano tutte le pause che il solutore "
+     "aveva messo per stare lontani dal vicino, cosi' il ciclogramma cambiava "
+     "ben oltre quello che si era toccato. Qui ogni pausa resta dov'era, "
+     "con la sua durata, finche' esiste ancora il rientro a cui appartiene."),
+    ("p",
+     "La chiama interfaccia.py dopo una modifica, quando c'e' un ciclogramma "
+     "precedente con delle pause da salvare, in due tempi: prima compone il "
+     "ciclogramma nuovo SENZA pause (la regola predefinita), e lo passa qui "
+     "come `nuova` per sapere quali rientri ci sono adesso e quanto tempo "
+     "hanno; poi ricompone con le attese e le soste che questa funzione "
+     "restituisce."),
+    ("p",
+     "Un rientro e' lo stesso se e' lo stesso carroponte, che consegna la "
+     "stessa mossa e va a prendere la stessa mossa dopo. successori, la "
+     "funzione annidata, ricava per ogni mossa quella che il suo carroponte "
+     "fa dopo, leggendo l'ordine del giro di ciascuno (plan.order); il modulo "
+     "-- `% len(p.order)` -- fa si' che dopo l'ultima venga la prima, perche' "
+     "il giro e' chiuso. Se il successore e' cambiato, o la mossa e' passata a "
+     "un altro carroponte, il rientro e' nuovo, e la pausa vecchia non si "
+     "applica: decide la regola predefinita."),
+    ("p",
+     "Per i rientri sopravvissuti si calcola il tempo LIBERO: dall'istante "
+     "della consegna (finish) al prelievo successivo, meno il viaggio a "
+     "vuoto. Se la mossa dopo e' la prima del giro il prelievo cade nel ciclo "
+     "successivo, e va aggiunto un T. Con una sosta il viaggio e' quello con "
+     "la deviazione, dalla consegna alla vasca della sosta e da li' al "
+     "prelievo; se gia' la deviazione da sola non ci sta piu', la sosta si "
+     "toglie e il tempo libero si ricalcola sul viaggio diretto."),
+    ("p",
+     "Poi le pause si accorciano quanto basta per starci. L'attesa si prende "
+     "il tempo per prima, la sosta prende quello che resta: a parita' di "
+     "tempo mancante e' la sosta a rimetterci per prima. Le durate non "
+     "scendono mai sotto zero e non crescono mai: una pausa puo' solo restare "
+     "com'era o accorciarsi."),
+    ("q",
+     "None E UN DIZIONARIO VUOTO NON SONO LA STESSA COSA. attese None vuol "
+     "dire 'nessuna scelta, regola predefinita ovunque'; un dizionario, "
+     "anche vuoto, e' una scelta fatta mossa per mossa. Per questo l'uscita "
+     "anticipata restituisce attese cosi' com'e', e alla fine si restituisce "
+     "None se None era arrivato: trasformarlo in {} cambierebbe il "
+     "significato di quello che si passa a componi()."),
 
     ("h3", "pettine -- le dieci scalinate"),
     ("c", "manuale.pettine"),
@@ -244,7 +348,9 @@ RIGA_PER_RIGA = [
     ("p",
      "L'albero delle chiamate, generato leggendo i sorgenti, dice che tre "
      "funzioni di questo modulo non sono chiamate da nessun punto del "
-     "progetto. Vale la pena distinguerle, perche' non sono lo stesso caso."),
+     "progetto. L'albero non legge i test: assegnazione_iniziale la usa un "
+     "test dell'interfaccia per preparare un'assegnazione, il programma no. "
+     "Vale la pena distinguerle, perche' non sono lo stesso caso."),
     ("t", [
         ["funzione", "situazione"],
         ["assegnazione_iniziale", "mai chiamata, ma dichiaratamente pubblica"],
@@ -275,8 +381,8 @@ RIGA_PER_RIGA = [
      "zona solo per i carroponti che hanno almeno una mossa, e salta i buchi. "
      "Il docstring dice che l'assegnazione 'e' gia' stata verificata contigua "
      "e ordinata da perche_non_va()' -- ma perche_non_va, come si e' visto, "
-     "verifica soltanto l'ordine, non la contiguita', proprio perche' le mosse "
-     "scoperte sono ammesse."),
+     "verifica l'ordine e la portata, non la contiguita', proprio perche' le "
+     "mosse scoperte sono ammesse."),
     ("q",
      "IL PRESUPPOSTO NON REGGE PIU'. E' con ogni probabilita' la funzione da "
      "cui si e' partiti, prima di accorgersi che le mosse non assegnate "
