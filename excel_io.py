@@ -251,12 +251,6 @@ _PARAMETRI = {
         "sgancio, dopo l'immersione: si somma al rilascio e NON e' tempo in "
         "vasca (il bagno comincia quando lo sgancio e' finito)",
     ),
-    "risoluzione_tick_per_s": (
-        "tick/s",
-        False,
-        100,
-        "risoluzione temporale interna del solutore",
-    ),
     "passo_controllo_distanza_mm": (
         "mm",
         False,
@@ -288,35 +282,35 @@ _PARAMETRI = {
     "max_soste_intermedie": (
         "-",
         False,
-        1,
+        2,
         "quante vasche IN MEZZO il calcolo automatico puo' valutare come posto "
         "dove far sostare un carroponte durante uno spostamento a vuoto, per "
         "tenerlo lontano dal vicino. 0 = nessuna, il carro aspetta solo dove "
         "ha consegnato o dove deve andare (come prima che questa colonna "
-        "esistesse). 1 (il default) da' al solutore il posto piu' al riparo, "
-        "ed e' quello che costa meno. Ogni candidato in piu' allarga il "
-        "modello parecchio -- su una linea da 14 mosse e 4 carroponti il "
-        "secondo candidato triplica i vincoli di non collisione: se il calcolo "
+        "esistesse). 1 da' al solutore il posto piu' al riparo, ed e' quello "
+        "che costa meno; 2 (il default) gli da' anche il secondo. Ogni "
+        "candidato in piu' allarga il modello parecchio -- su una linea da 14 "
+        "mosse e 4 carroponti il secondo candidato triplica i vincoli di non collisione: se il calcolo "
         "diventa lento, o se il takt time PEGGIORA dopo averlo alzato, alza "
         "tempo_limite_per_tentativo_s oppure riporta questo a 1 o a 0",
     ),
     "max_carroponti": (
         "-",
         False,
-        6,
+        10,
         "limite superiore alla ricerca automatica del numero di carroponti "
         "(non conta se il foglio Zone dichiara le portate)",
     ),
     "tempo_limite_per_tentativo_s": (
         "s",
         False,
-        15.0,
+        120.0,
         "quanto puo' durare ogni singola risoluzione CP-SAT",
     ),
     "takt_fisso": (
         "-",
         False,
-        0,
+        1,
         "0 = cerca il takt time PIU' PICCOLO nella banda dei due delta, e "
         "poi, a quel takt, i tempi in vasca piu' vicini ai teorici. "
         "1 = takt time FISSO al teorico, e si cercano solo i tempi in vasca "
@@ -337,12 +331,19 @@ _PARAMETRI = {
 }
 
 _INTERI = {
-    "risoluzione_tick_per_s",
     "max_carroponti",
     "max_soste_intermedie",
     "takt_fisso",
     "interblocco_vasche",
 }
+
+# La risoluzione temporale interna del solutore. Non e' un parametro della
+# linea e non si puo' cambiare dal file: tutte le tolleranze del progetto
+# (eps_seconds, il mezzo tick della verifica) sono pensate su questo valore.
+RISOLUZIONE_TICK_PER_S = 100
+# Nomi che un file scritto da una versione precedente puo' ancora avere fra i
+# Parametri e che adesso si IGNORANO, senza errore: il loro valore e' fisso.
+_NOMI_IGNORATI = {"risoluzione_tick_per_s"}
 
 # Per chi mostra i parametri fuori dal file (la finestra "Dati linea"): nome ->
 # (unita', obbligatorio, default, descrizione), nell'ordine del foglio.
@@ -583,7 +584,7 @@ def _leggi_libro(wb, percorso_file: str, errori: _Errori) -> Configurazione:
             hoist_extent_pos=par["ingombro_lato_positivo_mm"],
             hoist_extent_neg=par["ingombro_lato_negativo_mm"],
             safety_distance=par["distanza_sicurezza_mm"],
-            time_scale=par["risoluzione_tick_per_s"],
+            time_scale=RISOLUZIONE_TICK_PER_S,
 
             kin_lift_empty=_kin_sollevamento("vuoto"),
             kin_lift_loaded=_kin_sollevamento("carico"),
@@ -1203,6 +1204,8 @@ def _leggi_parametri(ws, errori: _Errori) -> dict:
                 f"'Nuovo modello Excel...' e ricopiarci i dati",
             )
             continue
+        if nome in _NOMI_IGNORATI:
+            continue
         if nome in _NOMI_SOSTITUITI:
             # Rinominati cambiando anche il significato: lasciarli cadere nel
             # generico "non riconosciuto" farebbe ricopiare il vecchio valore
@@ -1443,37 +1446,38 @@ def _righe_esempio():
         ("SCARICO", 0, 0, 0, 1, 1),
     ]
     parametri = {
-        "takt_teorico_s": 130,
-        "takt_delta_negativo_s": 20,
-        "takt_delta_positivo_s": 20,
-        "takt_fisso": 0,
-        "v_max_vuoto_mm_s": 1600,
-        "a_max_vuoto_mm_s2": 900,
-        "d_max_vuoto_mm_s2": 1200,
-        "v_max_carico_mm_s": 1000,
-        "a_max_carico_mm_s2": 400,
-        "d_max_carico_mm_s2": 500,
-        "ingombro_lato_positivo_mm": 500,
-        "ingombro_lato_negativo_mm": 700,
-        "distanza_sicurezza_mm": 600,
-        "v_max_sollevamento_vuoto_mm_s": 500,
-        "a_max_sollevamento_vuoto_mm_s2": 800,
-        "d_max_sollevamento_vuoto_mm_s2": 800,
-        "v_max_sollevamento_carico_mm_s": 300,
-        "a_max_sollevamento_carico_mm_s2": 500,
-        "d_max_sollevamento_carico_mm_s2": 500,
-        "v_approach_sollevamento_mm_s": 80,
-        "d_approach_sollevamento_mm": 150,
-        "tempo_aggancio_s": 2,
-        "tempo_sgancio_s": 1,
-        "risoluzione_tick_per_s": 100,
+        "takt_teorico_s": 300,
+        "takt_delta_negativo_s": 30,
+        "takt_delta_positivo_s": 30,
+        "v_max_vuoto_mm_s": 500,
+        "a_max_vuoto_mm_s2": 200,
+        "d_max_vuoto_mm_s2": 200,
+        "v_max_carico_mm_s": 500,
+        "a_max_carico_mm_s2": 200,
+        "d_max_carico_mm_s2": 200,
+        "ingombro_lato_positivo_mm": 1660,
+        "ingombro_lato_negativo_mm": 620,
+        "distanza_sicurezza_mm": 50,
+        "v_max_sollevamento_vuoto_mm_s": 350,
+        "a_max_sollevamento_vuoto_mm_s2": 150,
+        "d_max_sollevamento_vuoto_mm_s2": 150,
+        "v_max_sollevamento_carico_mm_s": 350,
+        "a_max_sollevamento_carico_mm_s2": 150,
+        "d_max_sollevamento_carico_mm_s2": 150,
+        "v_approach_sollevamento_mm_s": 100,
+        "d_approach_sollevamento_mm": 250,
+        "tempo_aggancio_s": 0,
+        "tempo_sgancio_s": 0,
         "passo_controllo_distanza_mm": 200,
-        "max_soste_intermedie": 1,
+        # solo per la simulazione: vuoti, il pezzo si disegna di misura
+        # convenzionale finche' qualcuno non li compila
+        "larghezza_pezzo_mm": None,
+        "altezza_pezzo_mm": None,
+        "max_soste_intermedie": 2,
+        "max_carroponti": 10,
+        "tempo_limite_per_tentativo_s": 120,
+        "takt_fisso": 1,
         "interblocco_vasche": 1,
-        "larghezza_pezzo_mm": 1400,
-        "altezza_pezzo_mm": 900,
-        "max_carroponti": 4,
-        "tempo_limite_per_tentativo_s": 15,
     }
     # La linea d'esempio non ha zone di cambio quota: il foglio nasce vuoto,
     # con le sole intestazioni, cosi' si vede che c'e' e cosa vorrebbe.
@@ -1534,7 +1538,6 @@ def _righe_da_configurazione(cfg: Configurazione):
         "d_approach_sollevamento_mm": d.d_approach_lift,
         "tempo_aggancio_s": d.engage_time,
         "tempo_sgancio_s": d.disengage_time,
-        "risoluzione_tick_per_s": d.time_scale,
         "passo_controllo_distanza_mm": d.clearance_step_mm,
         "max_soste_intermedie": d.max_soste_intermedie,
         "interblocco_vasche": 1 if d.interblocco else 0,
