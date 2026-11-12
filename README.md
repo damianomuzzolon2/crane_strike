@@ -2332,7 +2332,7 @@ Fermarsi costa il tempo di frenare e ripartire — due traslate invece di una (o
 invece di nessuna), calcolate con la cinematica vera — quindi il solutore lo
 sceglie solo quando gli serve.
 
-`max_soste_intermedie` (foglio `Parametri`, default **1**) dice quante vasche
+`max_soste_intermedie` (foglio `Parametri`, default **2**) dice quante vasche
 puo' valutare per ogni viaggio a vuoto. **A zero** il calcolo torna a essere
 quello di prima. Ogni candidato in piu' e' un ramo in piu' per il solutore e,
 attorno ai confini, un fascio di intervalli in piu' nel vincolo di non
@@ -2369,11 +2369,11 @@ fasce non genera nessuna finestra nel vincolo di non collisione — costa quasi
 nulla. Dal secondo in poi si comincia a prendere vasche ancora esposte, e li'
 la sosta e' una finestra lunga che si accoppia con tutte quelle del vicino.
 
-Per questo il default e' **1**: il posto piu' al riparo, quasi gratis. Alzalo a
-2-3 quando vuoi che il solutore consideri anche i posti imperfetti — per
+Il posto piu' al riparo (1) e' quasi gratis; il default e' **2**. Alzalo a
+3 quando vuoi che il solutore consideri anche i posti imperfetti — per
 esempio una vasca esposta al vicino di sinistra per scappare da quello di
 destra — e mettilo a 0 se il calcolo deve restare veloce. Si incrocia con
-`tempo_limite_per_tentativo_s` (default 15 s): un modello piu' grande ha bisogno
+`tempo_limite_per_tentativo_s` (default 120 s): un modello piu' grande ha bisogno
 di piu' tempo, e con un limite stretto puo' restituire un takt PEGGIORE di
 quello che si otterrebbe senza le soste. Se succede, alza il limite invece di
 abbassare le soste — o abbassale, se il calcolo deve restare veloce.
