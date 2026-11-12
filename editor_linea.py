@@ -556,9 +556,27 @@ _SCHEDE = [
     (
         FOGLIO_CAMBIO_QUOTA,
         "Cambio quota",
-        "Facoltativo. Al piu' una riga 'carico' (fra il carico e la prima "
-        "vasca) e una 'scarico' (fra l'ultima vasca e lo scarico). Vuoto = "
-        "nessuna zona di cambio quota, che e' il caso normale.",
+        "Facoltativo: LASCIALO VUOTO se il carroponte puo' salire e scendere "
+        "dove si trova, che e' il caso normale. Serve agli impianti in cui, "
+        "sopra il carico o sopra lo scarico, il carroponte non puo' cambiare "
+        "quota e deve prima portarsi in un punto dedicato. Al piu' due righe:\n"
+        "  zona: 'carico' (fra il carico e la prima vasca) oppure 'scarico' "
+        "(fra l'ultima vasca e lo scarico).\n"
+        "  posizione_mm: dove sta il punto di cambio quota sulla rotaia; deve "
+        "cadere FRA la stazione servita e quella accanto (estremi compresi).\n"
+        "Le tre quote si misurano DAL BASSO: 0 e' la posizione piu' bassa del "
+        "carroponte, quella a cui gia' trasla col gancio calato.\n"
+        "  intermediate1_mm: quota a cui il gancio arriva alla stazione, e a "
+        "cui vi posa il telaio.\n"
+        "  intermediate2_mm: quota a cui il telaio viene sollevato prima di "
+        "lasciare la stazione.\n"
+        "  corsa_totale_mm: distanza da 0 fino alla cima.\n"
+        "Verso il CARICO il carroponte trasla al punto di cambio quota, sale a "
+        "intermediate1, va al carico, prende il pezzo salendo a intermediate2, "
+        "torna al punto di cambio quota e sale in cima; verso lo SCARICO fa lo "
+        "stesso giro al contrario. Il tempo di tutto il giro e' contato nella "
+        "presa (o nel rilascio) di quella stazione. La corsa_verticale_mm del "
+        "carico e dello scarico (scheda Vasche) deve essere 0.",
     ),
 ]
 
