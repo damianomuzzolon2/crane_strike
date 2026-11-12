@@ -1999,6 +1999,61 @@ def test_takt_fisso(percorso_linea):
         chiudi(app)
 
 
+# I parametri con cui sono stati misurati i numeri che questi test controllano
+# (il takt di 120.95 s, i rientri con margine, il takt libero...). Il modello
+# che si genera porta i valori di partenza di un impianto vero, che servono a
+# chi compila una linea nuova; qui invece serve una linea che non cambi quando
+# cambiano quelli.
+_PARAMETRI_DI_PROVA = {
+    "takt_teorico_s": 130,
+    "takt_delta_negativo_s": 20,
+    "takt_delta_positivo_s": 20,
+    "takt_fisso": 0,
+    "v_max_vuoto_mm_s": 1600,
+    "a_max_vuoto_mm_s2": 900,
+    "d_max_vuoto_mm_s2": 1200,
+    "v_max_carico_mm_s": 1000,
+    "a_max_carico_mm_s2": 400,
+    "d_max_carico_mm_s2": 500,
+    "ingombro_lato_positivo_mm": 500,
+    "ingombro_lato_negativo_mm": 700,
+    "distanza_sicurezza_mm": 600,
+    "v_max_sollevamento_vuoto_mm_s": 500,
+    "a_max_sollevamento_vuoto_mm_s2": 800,
+    "d_max_sollevamento_vuoto_mm_s2": 800,
+    "v_max_sollevamento_carico_mm_s": 300,
+    "a_max_sollevamento_carico_mm_s2": 500,
+    "d_max_sollevamento_carico_mm_s2": 500,
+    "v_approach_sollevamento_mm_s": 80,
+    "d_approach_sollevamento_mm": 150,
+    "tempo_aggancio_s": 2,
+    "tempo_sgancio_s": 1,
+    "passo_controllo_distanza_mm": 200,
+    "max_soste_intermedie": 1,
+    "interblocco_vasche": 1,
+    "larghezza_pezzo_mm": 1400,
+    "altezza_pezzo_mm": 900,
+    "max_carroponti": 4,
+    "tempo_limite_per_tentativo_s": 15,
+}
+
+
+def _scrivi_linea_di_prova(percorso: str):
+    """Il modello d'esempio, con i parametri di `_PARAMETRI_DI_PROVA`."""
+    from openpyxl import load_workbook
+
+    from excel_io import FOGLIO_PARAMETRI
+
+    scrivi_modello(percorso)
+    wb = load_workbook(percorso)
+    ws = wb[FOGLIO_PARAMETRI]
+    for riga in range(2, ws.max_row + 1):
+        nome = ws.cell(riga, 1).value
+        if nome in _PARAMETRI_DI_PROVA:
+            ws.cell(riga, 2).value = _PARAMETRI_DI_PROVA[nome]
+    wb.save(percorso)
+
+
 def main():
     print("=" * 72)
     print("TEST DELL'INTERFACCIA GRAFICA")
@@ -2009,7 +2064,7 @@ def main():
 
     fd, linea = tempfile.mkstemp(suffix=".xlsx")
     os.close(fd)
-    scrivi_modello(linea)
+    _scrivi_linea_di_prova(linea)
     CALCOLI.installa()
     t0 = time.perf_counter()
     try:
