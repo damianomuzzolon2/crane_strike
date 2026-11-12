@@ -747,78 +747,51 @@ def test_parametro_facoltativo_vuoto():
         os.unlink(p)
 
 
-def test_sollevamento_incoerente():
-    print("\n[8-bis] corsa verticale senza cinematica di sollevamento")
+def test_sollevamento_obbligatorio():
+    print("\n[8-bis] velocita' e accelerazione di sollevamento: obbligatorie")
+    # Velocita' e accelerazione di sollevamento, a vuoto e col telaio, si
+    # chiedono sempre, anche su una linea che non le userebbe: e' un dato del
+    # carroponte, non della linea. La decelerazione resta facoltativa (vuota =
+    # come l'accelerazione), ed e' verificata nel test delle decelerazioni.
+    from openpyxl import load_workbook
+
+    for nome in (
+        "v_max_sollevamento_vuoto_mm_s",
+        "a_max_sollevamento_vuoto_mm_s2",
+        "v_max_sollevamento_carico_mm_s",
+        "a_max_sollevamento_carico_mm_s2",
+    ):
+        # lasciato vuoto
+        p = modello_temporaneo()
+        try:
+            wb = load_workbook(p)
+            ws = wb[FOGLIO_PARAMETRI]
+            riga = next(
+                r for r in range(2, ws.max_row + 1) if ws.cell(r, 1).value == nome
+            )
+            ws.cell(riga, 2).value = None
+            wb.save(p)
+            msg = errore_leggendo(p)
+            check(
+                nome in msg and f"[{FOGLIO_PARAMETRI}!B{riga}]" in msg,
+                f"{nome} vuoto: segnalato sulla sua riga",
+            )
+            # riga tolta del tutto
+            wb = load_workbook(p)
+            wb[FOGLIO_PARAMETRI].delete_rows(riga)
+            wb.save(p)
+            msg = errore_leggendo(p)
+            check(
+                f"parametro obbligatorio '{nome}' assente" in msg,
+                f"{nome} cancellato: segnalato come assente",
+            )
+        finally:
+            os.unlink(p)
+
+    # con corsa 0 i tempi verticali sono nulli, anche se la cinematica c'e'
     p = modello_temporaneo()
     try:
-        from openpyxl import load_workbook
-
         wb = load_workbook(p)
-        ws = wb[FOGLIO_PARAMETRI]
-        for riga in range(2, ws.max_row + 1):
-            if str(ws.cell(riga, 1).value or "").startswith("v_max_sollevamento_carico"):
-                ws.cell(riga, 2).value = None
-        wb.save(p)
-        msg = errore_leggendo(p)
-        check(
-            "kin_lift_loaded" in msg,
-            "corsa dichiarata ma manca il sollevamento a carico: segnalato",
-        )
-    finally:
-        os.unlink(p)
-
-    # Il sollevamento a VUOTO invece non serve: col gancio che trasla basso --
-    # lo standard -- quelle corse non le fa nessuno, e pretendere il dato
-    # sarebbe chiedere un numero per non usarlo.
-    p = modello_temporaneo()
-    try:
-        from openpyxl import load_workbook
-
-        wb = load_workbook(p)
-        ws = wb[FOGLIO_PARAMETRI]
-        for riga in range(2, ws.max_row + 1):
-            if str(ws.cell(riga, 1).value or "").startswith(
-                ("v_max_sollevamento_vuoto", "a_max_sollevamento_vuoto")
-            ):
-                ws.cell(riga, 2).value = None
-        wb.save(p)
-        cfg = leggi_problema(p)
-        check(
-            cfg.data.empty_lift_seconds(1, scendendo=True) == 0.0,
-            "senza sollevamento a vuoto la linea si legge lo stesso",
-        )
-        # ...ma dichiarando una vasca OSTACOLO il gancio deve salire e
-        # riscendere sugli svincoli, e allora la cinematica serve
-        wb = load_workbook(p)
-        ws = wb[FOGLIO_VASCHE]
-        for riga in range(2, ws.max_row + 1):
-            nome, pos = ws.cell(riga, 1).value, ws.cell(riga, 2).value
-            if not nome:
-                continue
-            ws.cell(riga, 6).value = pos - 900 if pos > 0 else None
-            ws.cell(riga, 7).value = pos + 900 if pos < 20000 else None
-            if nome == "ZINCATURA":
-                ws.cell(riga, 8).value = 0
-        wb.save(p)
-        msg = errore_leggendo(p)
-        check(
-            "ZINCATURA" in msg and "kin_lift_empty" in msg,
-            f"e li' invece viene chiesto: \"{msg.splitlines()[-1][:70]}...\"",
-        )
-    finally:
-        os.unlink(p)
-
-    # con corsa 0 la cinematica non serve, e i tempi verticali sono nulli
-    p = modello_temporaneo()
-    try:
-        from openpyxl import load_workbook
-
-        wb = load_workbook(p)
-        ws = wb[FOGLIO_PARAMETRI]
-        for riga in range(2, ws.max_row + 1):
-            nome = str(ws.cell(riga, 1).value or "")
-            if nome.startswith(("v_max_sollevamento", "a_max_sollevamento")):
-                ws.cell(riga, 2).value = None
         # corsa a zero su OGNI vasca: e' una dichiarazione, non una cella
         # lasciata vuota -- quelle adesso sono un errore
         ws2 = wb[FOGLIO_VASCHE]
@@ -829,10 +802,6 @@ def test_sollevamento_incoerente():
         cfg = leggi_problema(p)
         # niente corsa = nessun moto verticale, ma aggancio e sgancio restano:
         # sono tempi morti, non dipendono da quanto e' lunga la corsa
-        check(
-            cfg.data.kin_lift_empty is None and cfg.data.kin_lift_loaded is None,
-            "corsa nulla: la cinematica di sollevamento non e' richiesta",
-        )
         check(
             cfg.data.pick_time_at(1)
             == cfg.data.engage_time + cfg.data.drain_time_at(1)
@@ -2047,7 +2016,7 @@ def main():
     test_percorso_riordinato()
     test_parametro_sconosciuto()
     test_parametro_facoltativo_vuoto()
-    test_sollevamento_incoerente()
+    test_sollevamento_obbligatorio()
     test_portate()
     test_errori_multipli()
     test_foglio_mancante()
