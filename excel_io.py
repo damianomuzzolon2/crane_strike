@@ -187,13 +187,13 @@ _PARAMETRI = {
     ),
     "v_max_sollevamento_vuoto_mm_s": (
         "mm/s",
-        False,
+        True,
         None,
         "velocita' max di sollevamento a gancio scarico",
     ),
     "a_max_sollevamento_vuoto_mm_s2": (
         "mm/s^2",
-        False,
+        True,
         None,
         "accelerazione max di sollevamento a gancio scarico",
     ),
@@ -206,13 +206,13 @@ _PARAMETRI = {
     ),
     "v_max_sollevamento_carico_mm_s": (
         "mm/s",
-        False,
+        True,
         None,
         "velocita' max di sollevamento col telaio",
     ),
     "a_max_sollevamento_carico_mm_s2": (
         "mm/s^2",
-        False,
+        True,
         None,
         "accelerazione max di sollevamento col telaio",
     ),
@@ -550,15 +550,14 @@ def _leggi_libro(wb, percorso_file: str, errori: _Errori) -> Configurazione:
         ciclogramma["passaggi"] = _leggi_passaggi(wb[FOGLIO_PASSAGGI], errori)
     errori.solleva_se_presenti()
 
-    def _kin_sollevamento(prefisso: str) -> Optional[Kinematics]:
-        v = par.get(f"v_max_sollevamento_{prefisso}_mm_s")
-        a = par.get(f"a_max_sollevamento_{prefisso}_mm_s2")
-        if v is None or a is None:
-            return None
-        # la decelerazione resta facoltativa anche dove il sollevamento c'e':
-        # None vuol dire "frena come accelera", non "niente sollevamento"
+    def _kin_sollevamento(prefisso: str) -> Kinematics:
+        # velocita' e accelerazione sono obbligatorie: se mancavano,
+        # solleva_se_presenti() si e' gia' fermato. La decelerazione resta
+        # facoltativa: None vuol dire "frena come accelera".
         return Kinematics(
-            v_max=v, a_max=a, d_max=par.get(f"d_max_sollevamento_{prefisso}_mm_s2")
+            v_max=par[f"v_max_sollevamento_{prefisso}_mm_s"],
+            a_max=par[f"a_max_sollevamento_{prefisso}_mm_s2"],
+            d_max=par.get(f"d_max_sollevamento_{prefisso}_mm_s2"),
         )
 
     try:
