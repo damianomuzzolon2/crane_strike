@@ -29,26 +29,30 @@ periodici. È una scelta valida: il codice qui sotto la usa.
 
 ## I file del progetto
 
-In radice ci sta **solo il programma**: i dodici moduli che lo compongono, i due
+In radice ci sta **solo il programma**: i quindici moduli che lo compongono, i due
 documenti e il file da doppio clic. Tutto il resto e' in una sottocartella.
 
 ```text
 create_cyclograms/
-  interfaccia.py  simulazione.py  ciclogramma.py       <- i moduli: nessuna
-  model.py  verify.py  excel_io.py  avvio.py               sottocartella, cosi'
-  kinematics.py  plotting.py  manuale.py                  si importano per nome
-  allinea_avvio.py  programma_carri.py  accesso.py
+  interfaccia.py  editor_linea.py  simulazione.py      <- i moduli: nessuna
+  ciclogramma.py  fattibilita.py  accesso.py               sottocartella, cosi'
+  model.py  verify.py  excel_io.py  avvio.py               si importano per nome
+  kinematics.py  plotting.py  manuale.py
+  allinea_avvio.py  programma_carri.py
   CraneStrike.bat  README.md  ARCHITETTURA.md
   requirements.txt
 
   test/        i test e l'esempio d'uso in codice
-  strumenti/   compila_nuitka.py, costruisci_exe.py e la ricetta PyInstaller
-  risorse/     icona.png e icona.ico, ricavata dalla prima
-  doc/         immagini del manuale, SOLVE_riga_per_riga.docx
-  dati/        file Excel di esempio e di prova
+  strumenti/   compila_nuitka.py, costruisci_exe.py e la ricetta PyInstaller,
+               genera_utente.py, genera_doc.py con i testi in doc_contenuti/
+  risorse/     icona.png, icona.ico (ricavata dalla prima) e logo_imel.png
+  doc/         i documenti Word riga per riga, uno o piu' per modulo, e le
+               immagini di questo manuale
+  dati/        la linea d'esempio (linea.xlsx) e l'immagine dei suoi risultati
+  .github/     la CI: i test girano scrivendo "check" in una pull request
 ```
 
-I moduli restano tutti in radice di proposito. Sono dieci, quindi non e' un
+I moduli restano tutti in radice di proposito. Sono quindici, quindi non e' un
 disordine: metterli in un package obbligherebbe a scrivere
 `from ciclogrammi.model import ...` ovunque e ad avviare con `python -m`,
 mentre questo programma non si installa mai con `pip` — gira dalla cartella o
@@ -62,6 +66,7 @@ OR-Tools installato.
 
 ```text
   interfaccia.py      ciclogramma.py   test/esempio.py      <- si lanciano
+  (+ accesso.py, editor_linea.py, fattibilita.py: li usa solo l'interfaccia)
         |                   |                  |
         +-------------------+------------------+
         |                   |
@@ -70,6 +75,8 @@ OR-Tools installato.
         +----------+--------+-+---------+----------+
         |          |          |         |          |
   excel_io.py manuale.py plotting.py verify.py simulazione.py   <- contorno
+        |          |          |         |          |
+  programma_carri.py          |         |          |
         |          |          |         |          |
         +----------+----+-----+---------+----------+
                         |
@@ -84,35 +91,37 @@ OR-Tools installato.
 
 | file | righe | contenuto |
 | --- | ---: | --- |
-| `kinematics.py` | 413 | La fisica del movimento, in millimetri e secondi. Accelerazione e decelerazione sono due numeri distinti, e il sollevamento puo' avere una zona di avvicinamento a velocita' ridotta. `travel_time()` da' il tempo per percorrere una distanza con profilo trapezoidale o triangolare; `position_profile()` la posizione istante per istante; `profile_breakpoints()` gli spigoli della curva, che servono al verificatore per limitare in modo rigoroso l'errore di campionamento. Non sa nulla del resto del progetto. |
-| `model.py` | 2052 | Il cuore. Contiene le **strutture dati** (`Tank`, `StationSpec`, `HoistZone`, `ProblemData`, `Segment`, `Solution`), la costruzione e risoluzione del **modello CP-SAT** (`solve`), la scelta automatica di zone e numero di carroponti (`solve_auto_zones`, `solve_auto_hoists`), e la costruzione di un ciclogramma **senza risolvere** a partire dai suoi gradi di liberta' (`build_solution`, `estrai_gradi_di_liberta`) — quest'ultima e' cio' che rende possibile l'editor. |
-| `verify.py` | 1043 | Il **verificatore indipendente**: `verify_solution()` ricontrolla una soluzione in Python puro, senza CP-SAT, campionando le posizioni reali dei carroponti. Restituisce un `VerificationReport` con l'elenco delle `Violation` divise per gravita'. E' la rete di sicurezza contro gli errori nella formulazione del modello. |
-| `manuale.py` | 260 | Il ciclogramma nei termini in cui si modifica: il "pettine" dei pezzi (`pettine`, `catena_pezzo`), la composizione libera del ciclogramma (`componi`) e il controllo che i carroponti non si scavalchino sulla rotaia (`perche_non_va`). |
+| `kinematics.py` | 497 | La fisica del movimento, in millimetri e secondi. Accelerazione e decelerazione sono due numeri distinti, e il sollevamento puo' avere una zona di avvicinamento a velocita' ridotta. `travel_time()` da' il tempo per percorrere una distanza con profilo trapezoidale o triangolare; `position_profile()` la posizione istante per istante; `profile_breakpoints()` gli spigoli della curva, che servono al verificatore per limitare in modo rigoroso l'errore di campionamento. Non sa nulla del resto del progetto. |
+| `model.py` | 5631 | Il cuore. Contiene le **strutture dati** (`Tank`, `StationSpec`, `HoistZone`, `ProblemData`, `Segment`, `Solution`), la costruzione e risoluzione del **modello CP-SAT** (`solve`), la scelta automatica di zone e numero di carroponti (`solve_auto_zones`, `solve_auto_hoists`), e la costruzione di un ciclogramma **senza risolvere** a partire dai suoi gradi di liberta' (`build_solution`, `estrai_gradi_di_liberta`) — quest'ultima e' cio' che rende possibile l'editor. |
+| `verify.py` | 1544 | Il **verificatore indipendente**: `verify_solution()` ricontrolla una soluzione in Python puro, senza CP-SAT, campionando le posizioni reali dei carroponti. Restituisce un `VerificationReport` con l'elenco delle `Violation` divise per gravita'. E' la rete di sicurezza contro gli errori nella formulazione del modello. |
+| `manuale.py` | 412 | Il ciclogramma nei termini in cui si modifica: il "pettine" dei pezzi (`pettine`, `catena_pezzo`), la composizione libera del ciclogramma (`componi`) e il controllo che i carroponti non si scavalchino sulla rotaia (`perche_non_va`). |
 
 ### Ingresso, uscita, disegno
 
 | file | righe | contenuto |
 | --- | ---: | --- |
-| `excel_io.py` | 1742 | Tutto l'Excel: `scrivi_modello()` genera il file da compilare, `leggi_problema()` lo rilegge raccogliendo **tutti** gli errori di compilazione con foglio e cella, `scrivi_risultati()` produce il file dei risultati -- che e' anche un file di ingresso, col ciclogramma dentro, per poterlo riaprire, diviso in due meta' (`Input` e `Output`) dietro due cartelli colorati. |
-| `editor_linea.py` | 1007 | La finestra **Dati linea**: le tabelle del file di ingresso (Vasche, Percorso, Parametri, Zone, Cambio quota) da guardare e modificare senza Excel. Non ha controlli suoi: `Applica` passa le tabelle a `excel_io.leggi_righe`, che le legge con lo stesso lettore dei file, e gli errori tornano con foglio e cella -- la finestra li colora sulla riga giusta. Vedi *Inserire o modificare i dati senza Excel*. |
-| `plotting.py` | 470 | `plot_cyclogram()`: disegna il ciclogramma (posizione lungo la rotaia contro tempo) con il profilo cinematico vero, non con segmenti diritti, i punti sugli istanti in cui succede qualcosa (aggancio, sgancio, partenza, arrivo), le frecce su e giu' sulle corse verticali del gancio e il pezzo fermo in vasca come linea grigia. |
-| `avvio.py` | 572 | Il **punto di avvio**: `trova_avvii()` cerca nel ciclogramma gli istanti in cui tutti i carroponti sono fermi, col gancio in basso, e non stanno ne' al carico ne' allo scarico — quelli da cui la linea si puo' mettere in marcia. Ce n'e' quasi sempre piu' d'uno e sono equivalenti: si restituiscono tutti, e nella finestra si scorrono col pulsante `Avvio`. Se un istante del genere non esiste sceglie quello che sbaglia di meno, e dice di quanto. Non calcola niente di nuovo: legge i segmenti del ciclogramma. Il risultato si vede come linea nera verticale sul grafico, nel foglio Riepilogo, nel pannello della finestra e in fondo al comando da terminale. |
-| `allinea_avvio.py` | 359 | Rende **esatto** un punto di avvio approssimato: `allinea_avvio()` sposta rigidamente nel tempo il giro di qualche carroponte (tutte le sue mosse insieme, con attese e soste) finche' esiste un istante in cui sono tutti a riposo. Cambiano solo i bagni di confine fra un carroponte e l'altro, dentro le tolleranze, e le distanze fra carroponti restano rispettate. Gli spostamenti li sceglie un piccolo modello CP-SAT; il risultato si tiene solo se la verifica indipendente lo passa. Vedi *Il punto di avvio: la linea nera*. |
-| `programma_carri.py` | 473 | Il **programma dei carri**: `programma_carri()` traduce il ciclogramma nei passi che ogni carro esegue sul PLC (`Lifting`, `Transfer`, `Dripping`, `Pause`, `External Request`, `Crane Syncro`, `Cover Syncro`, `End Program`). Non calcola niente di nuovo: legge i segmenti, e presa e rilascio dalle loro fasi. Il programma comincia dall'istante di avvio, e i `Crane Syncro` vengono dall'interblocco delle vasche. Lo scrive `excel_io` nel foglio `SequenzaCarri`. |
-| `fattibilita.py` | 290 | Il **controllo preventivo**: `valuta()` calcola in pochi millisecondi dei *limiti inferiori* del takt time -- per vasca (permanenza minima, presa, arrivo del pezzo successivo, ingombro dei carri vicini) e per numero di carroponti (mosse a carico piu' un rientro, con la zona migliore) -- e `testo()` li scrive come referto. Se il limite supera il takt richiesto la linea e' certamente impossibile e il calcolo si puo' risparmiare; se non lo supera, decide il solutore. In finestra e' il pulsante `Fattibilita'`; da terminale `python fattibilita.py linea.xlsx`. |
-| `simulazione.py` | 1388 | La **simulazione**: la linea vista di fronte, in movimento. `Simulazione` e' la parte che conta e non importa tkinter — dato un istante dice dove sta ogni carroponte (posizione, quota del gancio, cosa sta facendo) e ogni pezzo; `FinestraSimulazione` e' solo la finestra che la anima. Non calcola niente di nuovo: legge `segments_per_hoist` e `actual_time` della soluzione, cioe' gli stessi oggetti che disegnano il ciclogramma. |
+| `excel_io.py` | 3429 | Tutto l'Excel: `scrivi_modello()` genera il file da compilare, `leggi_problema()` lo rilegge raccogliendo **tutti** gli errori di compilazione con foglio e cella, `scrivi_risultati()` produce il file dei risultati -- che e' anche un file di ingresso, col ciclogramma dentro, per poterlo riaprire, diviso in due meta' (`Input` e `Output`) dietro due cartelli colorati. |
+| `editor_linea.py` | 1013 | La finestra **Dati linea**: le tabelle del file di ingresso (Vasche, Percorso, Parametri, Zone, Cambio quota) da guardare e modificare senza Excel. Non ha controlli suoi: `Applica` passa le tabelle a `excel_io.leggi_righe`, che le legge con lo stesso lettore dei file, e gli errori tornano con foglio e cella -- la finestra li colora sulla riga giusta. Vedi *Inserire o modificare i dati senza Excel*. |
+| `plotting.py` | 587 | `plot_cyclogram()`: disegna il ciclogramma (posizione lungo la rotaia contro tempo) con il profilo cinematico vero, non con segmenti diritti, i punti sugli istanti in cui succede qualcosa (aggancio, sgancio, partenza, arrivo), le frecce su e giu' sulle corse verticali del gancio e il pezzo fermo in vasca come linea grigia. |
+| `avvio.py` | 617 | Il **punto di avvio**: `trova_avvii()` cerca nel ciclogramma gli istanti in cui tutti i carroponti sono fermi, col gancio in basso, e non stanno ne' al carico ne' allo scarico — quelli da cui la linea si puo' mettere in marcia. Ce n'e' quasi sempre piu' d'uno e sono equivalenti: si restituiscono tutti, e nella finestra si scorrono col pulsante `Avvio`. Se un istante del genere non esiste sceglie quello che sbaglia di meno, e dice di quanto. Non calcola niente di nuovo: legge i segmenti del ciclogramma. Il risultato si vede come linea nera verticale sul grafico, nel foglio Riepilogo, nel pannello della finestra e in fondo al comando da terminale. |
+| `allinea_avvio.py` | 400 | Rende **esatto** un punto di avvio approssimato: `allinea_avvio()` sposta rigidamente nel tempo il giro di qualche carroponte (tutte le sue mosse insieme, con attese e soste) finche' esiste un istante in cui sono tutti a riposo. Cambiano solo i bagni di confine fra un carroponte e l'altro, dentro le tolleranze, e le distanze fra carroponti restano rispettate. Gli spostamenti li sceglie un piccolo modello CP-SAT; il risultato si tiene solo se la verifica indipendente lo passa. Vedi *Il punto di avvio: la linea nera*. |
+| `programma_carri.py` | 725 | Il **programma dei carri**: `programma_carri()` traduce il ciclogramma nei passi che ogni carro esegue sul PLC (`Lifting`, `Transfer`, `Dripping`, `Pause`, `External Request`, `Crane Syncro`, `Cover Syncro`, `End Program`). Non calcola niente di nuovo: legge i segmenti, e presa e rilascio dalle loro fasi. Il programma comincia dall'istante di avvio, e i `Crane Syncro` vengono dall'interblocco delle vasche. Lo scrive `excel_io` nel foglio `SequenzaCarri`. |
+| `fattibilita.py` | 296 | Il **controllo preventivo**: `valuta()` calcola in pochi millisecondi dei *limiti inferiori* del takt time -- per vasca (permanenza minima, presa, arrivo del pezzo successivo, ingombro dei carri vicini) e per numero di carroponti (mosse a carico piu' un rientro, con la zona migliore) -- e `testo()` li scrive come referto. Se il limite supera il takt richiesto la linea e' certamente impossibile e il calcolo si puo' risparmiare; se non lo supera, decide il solutore. In finestra e' il pulsante `Fattibilita'`; da terminale `python fattibilita.py linea.xlsx`. |
+| `simulazione.py` | 2058 | La **simulazione**: la linea vista di fronte, in movimento. `Simulazione` e' la parte che conta e non importa tkinter — dato un istante dice dove sta ogni carroponte (posizione, quota del gancio, cosa sta facendo) e ogni pezzo; `FinestraSimulazione` e' solo la finestra che la anima. Non calcola niente di nuovo: legge `segments_per_hoist` e `actual_time` della soluzione, cioe' gli stessi oggetti che disegnano il ciclogramma. |
+| `accesso.py` | 217 | La **schermata di accesso**: utente e password prima di aprire la finestra principale. Nel codice ci sono solo le impronte PBKDF2 (`UTENTI`), nessuna password e nessun nome in chiaro. Solo libreria standard. Vedi *Utenti e password*. |
 
 ### Programmi da lanciare
 
 | file | righe | contenuto |
 | --- | ---: | --- |
-| `interfaccia.py` | 2053 | L'**interfaccia grafica** (tkinter). La classe `Applicazione` e' tutta la finestra: caricamento, calcolo in background, grafico incorporato (ciclogramma o pettine, secondo come ci si e' arrivati), la pagina unica in cui il ciclogramma si modifica -- calcolato o composto da zero che sia -- simulazione, verifica e salvataggio. `autotest()` prova l'installazione da sola. E' il programma che usa un utente normale. |
-| `ciclogramma.py` | 191 | Lo stesso lavoro da **riga di comando**, per chi preferisce il terminale o vuole automatizzare. |
-| `test/esempio.py` | 198 | La linea di esempio definita **in codice** invece che in Excel, per chi vuole integrare il solutore in qualcos'altro. |
-| `strumenti/compila_nuitka.py` | — | Costruisce l'**eseguibile autonomo PROTETTO** con Nuitka: compila i moduli in codice macchina, cosi' nella cartella consegnata non resta nessun sorgente. E' la via consigliata. Vedi sotto. |
-| `strumenti/costruisci_exe.py` | 119 | Costruisce l'**eseguibile autonomo** con PyInstaller: piu' veloce da costruire, ma impacchetta i `.pyc` (bytecode decompilabile), quindi **non** protegge il sorgente. Vedi sotto. |
+| `interfaccia.py` | 3860 | L'**interfaccia grafica** (tkinter). La classe `Applicazione` e' tutta la finestra: caricamento, calcolo in background, grafico incorporato (ciclogramma o pettine, secondo come ci si e' arrivati), la pagina unica in cui il ciclogramma si modifica -- calcolato o composto da zero che sia -- simulazione, verifica e salvataggio. `autotest()` prova l'installazione da sola. E' il programma che usa un utente normale. |
+| `ciclogramma.py` | 258 | Lo stesso lavoro da **riga di comando**, per chi preferisce il terminale o vuole automatizzare. |
+| `test/esempio.py` | 209 | La linea di esempio definita **in codice** invece che in Excel, per chi vuole integrare il solutore in qualcos'altro. |
+| `strumenti/compila_nuitka.py` | 232 | Costruisce l'**eseguibile autonomo PROTETTO** con Nuitka: compila i moduli in codice macchina, cosi' nella cartella consegnata non resta nessun sorgente. E' la via consigliata. Vedi sotto. |
+| `strumenti/costruisci_exe.py` | 124 | Costruisce l'**eseguibile autonomo** con PyInstaller: piu' veloce da costruire, ma impacchetta i `.pyc` (bytecode decompilabile), quindi **non** protegge il sorgente. Vedi sotto. |
 | `strumenti/cranestrike.spec` | — | La ricetta per PyInstaller: cosa includere, cosa escludere, come impacchettare. Non si lancia a mano, la usa `costruisci_exe.py`. |
-| `strumenti/genera_doc.py` | 470 | Produce i documenti Word in `doc/`: la spiegazione riga per riga di ogni modulo e l'albero delle chiamate. Il codice citato **non e' ricopiato**, viene estratto dal sorgente per nome a ogni generazione. Vedi *La documentazione in `doc/`*. |
+| `strumenti/genera_doc.py` | 681 | Produce i documenti Word in `doc/`: la spiegazione riga per riga di ogni modulo e l'albero delle chiamate. Il codice citato **non e' ricopiato**, viene estratto dal sorgente per nome a ogni generazione. Vedi *La documentazione in `doc/`*. |
+| `strumenti/genera_utente.py` | 58 | Chiede nome e password di una persona da abilitare e stampa la voce da incollare in `UTENTI` di `accesso.py`. Vedi *Utenti e password*. |
 | `CraneStrike.bat` | — | Avvia l'interfaccia con un doppio clic, senza aprire il terminale. |
 
 ### Test
@@ -135,15 +144,16 @@ mai.
 
 | file | righe | cosa verifica |
 | --- | ---: | --- |
-| `test/test_verify.py` | 999 | **Il verificatore.** Risponde a "chi verifica il verificatore?": venti casi, di cui uno solo corretto e tutti gli altri rotti di proposito (collisioni, permanenze fuori tolleranza, periodicita' incoerente, geometrie patologiche, capienze). Un controllore che non segnala mai nulla e' inutile, quindi ogni controllo ha un caso che DEVE farlo scattare. Non richiede OR-Tools: le soluzioni sono costruite a mano. |
-| `test/test_model.py` | 586 | **Il modello CP-SAT.** Risolve davvero e passa ogni soluzione al verificatore: vasche ravvicinate, tre carroponti, capienza, tempi verticali, e la fedelta' della ricostruzione di una soluzione dai suoi gradi di liberta'. Richiede OR-Tools. |
-| `test/test_excel_io.py` | 954 | **La lettura e la scrittura Excel.** Quasi tutti i casi sono file compilati male: valori mancanti o non numerici, vasche inesistenti o duplicate, righe riordinate, parametri sbagliati, o un file scritto per la vecchia versione in metri. Piu' l'andata e ritorno del ciclogramma salvato nel file, e la struttura del file dei risultati: l'ordine dei fogli, i due cartelli colorati, e che l'elenco dentro un cartello dica davvero i fogli che seguono. Non richiede OR-Tools. |
-| `test/test_simulazione.py` | 755 | **La simulazione.** Il controllo che conta e' incrociato: ogni pezzo appeso deve stare *esattamente* dove sta il gancio di un carroponte che lo tiene, e ogni carroponte che tiene qualcosa deve avere un pezzo li'. Se simulazione e ciclogramma raccontassero due storie diverse, una delle due sarebbe sbagliata. Lo stesso controllo viene rifatto sulle quote **disegnate**, che non sono quelle vere: il telaio deve restare appeso al bilancino anche dopo il rimappaggio delle profondita'. Le vasche di prova hanno corse verticali **diverse fra loro** apposta: con corse tutte uguali, prendere la corsa della vasca sbagliata darebbe comunque il risultato giusto. In fondo, i casi in cui la geometria del disegno degenera: corse e ingombri tutti a zero, tutte le tappe nella stessa vasca. Non richiede OR-Tools. |
-| `test/test_allinea_avvio.py` | 163 | **L'avvio reso esatto.** Su un ciclogramma risolto con l'avvio approssimato, `allinea_avvio` lo deve rendere esatto con la verifica che passa, lo stesso takt, ogni giro spostato rigidamente con le sue attese, e cambiati solo i bagni di confine, dentro le tolleranze. Un avvio gia' esatto non si tocca; con le tolleranze di confine chiuse non si sposta niente. Richiede OR-Tools. |
-| `test/test_avvio.py` | 464 | **Il punto di avvio.** Che sia davvero un punto di avvio: in quell'istante ogni carroponte sta dove il riepilogo dice, fermo, col gancio in basso, lontano da carico e scarico, e con mezzo secondo di margine da entrambe le parti. Quando un istante comune non esiste, l'errore dichiarato viene confrontato con quello che si ottiene **campionando** tutto il ciclo: deve essere il minimo. E gli istanti equivalenti devono essere tanti quanti i tratti al minimo che si contano campionando, ciascuno in un tratto diverso. Non richiede OR-Tools. |
-| `test/test_programma_carri.py` | 463 | **Il programma dei carri.** Che i passi siano comandi del PLC con parametri del PLC (velocita' 9 o 10, posizioni `Pos.<...>`, secondi interi); un trasporto col pezzo per mossa; le pause arrotondate che sommano il tempo d'attesa del ciclogramma; `External Request` solo prima di carico e scarico; un `Crane Syncro` prima di entrare nella vasca comune, riferito al passo del vicino che viene subito dopo il suo arrivo su un'altra vasca -- e che il vicino quel passo lo raggiunga davvero prima. Piu' svincoli, cambio quota, l'avvio e il foglio Excel. Non richiede OR-Tools. |
+| `test/test_verify.py` | 1712 | **Il verificatore.** Risponde a "chi verifica il verificatore?": trenta casi, di cui uno solo corretto e tutti gli altri rotti di proposito (collisioni, permanenze fuori tolleranza, periodicita' incoerente, geometrie patologiche, capienze). Un controllore che non segnala mai nulla e' inutile, quindi ogni controllo ha un caso che DEVE farlo scattare. Non richiede OR-Tools: le soluzioni sono costruite a mano. |
+| `test/test_model.py` | 2206 | **Il modello CP-SAT.** Risolve davvero e passa ogni soluzione al verificatore: vasche ravvicinate, tre carroponti, capienza, tempi verticali, e la fedelta' della ricostruzione di una soluzione dai suoi gradi di liberta'. Richiede OR-Tools. |
+| `test/test_excel_io.py` | 2082 | **La lettura e la scrittura Excel.** Quasi tutti i casi sono file compilati male: valori mancanti o non numerici, vasche inesistenti o duplicate, righe riordinate, parametri sbagliati, o un file scritto per la vecchia versione in metri. Piu' l'andata e ritorno del ciclogramma salvato nel file, e la struttura del file dei risultati: l'ordine dei fogli, i due cartelli colorati, e che l'elenco dentro un cartello dica davvero i fogli che seguono. Non richiede OR-Tools. |
+| `test/test_simulazione.py` | 1392 | **La simulazione.** Il controllo che conta e' incrociato: ogni pezzo appeso deve stare *esattamente* dove sta il gancio di un carroponte che lo tiene, e ogni carroponte che tiene qualcosa deve avere un pezzo li'. Se simulazione e ciclogramma raccontassero due storie diverse, una delle due sarebbe sbagliata. Lo stesso controllo viene rifatto sulle quote **disegnate**, che non sono quelle vere: il telaio deve restare appeso al bilancino anche dopo il rimappaggio delle profondita'. Le vasche di prova hanno corse verticali **diverse fra loro** apposta: con corse tutte uguali, prendere la corsa della vasca sbagliata darebbe comunque il risultato giusto. In fondo, i casi in cui la geometria del disegno degenera: corse e ingombri tutti a zero, tutte le tappe nella stessa vasca. Non richiede OR-Tools. |
+| `test/test_allinea_avvio.py` | 182 | **L'avvio reso esatto.** Su un ciclogramma risolto con l'avvio approssimato, `allinea_avvio` lo deve rendere esatto con la verifica che passa, lo stesso takt, ogni giro spostato rigidamente con le sue attese, e cambiati solo i bagni di confine, dentro le tolleranze. Un avvio gia' esatto non si tocca; con le tolleranze di confine chiuse non si sposta niente. Richiede OR-Tools. |
+| `test/test_avvio.py` | 480 | **Il punto di avvio.** Che sia davvero un punto di avvio: in quell'istante ogni carroponte sta dove il riepilogo dice, fermo, col gancio in basso, lontano da carico e scarico, e con mezzo secondo di margine da entrambe le parti. Quando un istante comune non esiste, l'errore dichiarato viene confrontato con quello che si ottiene **campionando** tutto il ciclo: deve essere il minimo. E gli istanti equivalenti devono essere tanti quanti i tratti al minimo che si contano campionando, ciascuno in un tratto diverso. Non richiede OR-Tools. |
+| `test/test_programma_carri.py` | 648 | **Il programma dei carri.** Che i passi siano comandi del PLC con parametri del PLC (velocita' 9 o 10, posizioni `Pos.<...>`, secondi interi); un trasporto col pezzo per mossa; le pause arrotondate che sommano il tempo d'attesa del ciclogramma; `External Request` solo prima di carico e scarico; un `Crane Syncro` prima di entrare nella vasca comune, riferito al passo del vicino che viene subito dopo il suo arrivo su un'altra vasca -- e che il vicino quel passo lo raggiunga davvero prima. Piu' svincoli, cambio quota, l'avvio e il foglio Excel. Non richiede OR-Tools. |
 | `test/test_fattibilita.py` | 120 | **Il controllo preventivo.** Il limite non deve mai superare il takt che il solutore trova davvero (altrimenti direbbe impossibile a una linea che si fa), e con la banda tutta sotto il limite il solutore deve confermare che non c'e' soluzione. Piu' le vasche a due posti. Richiede OR-Tools. |
-| `test/test_interfaccia.py` | 1085 | **Le funzioni dell'interfaccia grafica.** La finestra viene costruita davvero e pilotata da codice — si "premono" i pulsanti chiamando i metodi e si fa girare il ciclo degli eventi con `update()` invece di `mainloop()`. Verifica che i pulsanti si abilitino al momento giusto, che il calcolo in background consegni il risultato, che una soluzione calcolata riletta come tempi in vasca e ricomposta dia esattamente lo stesso ciclogramma, che le modifiche vengano riverificate, che l'immagine salvata sia il ciclogramma anche componendo dal pettine, che la scheda di modifica si apra solo dopo 'Calcola man' o 'Modifica' e mai mentre il solutore lavora, che un ciclogramma salvato si riapra identico anche se lasciato a meta', che la composizione da zero produca il pettine giusto, che un trasporto assegnato si possa togliere con lo stesso gesto con cui lo si e' assegnato, e che la simulazione si apra solo quando un ciclogramma c'e' davvero e segua le modifiche mentre e' aperta. Richiede OR-Tools e un ambiente grafico. |
+| `test/test_interfaccia.py` | 2103 | **Le funzioni dell'interfaccia grafica.** La finestra viene costruita davvero e pilotata da codice — si "premono" i pulsanti chiamando i metodi e si fa girare il ciclo degli eventi con `update()` invece di `mainloop()`. Verifica che i pulsanti si abilitino al momento giusto, che il calcolo in background consegni il risultato, che una soluzione calcolata riletta come tempi in vasca e ricomposta dia esattamente lo stesso ciclogramma, che le modifiche vengano riverificate, che l'immagine salvata sia il ciclogramma anche componendo dal pettine, che la scheda di modifica si apra solo dopo 'Calcola man' o 'Modifica' e mai mentre il solutore lavora, che un ciclogramma salvato si riapra identico anche se lasciato a meta', che la composizione da zero produca il pettine giusto, che un trasporto assegnato si possa togliere con lo stesso gesto con cui lo si e' assegnato, e che la simulazione si apra solo quando un ciclogramma c'e' davvero e segua le modifiche mentre e' aperta. Richiede OR-Tools e un ambiente grafico. |
+| `test/test_accesso.py` | 67 | **Utente e password.** La coppia giusta entra, anche con il nome scritto in maiuscolo o con spazi ai bordi; la password distingue le maiuscole; nome sconosciuto, password di un altro, campi vuoti ed elenco vuoto restano fuori; una voce malformata non fa cadere il programma. Non apre finestre e non richiede OR-Tools. |
 
 `kinematics.py` ha in fondo un autotest che si lancia allo stesso modo
 (`python kinematics.py`).
@@ -155,12 +165,16 @@ pip install -r requirements.txt
 ```
 
 Servono `ortools` (il solutore), `matplotlib` (il disegno) e `openpyxl` (i file
-Excel). `pyinstaller` serve solo a chi deve costruire l'eseguibile.
+Excel). `nuitka` e `pyinstaller` servono solo a chi deve costruire l'eseguibile
+(vedi *Creare l'eseguibile per PC senza Python*).
 
 ## Come si usa l'interfaccia
 
 Doppio clic su **`CraneStrike.bat`** (oppure `python interfaccia.py`, oppure
-`CraneStrike.exe` se si usa la versione impacchettata).
+`CraneStrike.exe` se si usa la versione impacchettata). Prima compare la
+richiesta di **utente e password** (vedi *Utenti e password*), poi per qualche
+secondo una schermata di benvenuto con il logo del programma e quello IMEL,
+mentre la finestra principale si prepara.
 
 ![interfaccia](doc/interfaccia.png)
 
@@ -190,7 +204,8 @@ programma.
 | `Apri linea...` | Carica un file Excel con la definizione della linea. Se il file e' compilato male non succede nulla di brutto: compare una finestra con **tutti** gli errori trovati, con foglio e cella, che propone di aprire i dati in `Dati linea` per correggerli li'. |
 | `Nuovo modello Excel...` | Crea il file da compilare, gia' pieno con una linea di zincatura d'esempio, e chiede se aprirlo subito. E' il modo consigliato di cominciare: si parte da qualcosa che funziona e lo si modifica. |
 | `Dati linea...` | Apre una finestra con le **tabelle della linea** -- le stesse dei fogli dell'Excel -- per guardarle e modificarle senza uscire dal programma. Senza una linea aperta parte dalla linea d'esempio. Vedi *Inserire o modificare i dati senza Excel*. |
-| `Calcola auto` | Cerca il numero minimo di carroponti, la suddivisione migliore della linea e il takt time piu' basso. Puo' durare da qualche secondo a qualche minuto: i pulsanti si spengono e la scheda *Ciclogramma* si chiude finche' non ha finito, ma la finestra **non si blocca**. In basso a destra la barra dice a che punto e' e cosa ha gia' in mano: `2 carroponti: tentativo 3 di 5 - ancora circa 3 s - 2 soluzioni trovate, migliore T = 122.14 s: fermando ora resta quella` (vedi *Quanto durera' il calcolo*). |
+| `Fattibilita'` | Il **controllo preventivo**, in pochi millisecondi e senza solutore: apre una finestra con i limiti inferiori del takt time, vasca per vasca e per numero di carroponti. Se il limite supera il takt richiesto la linea e' certamente impossibile e non vale la pena lanciare il calcolo; se non lo supera, decide `Calcola auto`. |
+| `Calcola auto` | Cerca il numero minimo di carroponti e la suddivisione migliore della linea. Con `takt_fisso = 1` (il default) il takt time resta quello teorico e si cercano i tempi in vasca piu' vicini ai teorici; con `takt_fisso = 0` si cerca il takt time piu' basso nella banda. Puo' durare da qualche secondo a qualche minuto: i pulsanti si spengono e la scheda *Ciclogramma* si chiude finche' non ha finito, ma la finestra **non si blocca**. In basso a destra la barra dice a che punto e' e cosa ha gia' in mano: `2 carroponti: tentativo 5 di 5 - 1 soluzione trovata, scarto dai teorici = 0.01 s: fermando ora resta quella` (vedi *Quanto durera' il calcolo*). |
 | `Ferma` | Interrompe `Calcola auto` (e `Ottimizza con questi carroponti`). E' acceso solo mentre il calcolo gira, e il calcolo si ferma entro mezzo secondo. Se fino a quel momento era gia' stata trovata una soluzione valida la mostra e la verifica, dicendo nel Riepilogo che **non e' dimostrata ottima**: e' la migliore fra le suddivisioni provate, e le altre non lo sono state. Se non era stato trovato niente, il ciclogramma che avevi a schermo **resta com'era**, e la barra in basso scrive `Calcolo interrotto`. Uno stop non e' mai un «nessuna soluzione»: la linea non e' stata dimostrata impossibile. |
 | `Pausa` / `Riprendi` | Sospende `Calcola auto` (e `Ottimizza con questi carroponti`) per liberare il computer, e lo fa ripartire piu' tardi. Il tentativo in corso si ferma subito e alla ripresa **si rifa' da capo**; quelli gia' conclusi e le soluzioni trovate restano: si perde al massimo un tentativo, cioe' al piu' il tempo limite. Vale solo durante la ricerca delle suddivisioni: nelle rifiniture finali il pulsante e' spento. Il tempo passato in pausa non conta nella durata del calcolo. Il programma deve restare aperto; `Ferma` funziona anche durante una pausa. |
 | `Calcola man` | Butta via il ciclogramma corrente e riparte dai tempi teorici di processo, con **nessun trasporto assegnato**, per comporlo a mano (vedi sotto). |
@@ -253,15 +268,23 @@ corretta: si salva il lavoro, e gli errori li si ritrova riaprendola.
 `Annulla modifiche` torna alla linea in uso, `Chiudi` chiede se applicare
 quello che non e' ancora stato applicato.
 
-Il takt fisso si sceglie col parametro `takt_fisso` del foglio Parametri.
+Il takt fisso si sceglie col parametro `takt_fisso` del foglio Parametri: `1`
+(il default) tiene il takt time al teorico e cerca i tempi in vasca piu' vicini
+ai teorici, `0` cerca il takt time piu' basso nella banda dei due delta.
 
 ### Quanto durera' il calcolo
 
 Durante `Calcola auto` la barra in basso a destra si riempie e accanto si
-legge, per esempio:
+legge, per esempio con il takt time libero (`takt_fisso = 0`):
 
 ```text
 2 carroponti: tentativo 3 di 5 - ancora circa 3,1 s - 2 soluzioni trovate, migliore T = 122.14 s: fermando ora resta quella
+```
+
+e con il takt time fisso, che e' il default:
+
+```text
+2 carroponti: tentativo 5 di 5 - 1 soluzione trovata, scarto dai teorici = 0.01 s: fermando ora resta quella
 ```
 
 Il numero di **tentativi** e' esatto: il programma prova una suddivisione della
@@ -281,8 +304,10 @@ Due cose che vale la pena sapere:
   riparte da capo: e' normale, e si vede perche' il testo dice sempre con
   quanti carroponti sta provando.
 - **prima** di cominciare non viene detto niente, ed e' voluto: l'unico numero
-  onesto sarebbe il caso peggiore, e sulla linea d'esempio sarebbe sei minuti e
-  mezzo contro sei secondi e mezzo reali.
+  onesto sarebbe il caso peggiore, cioe' tutti i tentativi per il loro tempo
+  limite (`tempo_limite_per_tentativo_s`, 120 s di default). Sulla linea
+  d'esempio vorrebbe dire almeno dodici minuti, contro il secondo e mezzo che
+  serve davvero.
 
 Le **soluzioni gia' trovate** rispondono all'altra domanda, quella che il tempo
 residuo non tocca: *se premo `Ferma` adesso, cosa mi resta?* Con `Ferma` si
@@ -291,10 +316,15 @@ quelle provate, quindi non dimostrata ottima. Finche' il conteggio e' a zero,
 pero', fermarsi vuol dire restare a mani vuote, e conviene aspettare almeno la
 prima. Per questo il numero si legge sempre, anche quando e' zero.
 
-Accanto c'e' il **takt time della migliore**, che e' poi il numero per cui si
-sta facendo tutto questo, e puo' solo migliorare mentre la ricerca va avanti:
-sulla linea d'esempio scende 139,29 → 122,14 → 110,00 s. Il conteggio dice se
-fermarsi e' sicuro, il takt time se conviene. Chi ha in mente il valore che gli
+Accanto c'e' il numero che dice **quanto e' buona la migliore**, e puo' solo
+migliorare mentre la ricerca va avanti. Col takt time libero e' il suo **takt
+time**, che e' poi il numero per cui si sta facendo tutto questo (per esempio
+139,29 → 122,14 → 110,00 s). Col takt time fisso il takt e' lo stesso per
+tutte, e il numero e' lo **scarto dai teorici**: la somma, in secondi, di
+quanto ogni bagno si scosta dal suo tempo teorico, sopra o sotto. E' senza pesi
+apposta: i pesi del foglio Percorso decidono dove il calcolo spende lo scarto,
+ma un numero pesato non si legge come una durata. Il conteggio dice se fermarsi
+e' sicuro, il numero accanto se conviene. Chi ha in mente il valore che gli
 serve riconosce da solo quando puo' smettere.
 
 Il conteggio riguarda il numero di carroponti in corso, come la stima del
@@ -324,15 +354,25 @@ Le vasche di confine sono quelle dove uno consegna e l'altro viene a prendere:
 restarci fermi per un minuto quando si potrebbe stare altrove e' il modo piu'
 facile di fabbricare una collisione che non c'era bisogno di avere.
 
-Il calcolo automatico invece tiene la convenzione opposta — parte appena
-consegnato — e non e' una svista: il vincolo di non collisione del solutore e'
-costruito su quella, e protegge quella traiettoria. Disegnarne un'altra
-vorrebbe dire garantire una cosa e mostrarne un'altra.
+Il calcolo automatico invece non segue una regola fissa: l'istante di partenza
+e' una variabile del modello, e il vincolo di non collisione protegge la
+traiettoria che il solutore ha scelto davvero (vedi *Dove il carroponte passa il
+tempo morto*). Quella scelta si salva nel foglio `Ciclogramma`
+(`attesa_dopo_consegna_s`), cosi' riaprendo il file si ridisegna la stessa.
+
+Trovata la soluzione, una rifinitura finale a takt time fisso sposta le attese
+**lontano dal carico e dallo scarico**: per il takt time e' indifferente dove
+il carroponte passa il tempo che gli avanza, e senza questa rifinitura il primo
+carro tendeva a restare fermo sopra il carico e l'ultimo sopra lo scarico, cioe'
+proprio sopra le stazioni presidiate. L'attesa va dove ha consegnato, dove
+prelevera' o in una vasca in mezzo, e resta sopra carico o scarico solo se la
+non collisione lo impone.
 
 ### Se non trova niente
 
 Il *Riepilogo* non dice piu' soltanto "nessuna soluzione": dice **cosa e' stato
-provato** e, quando riesce a stabilirlo, **perche' non riesce**.
+provato** e, quando riesce a stabilirlo, **perche' non riesce**. Vale sia dopo
+`Calcola auto` sia dopo `Ottimizza con questi carroponti`.
 
 ```text
 COSA E' STATO PROVATO
@@ -488,13 +528,21 @@ quello che lascia il margine piu' largo prima e dopo: avviare nell'istante in
 cui l'ultimo carroponte si e' appena fermato non lascerebbe scampo a nessuno.
 
 **Di istanti buoni ce n'e' quasi sempre piu' d'uno**, e sono lontani fra loro:
-sulla linea d'esempio ce ne sono cinque, uno per ogni combinazione di vasche in
+sulla linea d'esempio ce ne sono tre, uno per ogni combinazione di vasche in
 cui i due carroponti si trovano fermi insieme. Sono equivalenti — sbagliano
 tutti uguale — e sceglierne uno non e' una decisione che il programma possa
 prendere: quale convenga dipende dall'impianto, da dove si entra, da dove si
 vuole il pezzo quando si riparte.
 
-Il pulsante **`Avvio 1 di 5`** nella barra dei comandi li scorre uno per uno, e
+L'unica preferenza e' sull'**ordine**: per primo si propone quello con **piu'
+margine**, cioe' il tratto in cui tutti i carroponti restano fermi piu' a
+lungo, e poi gli altri in ordine di tempo lungo il giro. Un carroponte che
+arriva su una vasca e risolleva subito e' a riposo anche solo per un attimo:
+e' un avvio esatto, ma senza scampo ne' prima ne' dopo, e se c'e' un tratto in
+cui tutti stanno fermi per secondi si propone quello. Il primo e' anche quello
+che si scrive da riga di comando, dove nessuno sceglie.
+
+Il pulsante **`Avvio 1 di 3`** nella barra dei comandi li scorre uno per uno, e
 dopo l'ultimo torna al primo. A ogni pressione la linea nera si sposta e il
 Riepilogo riscrive dove si ferma ciascun carroponte: si guardano tutti e ci si
 ferma su quello che torna. L'istante che hai davanti e' quello che finisce
@@ -733,6 +781,9 @@ Su un ciclogramma composto a meta' si apre lo stesso, con un avviso in rosso:
 i trasporti che nessun carroponte fa ancora si vedono come **pezzi che si
 spostano da soli**. E' esatto, ed e' bene che si veda.
 
+Sulla riga del titolo, a sinistra, c'e' il logo IMEL, come sull'immagine del
+ciclogramma salvata.
+
 ### Il verdetto
 
 La striscia colorata in alto a destra e' l'informazione piu' importante, e per
@@ -748,12 +799,14 @@ questo non finisce mai dentro una scheda:
 ### Le tre schede
 
 **Riepilogo** — da dove viene il ciclogramma, **quanto e' durato il calcolo**,
-takt time, produttivita' in pezzi/ora, quanti carroponti e che tratto di linea
-serve ciascuno, distanza minima raggiunta fra i carri contro quella richiesta,
-esito della verifica.
+takt time, produttivita' in pezzi/ora, **scarto dai teorici** (la somma in
+secondi di quanto ogni bagno si scosta dal suo tempo teorico, senza pesi),
+quanti carroponti e che tratto di linea serve ciascuno, distanza minima
+raggiunta fra i carri contro quella richiesta, esito della verifica.
 
 > Il tempo di calcolo compare anche nella barra di stato appena il calcolo
-> finisce (`Ciclogramma pronto in 7,4 s — T = 110,00 s`), ma li' si perde al
+> finisce (`Ciclogramma pronto in 1,5 s - T = 300.00 s, scarto dai teorici
+> 0.01 s`), ma li' si perde al
 > primo altro messaggio: nel *Riepilogo* resta finche' resta il ciclogramma. E'
 > il tempo che hai aspettato tu, non quello che dichiara il solutore: comprende
 > tutti i tentativi con numeri di carroponti diversi e la verifica finale.
@@ -1001,9 +1054,10 @@ si rileggono riaprendolo.
 
 Un ciclogramma composto a mano vive nella memoria del programma: chiuso il
 programma, andrebbe rifatto da capo. Per questo **l'Excel dei risultati e'
-anche un file di ingresso**: dopo i quattro fogli del referto ne trova altri
-sei — `Istruzioni`, `Vasche`, `Percorso`, `Parametri`, `Zone` e `Ciclogramma`
-— e si riapre con `Apri linea...`.
+anche un file di ingresso**: oltre ai fogli del referto contiene quelli della
+linea — `Istruzioni`, `Vasche`, `Percorso`, `Parametri`, `Zone`, `CambioQuota`
+e `Ciclogramma`, piu' `Passaggi` se ci sono punti di passaggio — e si riapre
+con `Apri linea...`.
 
 Un file solo perche' non ce n'e' bisogno di due: `leggi_problema` cerca i fogli
 per nome e ignora gli altri. Due file separati sarebbero due cose da tenere
@@ -1105,19 +1159,21 @@ si guarda dove il conto non torna: li' non c'e' niente da trovare, si vede.
 Sia l'interfaccia sia la riga di comando producono, accanto al file di
 ingresso:
 
-- **`linea_risultati.xlsx`** — quattordici fogli, in **due meta'**, ciascuna dietro
-  un cartello con la linguetta colorata:
+- **`linea_risultati.xlsx`** — quindici fogli (sedici con i punti di
+  passaggio), in **due meta'**, ciascuna dietro un cartello con la linguetta
+  colorata:
 
   **`Input`** (linguetta blu) — quello che segue e' la **linea nel formato di
   ingresso**, col ciclogramma dentro: `Istruzioni`, `Vasche`, `Percorso`,
-  `Parametri`, `Zone`, `Ciclogramma`. Serve a riaprire lo stesso file con
-  `Apri linea...` e riprendere il lavoro. Vale anche da riga di comando.
+  `Parametri`, `Zone`, `CambioQuota`, `Ciclogramma` (e `Passaggi`, se ci sono
+  punti di passaggio). Serve a riaprire lo stesso file con `Apri linea...` e
+  riprendere il lavoro. Vale anche da riga di comando.
 
   **`Output`** (linguetta verde) — il referto:
 
   | foglio | contenuto |
   | --- | --- |
-  | `Riepilogo` | takt time, **produttivita' in pezzi/ora**, numero di carroponti, il **punto di avvio** (l'istante del ciclo da cui partire e dove si trova ogni carroponte in quel momento), zone e tratto di rotaia servito, **utilizzo di ciascun carroponte**, distanza minima raggiunta contro quella richiesta, esito della verifica |
+  | `Riepilogo` | takt time, **produttivita' in pezzi/ora**, **scarto dai teorici** (somma in secondi, senza pesi; lo scarto pesato, che e' l'obiettivo del calcolo, sta riga per riga in `FlussoPezzo`), numero di carroponti, il **punto di avvio** (l'istante del ciclo da cui partire e dove si trova ogni carroponte in quel momento), zone e tratto di rotaia servito, **utilizzo di ciascun carroponte**, distanza minima raggiunta contro quella richiesta, esito della verifica |
   | `Movimenti` | una riga per tratto: carroponte, fase (presa, trasporto, rilascio, spostamento a vuoto, attesa), vasca di partenza e arrivo, istanti di inizio e fine, durata, posizioni. E' la tabella da passare a chi programma il PLC |
   | `SequenzaCarri` | il **programma di ogni carro**, passo per passo, nel formato delle tabelle del PLC: un blocco di tre colonne per carro, cinque righe per passo (`step[n]`, `command`, `param1`, `param2`, `param3`). Vedi *Il foglio SequenzaCarri* qui sotto |
   | `TempiVerticali` | dove va a finire il tempo di presa e di rilascio, vasca per vasca: discesa del gancio, aggancio, sollevamento, sgocciolamento, e i totali. Serve a non dover indovinare perche' una presa duri quanto dura |
@@ -1182,8 +1238,10 @@ ingresso:
     `Transfer Inlet`, e param1 resta `Pos.<vasca>`: e' il comando a dire che si
     va allo svincolo (o al cambio quota) e non al centro della vasca.
 
-- **`linea.png`** — il **ciclogramma** disegnato. Sempre quello, anche se a
-  schermo c'era il pettine: e' il documento che si consegna. La **linea nera
+- **`linea.png`** (da riga di comando; dall'interfaccia `linea_risultati.png`,
+  accanto all'Excel) — il **ciclogramma** disegnato, con il logo IMEL in alto a
+  sinistra. Sempre quello, anche se a schermo c'era il pettine: e' il documento
+  che si consegna. La **linea nera
   verticale** e' il punto di avvio (vedi *Il punto di avvio: la linea nera*).
 
 Il comando stampa anche a video il takt time, il punto di avvio con la
@@ -1226,8 +1284,9 @@ python ciclogramma.py linea.xlsx              # calcola il ciclogramma
 ```
 
 Il modello generato e' gia' compilato con una linea di zincatura d'esempio, in
-modo che si possa lanciare subito e poi modificarlo pezzo per pezzo. Ha cinque
-fogli (sei se ci si salva dentro un ciclogramma):
+modo che si possa lanciare subito e poi modificarlo pezzo per pezzo. Ha sei
+fogli (sette se ci si salva dentro un ciclogramma, otto con i punti di
+passaggio):
 
 | foglio | contenuto |
 | --- | --- |
@@ -1236,6 +1295,7 @@ fogli (sei se ci si salva dentro un ciclogramma):
 | `Percorso` | sequenza di vasche attraversate, con le permanenze |
 | `Parametri` | quello che vale per tutta la linea: takt time (teorico piu' i due delta, come le permanenze), cinematiche del carroponte, ingombri, tempi di aggancio/sgancio, opzioni di calcolo |
 | `Zone` | facoltativo: la **portata** di ciascun carroponte, cioe' la vasca minima e la massima che puo' raggiungere (colonne `vasca_min`, `vasca_max`, una riga per carroponte nell'ordine della linea, il primo e' quello del carico). E' un limite, non una zona: il solutore puo' fargli servire anche solo una parte del tratto, mai andare oltre. Le portate di carroponti vicini **possono sovrapporsi**: le vasche in comune le serve l'uno o l'altro, e quale lo sceglie il solutore. Il numero di righe fissa il numero di carroponti. **Lasciandolo vuoto** nessun limite: numero di carroponti e zone vengono scelti automaticamente |
+| `CambioQuota` | facoltativo: le zone di cambio quota al carico e allo scarico, al massimo una per estremo. Nel modello nasce vuoto, con le sole intestazioni. Vedi *Le zone di cambio quota* |
 | `Ciclogramma` | facoltativo: il ciclogramma gia' composto. Lo scrive il programma quando salvi, e riaprendo il file si riprende da li' |
 
 ### Uso da Python
@@ -1253,21 +1313,28 @@ Oltre a questo file e ad `ARCHITETTURA.md`, in `doc/` c'e' una sottocartella
 per ogni modulo con i documenti Word che lo spiegano **riga per riga**. Piu'
 `ALBERO_DELLE_CHIAMATE.docx`, che dice quale funzione ne chiama quale altra.
 
-Ventiquattro documenti, che coprono **tutte e 286** le fra funzioni e metodi
-del progetto:
+Venticinque documenti, che spiegano **tutte le 469** fra funzioni e metodi dei
+moduli documentati. Quando ne arriva una nuova, `--copertura` (qui sotto) la
+segnala finche' qualcuno non la spiega:
 
-| cartella | documenti | funzioni |
+| cartella | documenti | funzioni spiegate |
 | --- | ---: | ---: |
-| `doc/kinematics/` | 1 | 4 |
-| `doc/model/` | 6 | 63 |
-| `doc/verify/` | 3 | 27 |
-| `doc/excel_io/` | 3 | 29 |
-| `doc/plotting/` | 1 | 6 |
-| `doc/manuale/` | 1 | 12 |
-| `doc/simulazione/` | 3 | 67 |
-| `doc/interfaccia/` | 4 | 76 |
+| `doc/kinematics/` | 1 | 13 |
+| `doc/model/` | 6 | 130 |
+| `doc/verify/` | 3 | 33 |
+| `doc/excel_io/` | 3 | 52 |
+| `doc/plotting/` | 1 | 13 |
+| `doc/manuale/` | 1 | 15 |
+| `doc/avvio/` | 1 | 16 |
+| `doc/simulazione/` | 3 | 72 |
+| `doc/interfaccia/` | 4 | 123 |
 | `doc/ciclogramma/` | 1 | 2 |
 | `doc/ALBERO_DELLE_CHIAMATE.docx` | 1 | — |
+
+Non hanno ancora un documento loro `allinea_avvio.py`, `programma_carri.py`,
+`fattibilita.py`, `editor_linea.py` e `accesso.py`: per questi la spiegazione
+sta nei commenti in testa a ogni file e in questo README (`allinea_avvio`,
+`programma_carri` ed `editor_linea` anche in `ARCHITETTURA.md`).
 
 ```bash
 python strumenti/genera_doc.py              # rigenera tutto
@@ -1365,7 +1432,8 @@ delicati:
 - **`--nofollow-import-to=...`**: toglie i pacchetti che nessuno usa ma che le
   librerie grosse trascinano dentro (plotly, Qt, ecc.). Fa la cartella piu'
   piccola e la compilazione piu' stabile. **`pandas` non si toglie** (lo importa
-  OR-Tools) e **`PIL` non si toglie** (lo usa `interfaccia.py` per l'icona).
+  OR-Tools) e **`PIL` non si toglie** (lo usa `interfaccia.py` per ridimensionare icona e
+  logo della schermata di benvenuto).
 - **`--include-data-dir=risorse=risorse`** e **`--windows-icon-from-ico=...`**:
   la cartella `risorse/` finisce accanto all'eseguibile (l'icona della finestra la
   mette `interfaccia.py` da li'); l'icona del `.exe` in Esplora risorse e' una
@@ -1676,8 +1744,9 @@ una soluzione con **un posto solo**, sfasando le due tappe.
 Il default `1` e' deliberatamente il caso restrittivo: obbliga a **dichiarare**
 le vasche multi-posto invece di lasciarlo implicito. Conseguenza pratica: con
 `capacity=1` il takt time non puo' scendere sotto l'occupazione della vasca
-piu' lenta. Nell'esempio ZINCATURA ha una permanenza di ~190 s con takt 110 s,
-quindi e' dichiarata `capacity=2`.
+piu' lenta: una zincatura da ~190 s con un takt di 110 s va dichiarata
+`capacity=2`. Nella linea d'esempio ZINCATURA (200 s, takt 300 s) e' a due
+posti anche se uno basterebbe, per mostrare come si compila.
 
 Se una vasca e' irrimediabilmente insufficiente
 (`release + dwell_min + pick > capacity * takt_max`), `ProblemData` lo rifiuta
@@ -1773,8 +1842,12 @@ correzioni sulla permanenza descritte piu' sotto; il valore di riferimento
 corrente sta in `test/test_interfaccia.py`, che lo verifica a ogni giro).
 
 Con `lift_height = 0` su **tutte** le vasche le cinematiche di sollevamento non
-servono e restano solo i tempi morti: e' la via da usare se si hanno tempi gia'
-misurati sul campo invece della meccanica.
+entrano nel calcolo e restano solo i tempi morti: e' la via da usare se si hanno
+tempi gia' misurati sul campo invece della meccanica. Velocita' e
+accelerazione di sollevamento (`v_max_sollevamento_..._mm_s`,
+`a_max_sollevamento_..._mm_s2`, a vuoto e col telaio) vanno pero' compilate lo
+stesso: sono **obbligatorie**, perche' sono un dato del carroponte e non della
+linea, e un file senza viene respinto con foglio e cella.
 
 Ogni mossa dura quindi `presa + traslazione + rilascio`. Lo spostamento **a
 vuoto non paga alcun tempo verticale**: dopo lo sgancio il gancio e' gia' in
@@ -1799,7 +1872,7 @@ l'accelerazione, che e' come il programma si comportava prima che esistessero.
 Un file gia' compilato da' percio' esattamente gli stessi tempi di prima.
 
 Vale la pena compilarle quando si conoscono, perche' non sono un dettaglio.
-Sul carroponte vuoto dell'esempio — 1600 mm/s con 900 mm/s^2 — la soglia fra
+Su un carroponte vuoto a 1600 mm/s con 900 mm/s^2 la soglia fra
 profilo triangolare e trapezoidale sta a 2844 mm; dichiarando una frenata a
 1200 mm/s^2 scende a 2489 mm. Un salto di 2500 mm cambia cosi' di **profilo**,
 non solo di durata: da triangolare a 3,33 s a trapezoidale a 3,12 s.
@@ -1841,9 +1914,8 @@ rifiutata: non e' un avvicinamento, e' quasi sempre un refuso.
 > quote di transito — si sale a una quota per traslare, si scende a un'altra
 > per posare — e rallentare a ognuna sarebbe tempo regalato.
 
-Quanto costa, col sollevamento del modello d'esempio (gancio scarico a 500
-mm/s e 800 mm/s^2, telaio a 300 mm/s e 500 mm/s^2) e una zona di 150 mm a
-80 mm/s:
+Quanto costa, con un sollevamento a gancio scarico a 500 mm/s e 800 mm/s^2,
+col telaio a 300 mm/s e 500 mm/s^2, e una zona di 150 mm a 80 mm/s:
 
 | corsa | a gancio scarico | col telaio |
 |---|---|---|
@@ -2053,13 +2125,14 @@ trasferimento. Con tempi verticali nulli non viene emesso alcun segmento e il
 risultato torna quello di una linea senza sollevamento.
 
 Attenzione al dimensionamento: i tempi verticali si sommano a **ogni** mossa e
-si fanno sentire in fretta. Nell'esempio fornito valgono da 16 a 25 s per mossa,
-cioe' oltre 100 s di contenuto su 6 mosse: abbastanza da far passare la linea da
-1 a 2 carroponti e da alzare il takt time da 110 a 132 s. E' un risultato
-corretto, non una regressione — e' esattamente la ragione per cui vale la pena
-modellarli invece di stimarli a occhio. Lo sgocciolamento, in particolare, e' il
+si fanno sentire in fretta. Sulla linea d'esempio di una versione precedente
+(takt libero intorno ai 130 s) valevano da 16 a 25 s per mossa, cioe' oltre
+100 s di contenuto su 6 mosse: abbastanza da far passare la linea da 1 a 2
+carroponti e da alzare il takt time da 110 a 132 s. E' un risultato corretto,
+non una regressione — e' esattamente la ragione per cui vale la pena modellarli
+invece di stimarli a occhio. Lo sgocciolamento, in particolare, e' il
 contributo che si tende a dimenticare: portarlo da 2 a 15 s sulla sola zincatura
-fa passare l'esempio a 3 carroponti.
+faceva passare quella linea a 3 carroponti.
 
 ### Scelta automatica del numero di carroponti e delle zone
 
@@ -2068,6 +2141,10 @@ data = ProblemData(..., zones=None, ...)
 solution, zones, n_hoists = solve_auto_hoists(data, max_hoists=4, time_limit_per_candidate=15.0,
                                                log_progress=True)
 ```
+
+(Da codice il default di `time_limit_per_candidate` e' 8 s; l'interfaccia e la
+riga di comando passano invece `tempo_limite_per_tentativo_s` del foglio
+Parametri, 120 s se lasciato vuoto.)
 
 `solve_auto_hoists` prova N = 1, 2, 3, ... carroponti (fino a `max_hoists`)
 in ordine crescente e si ferma al **primo** N per cui esiste una
@@ -2540,30 +2617,41 @@ python test/test_excel_io.py     # lettura e scrittura Excel    (no OR-Tools)
 python test/test_simulazione.py  # la simulazione               (no OR-Tools)
 python test/test_avvio.py        # il punto di avvio            (no OR-Tools)
 python test/test_programma_carri.py # il programma dei carri    (no OR-Tools)
+python test/test_accesso.py      # utente e password            (no OR-Tools)
 python test/test_allinea_avvio.py # l'avvio reso esatto         (serve OR-Tools)
+python test/test_fattibilita.py  # il controllo preventivo      (serve OR-Tools)
 python test/test_model.py        # il modello CP-SAT            (serve OR-Tools)
 python test/test_interfaccia.py  # l'interfaccia grafica        (serve OR-Tools)
 python test/esempio.py           # risoluzione reale + verifica + grafico
 ```
 
-Ognuno stampa cosa ha provato e finisce con `RISULTATO: n ok, m falliti`.
-Nessuna dipendenza da pytest. Stato attuale: **123, 143, 84, 36, 94 e 137
-asserzioni, zero fallimenti**.
+Ognuno stampa cosa ha provato e finisce con il conteggio di quanto e' passato
+e quanto no, e un codice d'uscita diverso da zero se qualcosa non va. Nessuna
+dipendenza da pytest.
 
-**La risoluzione CP-SAT e' eseguita e verificata end-to-end.** Sull'esempio
-fornito il solver trova `T = 110,00 s` con 2 carroponti, separazione minima
-3500 mm contro 1800 mm richiesti, e il verificatore indipendente conferma la
-soluzione senza errori.
+La stessa suite gira nella **CI di GitHub** (`.github/workflows/check.yml`), ma
+non da sola: la si lancia scrivendo `check` come commento in una pull request
+(solo chi ha accesso al repository). Gira su Windows, in modalita'
+deterministica, divisa in tre gruppi in parallelo (`test_model`,
+`test_interfaccia`, tutto il resto); l'esito torna come stato `check` sul commit
+e come commento sulla PR, con il dettaglio dei test falliti. Un nuovo `check`
+riparte da capo; un push sulla PR annulla quello in corso, e i test vanno
+richiesti di nuovo.
 
-I sei file rispondono a domande diverse e si completano:
+**La risoluzione CP-SAT e' eseguita e verificata end-to-end.** Sulla linea
+d'esempio (`Nuovo modello Excel...`, takt fisso a 300 s) il solver trova una
+soluzione con 2 carroponti, separazione minima 7000 mm contro 2330 mm
+richiesti, e il verificatore indipendente la conferma senza errori.
 
-- `test_verify.py` — 28 casi. *Il verificatore trova davvero quello che deve
+I file rispondono a domande diverse e si completano:
+
+- `test_verify.py` — 30 casi. *Il verificatore trova davvero quello che deve
   trovare?* Uno solo dei casi e' corretto, gli altri sono rotti di proposito
   (collisioni, permanenze, periodicita', fasi verticali, capienza, geometrie
   patologiche). Le soluzioni sono costruite a mano, quindi non serve OR-Tools.
-- `test_model.py` — 20 casi. *Il modello produce soluzioni fisicamente valide?*
+- `test_model.py` — 30 casi. *Il modello produce soluzioni fisicamente valide?*
   Risolve davvero e passa ogni risultato al verificatore.
-- `test_excel_io.py` — 30 casi. *Un file compilato male viene respinto con un
+- `test_excel_io.py` — 35 casi. *Un file compilato male viene respinto con un
   messaggio utile, e i risultati escono corretti?* In ingresso: valori mancanti
   o non numerici, vasche inesistenti o duplicate, righe riordinate, parametri
   sbagliati, zone incomplete, e un file della vecchia versione in metri. In uscita: struttura dei fogli, corrispondenza
@@ -2571,7 +2659,7 @@ I sei file rispondono a domande diverse e si completano:
   ritorno del foglio `Ciclogramma`, che comprende un file con le **vecchie
   colonne**: le colonne si cercano per nome, e un file salvato prima che il
   tempo teorico esistesse deve riaprirsi identico.
-- `test_simulazione.py` — 15 casi. *La simulazione mostra il ciclogramma che
+- `test_simulazione.py` — 17 casi. *La simulazione mostra il ciclogramma che
   c'e', o una sua approssimazione?* Il controllo che conta e' incrociato: su un
   ciclogramma coerente, ogni pezzo appeso deve stare **esattamente** dove sta
   il gancio di un carroponte che lo tiene, e viceversa — su millecinquecento
@@ -2593,12 +2681,21 @@ I sei file rispondono a domande diverse e si completano:
   takt e' lo stesso, ogni giro e' spostato rigidamente con le sue attese, e
   cambiano solo i bagni di confine, dentro le tolleranze. Un avvio gia' esatto
   non si tocca, e con le tolleranze di confine chiuse non si sposta niente.
-- `test_interfaccia.py` — 14 casi. *L'interfaccia si comporta come deve?* La
+- `test_interfaccia.py` — 18 casi. *L'interfaccia si comporta come deve?* La
   finestra viene costruita davvero e pilotata da codice. E' l'unico modo per
   accorgersi che un pulsante e' rimasto disabilitato, che il calcolo in
   background non consegna mai il risultato, o che una modifica impossibile
   manda tutto per aria invece di essere rifiutata: cose che un test sulle sole
   funzioni di calcolo non vedrebbe.
+- `test_programma_carri.py` — 9 casi. *Il programma dei carri e' quello che il
+  PLC sa eseguire, e racconta lo stesso ciclogramma?* Comandi e parametri del
+  PLC, pause intere che sommano le attese, `External Request`, `Crane Syncro`,
+  `Cover Syncro`, svincoli, cambio quota, avvio e foglio Excel.
+- `test_fattibilita.py` — 3 casi. *Il controllo preventivo dice mai
+  "impossibile" a una linea che si fa?* Il limite non deve superare il takt
+  trovato dal solutore, e sotto il limite il solutore deve confermare.
+- `test_accesso.py` — *Entra chi deve, e solo lui?* Utente e password giusti,
+  maiuscole nel nome, password di un altro, campi vuoti, voci malformate.
 
 Il ramo `traslazione_con_gancio_basso = 0` -- con e senza posizioni di
 svincolo -- ha uno sweep suo, di **192 configurazioni** (spaziatura 1500-4000
