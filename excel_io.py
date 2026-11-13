@@ -2096,13 +2096,22 @@ def _aggiungi_fogli_linea(
             None,
         ),
         (
-            "                  Scendendo il gancio ci arriva gia' a quella "
-            "velocita' e la tiene fino",
+            "                  Scendendo il gancio viaggia come se la zona non "
+            "ci fosse; quando ci entra",
             None,
         ),
         (
-            "                  all'ultima frenata; salendo riparte piano e "
-            "accelera solo dopo.",
+            "                  la velocita' CADE DI COLPO a quella di "
+            "avvicinamento, che tiene fino",
+            None,
+        ),
+        (
+            "                  all'ultima frenata. Salendo riparte piano, "
+            "percorre la zona a quella",
+            None,
+        ),
+        (
+            "                  velocita' e accelera solo dopo.",
             None,
         ),
         (
