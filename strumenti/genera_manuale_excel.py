@@ -457,40 +457,36 @@ def fig_corsa_verticale():
     _salva(fig, "corsa_sgocciolamento")
 
 
-def _profilo(d, v, a, dec=None, v_in=0.0, v_out=0.0, n=60):
-    """Profilo trapezoidale (o triangolare) di un tratto lungo d: tempi e
-    posizioni, partendo da v_in e arrivando a v_out."""
-    import numpy as np
+def _campiona(d: float, kin, punti=40):
+    """Tempo, corsa percorsa e velocita' lungo un movimento lungo `d`, presi
+    dai tratti che calcola kinematics.py: la figura mostra il profilo che usa
+    il programma, non un disegno che gli somiglia. Dove la velocita' cade a
+    gradino (l'ingresso nella zona di avvicinamento) due tratti consecutivi
+    hanno velocita' diverse sul confine, e la curva fa un segmento verticale."""
+    import kinematics
 
-    dec = dec or a
-    da = (v * v - v_in * v_in) / (2 * a)
-    dd = (v * v - v_out * v_out) / (2 * dec)
-    if da + dd > d:  # triangolare
-        vp = ((2 * a * dec * d + dec * v_in ** 2 + a * v_out ** 2) / (a + dec)) ** 0.5
-        da = (vp * vp - v_in * v_in) / (2 * a)
-        dd = (vp * vp - v_out * v_out) / (2 * dec)
-        v = vp
-    ta, td = (v - v_in) / a, (v - v_out) / dec
-    tc = (d - da - dd) / v
-    T = ta + tc + td
-    t = np.linspace(0, T, n)
-    s = np.where(
-        t < ta, v_in * t + a * t * t / 2,
-        np.where(t < ta + tc, da + v * (t - ta),
-                 da + v * tc + v * (t - ta - tc) - dec * (t - ta - tc) ** 2 / 2))
-    vel = np.where(t < ta, v_in + a * t, np.where(t < ta + tc, v, v - dec * (t - ta - tc)))
-    return t, s, vel, (ta, tc, td)
+    t, x, v = [0.0], [0.0], [0.0]
+    for tr in kinematics._tratti(d, kin):
+        t0, x0 = t[-1], x[-1]
+        for k in range(punti + 1):
+            dt = tr.dt * k / punti
+            t.append(t0 + dt)
+            x.append(x0 + tr.v0 * dt + tr.a * dt * dt / 2)
+            v.append(tr.v0 + tr.a * dt)
+    return t, x, v
 
 
 def fig_profilo_traslazione():
-    import numpy as np
+    from kinematics import Kinematics, _tratti
 
+    kin = Kinematics(v_max=500, a_max=200, d_max=120)
     fig, ax = plt.subplots(figsize=(9, 3.6))
-    t, _s, v, (ta, tc, td) = _profilo(6000, 500, 200, 120)
+    t, _x, v = _campiona(6000, kin)
     ax.plot(t, v, color=BLU, lw=2.2, label="spostamento lungo: arriva a v_max")
-    t2, _s2, v2, _ = _profilo(700, 500, 200, 120)
-    ax.plot(t2 + 0.3, v2, color=ARANCIO, lw=2, ls="--",
+    t2, _x2, v2 = _campiona(700, kin)
+    ax.plot([x + 0.3 for x in t2], v2, color=ARANCIO, lw=2, ls="--",
             label="spostamento corto: frena prima di arrivare a v_max")
+    ta, tc, td = (tr.dt for tr in _tratti(6000, kin))
     ax.axhline(500, color=GRIGIO, lw=0.8, ls=":")
     ax.text(t[-1] + 0.2, 500, "v_max_..._mm_s", va="center", fontsize=8.5,
             color=ROSSO, fontweight="bold")
@@ -507,25 +503,26 @@ def fig_profilo_traslazione():
     ax.legend(loc="upper center", fontsize=8, frameon=False, ncol=1,
               bbox_to_anchor=(0.45, 1.22))
     ax.spines[["top", "right"]].set_visible(False)
-    del np
     _salva(fig, "profilo_traslazione")
 
 
 def fig_profilo_sollevamento():
     """Velocita' del gancio lungo la corsa verticale, con la zona di
-    avvicinamento in fondo (discesa) e in testa (salita)."""
-    h, v, a, va_, da_ = 1100, 350, 150, 100, 250
-    fig, axs = plt.subplots(1, 2, figsize=(10, 3.6), sharey=True)
+    avvicinamento in fondo (discesa) e in testa (salita). Valori del modello
+    d'esempio: la ZINCATURA (1100 mm) e i parametri di sollevamento."""
+    from kinematics import Kinematics
+
+    par = excel_io._righe_esempio()[2]
+    h = 1100
+    v = par["v_max_sollevamento_carico_mm_s"]
+    va_ = par["v_approach_sollevamento_mm_s"]
+    da_ = par["d_approach_sollevamento_mm"]
+    base = Kinematics(v_max=v, a_max=par["a_max_sollevamento_carico_mm_s2"],
+                      d_max=par["d_max_sollevamento_carico_mm_s2"])
+    fig, axs = plt.subplots(1, 2, figsize=(10.5, 3.9), sharey=True)
     for ax, scendendo in zip(axs, (True, False)):
-        # tratto veloce + tratto lento
-        _t, s, vel, _ = _profilo(h - da_, v, a, v_in=0 if scendendo else va_,
-                                 v_out=va_ if scendendo else 0)
-        if scendendo:
-            xs = list(s) + [h - da_, h - 15, h]
-            vs = list(vel) + [va_, va_, 0]
-        else:
-            xs = [0, 15, da_] + [da_ + x for x in s]
-            vs = [0, va_, va_] + list(vel)
+        kin = base.avvicinandosi(va_, da_, scendendo=scendendo)
+        _t, xs, vs = _campiona(h, kin)
         ax.plot(xs, vs, color=BLU, lw=2.2)
         z0 = h - da_ if scendendo else 0
         ax.axvspan(z0, z0 + da_, color="#fde2c4", alpha=0.8)
@@ -535,11 +532,25 @@ def fig_profilo_sollevamento():
         ax.axhline(v, color=GRIGIO, lw=0.8, ls=":")
         ax.set_xlim(0, h)
         ax.set_ylim(0, 470)
-        ax.set_xlabel("corsa percorsa [mm]  (0 = inizio, " + str(h) + " = corsa_verticale_mm)")
+        ax.set_xlabel(f"corsa percorsa [mm]  (0 = inizio, {h} = corsa_verticale_mm)")
         ax.spines[["top", "right"]].set_visible(False)
-        ax.set_title("DISCESA: piano negli ultimi mm, verso il fondo vasca" if scendendo
-                     else "SALITA: si stacca piano dal fondo, poi accelera",
+        ax.set_title("DISCESA: zona in fondo, verso il punto di deposito" if scendendo
+                     else "SALITA: zona in testa, il telaio si stacca dal fondo",
                      fontsize=9, pad=28)
+    # il gradino all'ingresso della zona, in discesa
+    # la velocita' con cui ci si arriva: il limite piu' basso fra la massima,
+    # quella raggiungibile accelerando e quella da cui ci si puo' ancora
+    # fermare in fondo alla corsa (vedi kinematics._velocita_di_confine)
+    ingresso = min(v, (2 * base.a_max * (h - da_)) ** 0.5, (2 * base.decel * da_) ** 0.5)
+    axs[0].annotate("entrando nella zona la\nvelocità CADE A GRADINO\na v_approach",
+                    xy=(h - da_, (ingresso + va_) / 2), xytext=(h - da_ - 520, 150),
+                    fontsize=7.5, color=ROSSO, fontweight="bold",
+                    arrowprops=dict(arrowstyle="->", color=ROSSO))
+    axs[0].annotate("prima della zona frena solo\nquanto serve per potersi\n"
+                    "fermare in fondo alla corsa",
+                    xy=(h - da_ - 60, ingresso + 35), xytext=(h - da_ - 690, 395),
+                    fontsize=7.5, color="#555", fontweight="bold",
+                    arrowprops=dict(arrowstyle="->", color="#555"))
     axs[0].set_ylabel("velocità del gancio [mm/s]")
     axs[0].text(30, va_ + 10, "v_approach_sollevamento_mm_s", fontsize=8,
                 color=ROSSO, fontweight="bold")
@@ -1257,8 +1268,18 @@ def contenuto(messaggio_errore: str):
               "al punto in cui il telaio viene preso o posato, percorsi a velocità "
               "ridotta per non urtare:"),
         ("img", "profilo_sollevamento", 16.0,
-         "Velocità del gancio lungo la corsa: la zona di avvicinamento (in arancio) "
-         "sta alla fine della discesa e all'inizio della salita."),
+         "Velocità del gancio lungo la corsa, calcolata dal programma con i valori "
+         "del modello d'esempio: la zona di avvicinamento (in arancio) sta alla "
+         "fine della discesa e all'inizio della salita."),
+        ("b", "In **discesa** il gancio viaggia normalmente, come se la zona non ci "
+              "fosse, finché mancano `d_approach_sollevamento_mm`; lì la velocità "
+              "**cade di colpo** a quella di avvicinamento, resta costante e il gancio "
+              "frena solo alla fine. Prima della zona frena soltanto quanto serve per "
+              "potersi ancora fermare in fondo alla corsa: se la zona è più corta "
+              "dello spazio di frenata (come nell'esempio), il gancio ci entra già "
+              "un po' rallentato."),
+        ("b", "In **salita** parte piano, percorre la zona a velocità di "
+              "avvicinamento e solo dopo accelera verso la velocità massima."),
         ("b", "`v_approach_sollevamento_mm_s`: la velocità ridotta. Non può superare "
               "le velocità massime di sollevamento."),
         ("b", "`d_approach_sollevamento_mm`: quanti mm di corsa si fanno a quella "
