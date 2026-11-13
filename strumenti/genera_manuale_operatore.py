@@ -739,15 +739,30 @@ def _sfondo_cella(cella, colore: str):
     tcPr.append(shd)
 
 
-def _immagine(nome: str) -> str:
-    for cartella in (ANNOTATE, IMG):
+def _immagine(nome: str, cartelle=None) -> str:
+    for cartella in cartelle or (ANNOTATE, IMG):
         p = os.path.join(cartella, nome + ".png")
         if os.path.exists(p):
             return p
     raise FileNotFoundError(nome)
 
 
-def scrivi_documento():
+def scrivi_documento(
+    contenuto=None,
+    uscita=USCITA,
+    sottotitolo="Manuale operatore dell'interfaccia grafica",
+    descrizione=(
+        "Pulsanti, pagine e finestre del programma.\n"
+        "La compilazione della linea è descritta in un documento a parte."
+    ),
+    cartelle_img=None,
+    etichetta_nota="Da compilare  ",
+):
+    """Impagina `contenuto` (default: CONTENUTO) e lo salva in `uscita`.
+
+    I parametri servono a riusare la stessa impaginazione per gli altri
+    manuali (genera_manuale_excel.py): stessa copertina, stesso indice, stesse
+    voci."""
     from docx import Document
     from docx.enum.section import WD_ORIENT  # noqa: F401
     from docx.enum.table import WD_TABLE_ALIGNMENT
@@ -784,15 +799,12 @@ def scrivi_documento():
     r.bold, r.font.size = True, Pt(32)
     p = doc.add_paragraph()
     p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    r = p.add_run("Manuale operatore dell'interfaccia grafica")
+    r = p.add_run(sottotitolo)
     r.font.size = Pt(16)
     p = doc.add_paragraph()
     p.alignment = WD_ALIGN_PARAGRAPH.CENTER
     p.paragraph_format.space_before = Pt(24)
-    r = p.add_run(
-        "Pulsanti, pagine e finestre del programma.\n"
-        "La compilazione della linea è descritta in un documento a parte."
-    )
+    r = p.add_run(descrizione)
     r.font.size = Pt(11)
     r.font.color.rgb = RGBColor(0x55, 0x55, 0x55)
     imel = os.path.join(RADICE, "risorse", "logo_imel.png")
@@ -830,7 +842,7 @@ def scrivi_documento():
     # -- corpo --------------------------------------------------------------
     n_figura = 0
     numero, tipo = 0, None
-    for voce in CONTENUTO:
+    for voce in contenuto or CONTENUTO:
         precedente, tipo = tipo, voce[0]
         if tipo in ("h1", "h2", "h3"):
             doc.add_heading(voce[1], level=int(tipo[1]))
@@ -863,7 +875,7 @@ def scrivi_documento():
             tab.alignment = WD_TABLE_ALIGNMENT.CENTER
             cella = tab.rows[0].cells[0]
             _sfondo_cella(cella, "FFF4D6")
-            cella.paragraphs[0].add_run("Da compilare  ").bold = True
+            cella.paragraphs[0].add_run(etichetta_nota).bold = True
             _testo_ricco(cella.paragraphs[0], voce[1])
             doc.add_paragraph()
         elif tipo == "img":
@@ -873,7 +885,7 @@ def scrivi_documento():
             p.alignment = WD_ALIGN_PARAGRAPH.CENTER
             p.paragraph_format.keep_with_next = True
             p.paragraph_format.space_before = Pt(6)
-            p.add_run().add_picture(_immagine(nome), width=Cm(larghezza))
+            p.add_run().add_picture(_immagine(nome, cartelle_img), width=Cm(larghezza))
             p = doc.add_paragraph()
             p.alignment = WD_ALIGN_PARAGRAPH.CENTER
             r = p.add_run(f"Figura {n_figura} – ")
@@ -909,7 +921,7 @@ def scrivi_documento():
         else:
             raise ValueError(f"voce sconosciuta: {tipo}")
 
-    doc.save(USCITA)
+    doc.save(uscita)
     return n_figura
 
 
