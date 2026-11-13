@@ -1124,7 +1124,7 @@ def _leggi_ciclogramma(ws, route, errori: _Errori) -> Optional[dict]:
                 FOGLIO_CICLOGRAMMA,
                 dove("sosta_in_vasca", riga),
                 "la sosta in una vasca in mezzo vuole entrambe le colonne: "
-                "in quale vasca (G) e per quanti secondi (H). Lasciale "
+                "in quale vasca (I) e per quanti secondi (J). Lasciale "
                 "entrambe vuote se il carroponte rientra diritto",
             )
     if takt is None:
