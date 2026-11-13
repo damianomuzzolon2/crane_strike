@@ -44,10 +44,11 @@ create_cyclograms/
 
   test/        i test e l'esempio d'uso in codice
   strumenti/   compila_nuitka.py, costruisci_exe.py e la ricetta PyInstaller,
-               genera_utente.py, genera_doc.py con i testi in doc_contenuti/
+               genera_utente.py, genera_doc.py con i testi in doc_contenuti/,
+               cattura_schermate.py e genera_manuale_operatore.py
   risorse/     icona.png, icona.ico (ricavata dalla prima) e logo_imel.png
-  doc/         i documenti Word riga per riga, uno o piu' per modulo, e le
-               immagini di questo manuale
+  doc/         i documenti Word riga per riga, uno o piu' per modulo, il
+               manuale operatore e le immagini di questo README
   dati/        la linea d'esempio (linea.xlsx) e l'immagine dei suoi risultati
   .github/     la CI: i test girano scrivendo "check" in una pull request
 ```
@@ -121,6 +122,8 @@ OR-Tools installato.
 | `strumenti/costruisci_exe.py` | 124 | Costruisce l'**eseguibile autonomo** con PyInstaller: piu' veloce da costruire, ma impacchetta i `.pyc` (bytecode decompilabile), quindi **non** protegge il sorgente. Vedi sotto. |
 | `strumenti/cranestrike.spec` | — | La ricetta per PyInstaller: cosa includere, cosa escludere, come impacchettare. Non si lancia a mano, la usa `costruisci_exe.py`. |
 | `strumenti/genera_doc.py` | 681 | Produce i documenti Word in `doc/`: la spiegazione riga per riga di ogni modulo e l'albero delle chiamate. Il codice citato **non e' ricopiato**, viene estratto dal sorgente per nome a ogni generazione. Vedi *La documentazione in `doc/`*. |
+| `strumenti/cattura_schermate.py` | 293 | Apre davvero l'interfaccia sulla linea d'esempio, la pilota da codice e **fotografa ogni pagina** per il manuale operatore (in `doc/manuale_operatore/img/`). Solo Windows; durante la cattura non toccare mouse e tastiera. Vedi *La documentazione in `doc/`*. |
+| `strumenti/genera_manuale_operatore.py` | 927 | Scrive il **manuale operatore** (`doc/manuale_operatore/manuale_operatore.docx`) dalle schermate catturate: figure annotate, ritagli e testo, che sta nella lista `CONTENUTO` del file. |
 | `strumenti/genera_utente.py` | 58 | Chiede nome e password di una persona da abilitare e stampa la voce da incollare in `UTENTI` di `accesso.py`. Vedi *Utenti e password*. |
 | `CraneStrike.bat` | — | Avvia l'interfaccia con un doppio clic, senza aprire il terminale. |
 
@@ -793,8 +796,14 @@ questo non finisce mai dentro una scheda:
   fisicamente valido e rispetta tutte le tolleranze dichiarate.
 - **rosso** — quanti errori sono stati trovati. Il dettaglio e' nella scheda
   *Verifica*.
-- **azzurro** — `IN COMPOSIZIONE`: la verifica non e' ancora stata chiesta.
-  Componi come vuoi, il verdetto arriva quando premi `Verifica adesso`.
+- **arancio** — `INCOERENZE`: il ciclogramma cosi' com'e' non si puo'
+  realizzare, e il *Riepilogo* dice perche'. Ha la precedenza sugli altri
+  colori. Il caso piu' comune e' la composizione a mano appena cominciata:
+  finche' ci sono trasporti non assegnati a nessun carroponte il verdetto
+  resta arancio.
+- **azzurro** — `IN COMPOSIZIONE`: tutti i trasporti sono assegnati e non ci
+  sono incoerenze, ma la verifica non e' ancora stata chiesta. Il verdetto
+  arriva quando premi `Verifica adesso`.
 
 ### Le tre schede
 
@@ -981,6 +990,12 @@ pettine dei pezzi, che e' il vincolo di processo, poi si decide una mossa per
 volta chi la fa. Partire da una suddivisione gia' pronta voleva dire non avere
 mai niente "da assegnare": si finiva a correggere una proposta invece di
 comporre, che e' un'altra cosa.
+
+Finche' resta qualche trasporto senza carroponte il verdetto e' **arancio**
+(`INCOERENZE`, e il *Riepilogo* elenca le mosse non assegnate): un ciclogramma
+a meta' non si puo' realizzare, ed e' giusto che lo dica. Assegnato l'ultimo,
+se tutto si tiene in piedi diventa **azzurro** (`IN COMPOSIZIONE`) e si preme
+`Verifica adesso`.
 
 Nel pettine il colore vuol dire una cosa sola: **l'ho assegnato io**. Tutto
 quello che non hai ancora deciso e' dello stesso grigio sottile, cosi' il
@@ -1358,6 +1373,39 @@ il modo di mantenerli:
   modulo deve chiamare quelli che gli stanno sopra.
 
 Il testo sta in `strumenti/doc_contenuti/<modulo>.py`, uno per modulo.
+
+### Il manuale operatore
+
+`doc/manuale_operatore/manuale_operatore.docx` e' scritto per **chi usa il
+programma**, non per chi lo mantiene: cosa fa ogni pulsante, cosa mostra ogni
+pagina e finestra (accesso, finestra principale, Dati linea, Fattibilita',
+Simulazione), i colori del verdetto e le procedure passo per passo. **Non**
+spiega come si compila la linea: della finestra `Dati linea` mostra le
+schermate e dice che ci sono dati da compilare, ma il significato di colonne e
+parametri sta in un documento a parte (e in *Come modellare il tuo caso*, qui
+sotto).
+
+Le figure sono **schermate vere**, prese dal programma che gira sulla linea
+d'esempio, non disegni. Quando l'interfaccia cambia si rifanno:
+
+```bash
+python strumenti/cattura_schermate.py          # apre il programma e fotografa (~1 min)
+python strumenti/genera_manuale_operatore.py   # figure annotate + documento Word
+```
+
+| percorso | contenuto |
+| --- | --- |
+| `doc/manuale_operatore/img/` | le schermate, piu' `regioni.json` con la posizione di pulsanti e zone, che serve a numerarli |
+| `doc/manuale_operatore/img_annotate/` | la finestra principale con i pulsanti numerati e le zone a lettere, e i ritagli (i colori del verdetto, le barre dei comandi) |
+| `doc/manuale_operatore/manuale_operatore.docx` | il manuale |
+
+La cattura funziona solo su Windows e mentre gira **non bisogna toccare mouse
+e tastiera**: le finestre vengono portate in primo piano e fotografate dallo
+schermo. Il testo del manuale sta nella lista `CONTENUTO` di
+`genera_manuale_operatore.py`: se si aggiunge un pulsante, va aggiunto anche
+alla lista `PULSANTI` dello stesso file, che decide la numerazione della
+figura annotata. L'indice del documento e' un campo di Word: si aggiorna con
+F9 dopo averlo aperto.
 
 ## Creare l'eseguibile per PC senza Python
 
