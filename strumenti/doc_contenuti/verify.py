@@ -1,9 +1,10 @@
 """
 Il testo dei documenti di verify.py.
 
-Ventisette fra funzioni e metodi, divisi in tre documenti perche' rispondono a
+Trentatre fra funzioni e metodi, divisi in tre documenti perche' rispondono a
 tre domande diverse: come si racconta il risultato, quali controlli si fanno,
-e come si dimostra -- non si spera -- che due carroponti non si toccano.
+e come si dimostra -- non si spera -- che due carroponti non si toccano (e
+non si contendono una vasca).
 """
 
 from __future__ import annotations
@@ -16,9 +17,10 @@ REFERTO = [
     ("h1", "verify.py (1) -- il referto e il giro dei controlli"),
     ("p",
      "Primo dei tre documenti su verify.py, il verificatore indipendente. Qui "
-     "si vede come e' fatto il referto e in che ordine vengono eseguiti i "
-     "nove controlli; il secondo documento entra nei controlli uno per uno, il "
-     "terzo nella ricerca delle collisioni. Ogni blocco di codice e' estratto "
+     "si vede come e' fatto il referto e in che ordine vengono eseguiti gli "
+     "undici controlli; il secondo documento entra nei controlli uno per uno, "
+     "il terzo nella ricerca delle collisioni e nell'interblocco delle vasche. "
+     "Ogni blocco di codice e' estratto "
      "dal sorgente al momento della generazione."),
 
     # ==================================================================
@@ -47,11 +49,13 @@ REFERTO = [
      "SUPERATA'. Il paragrafo sulle permanenze, nel secondo documento, "
      "racconta cosa era sbagliato."),
 
-    ("h3", "I nove controlli"),
+    ("h3", "Gli undici controlli"),
     ("t", [
         ["n.", "controlla", "gravita' tipica"],
         ["1", "struttura: status, takt nella banda, zone contigue", "errore"],
         ["2", "layout: vicinanze che il modello non vincola", "avviso"],
+        ["--", "portata: nessun carroponte oltre il suo tratto di rotaia",
+         "errore"],
         ["3", "coerenza dei segmenti: continuita', periodo T", "errore"],
         ["4", "copertura delle mosse e durate delle tratte", "errore"],
         ["5", "coerenza di fase (la linearizzazione modulo T)", "errore"],
@@ -59,7 +63,15 @@ REFERTO = [
         ["7", "fattibilita' dei trasferimenti a vuoto", "errore"],
         ["8", "COLLISIONI reali, campionate nel tempo", "errore"],
         ["9", "capienza delle vasche", "errore o nota"],
+        ["10", "INTERBLOCCO: due carroponti non si contendono una vasca",
+         "errore"],
     ]),
+    ("p",
+     "La numerazione e' quella dell'elenco in testa al file, ed e' quella "
+     "che i docstring dei controlli richiamano ('7) Fattibilita'...'). La "
+     "portata non ha un numero: e' arrivata dopo, insieme al foglio Zone che "
+     "la dichiara, e nel giro viene eseguita subito dopo il layout. Se le "
+     "portate non sono dichiarate non controlla niente."),
 
     ("q",
      "IL CONTROLLO 8 E' PIU' STRETTO DI QUELLO CHE IL MODELLO IMPONE. Il "
@@ -191,7 +203,7 @@ REFERTO = [
      "zone. E' la guardia contro l'errore precedente commesso a meta': aver "
      "aggiornato le zone ma non la soluzione, o viceversa."),
 
-    ("h3", "L'ordine dei nove controlli"),
+    ("h3", "L'ordine dei controlli"),
     ("c", "verify.verify_solution", "    T = solution.T", "    violations = sorted("),
     ("p",
      "La funzione `add` e' una chiusura che accumula in V: passandola a tutti "
@@ -200,10 +212,15 @@ REFERTO = [
      "firme cosi' uniformi e si possono leggere uno per volta."),
     ("p",
      "L'ordine non e' casuale. _resolve_plans viene per primo perche' tutti "
-     "gli altri possono averne bisogno. _check_per_hoist e' l'unico che "
-     "RESTITUISCE qualcosa -- le traiettorie campionabili -- e deve percio' "
-     "precedere il controllo delle collisioni, che le usa. In mezzo, i "
-     "controlli indipendenti fra loro."),
+     "gli altri possono averne bisogno. _check_per_hoist e' l'unico controllo "
+     "il cui risultato serve a un ALTRO controllo -- restituisce le "
+     "traiettorie campionabili -- e deve percio' precedere il controllo delle "
+     "collisioni, che le usa. Anche _compute_dwell_slack, la capienza e le "
+     "collisioni restituiscono qualcosa, ma sono misure che finiscono nel "
+     "referto, non ingressi per qualcun altro. Il resto e' indipendente: la "
+     "portata e l'interblocco, gli ultimi arrivati, leggono i segmenti per "
+     "conto loro, e per questo la loro posizione nel giro -- la portata dopo "
+     "il layout, l'interblocco in coda -- non cambia niente."),
     ("p",
      "Da notare che nessun controllo interrompe la catena: si eseguono tutti, "
      "sempre. Fermarsi al primo errore darebbe un referto che dice una cosa "
@@ -280,19 +297,20 @@ CONTROLLI = [
     ("h1", "verify.py (2) -- i controlli, uno per uno"),
     ("p",
      "Secondo dei tre documenti su verify.py. Qui si entra nei controlli da 1 "
-     "a 7 e nel 9; le collisioni -- il controllo 8 -- hanno un documento "
-     "loro. Il primo documento spiega come e' fatto il referto e in che ordine "
+     "a 7, nella portata e nel 9; le collisioni e l'interblocco -- i "
+     "controlli 8 e 10 -- hanno un documento loro. Il primo documento spiega come e' fatto il referto e in che ordine "
      "i controlli vengono chiamati."),
 
     # ==================================================================
     ("h2", "1. Struttura"),
     ("c", "verify._check_structure"),
     ("p",
-     "Tre cose: il takt time sta nella banda dichiarata; le zone sono "
+     "Quattro cose: il takt time sta nella banda dichiarata; le zone sono "
      "intervalli sensati; le zone coprono tutte le mosse in modo contiguo ed "
-     "esclusivo."),
+     "esclusivo; e, se la soluzione porta con se' i piani risolti, ce n'e' "
+     "uno per zona."),
     ("p",
-     "L'ultimo controllo e' scritto in modo compatto e vale la pena leggerlo "
+     "Il controllo di copertura e' scritto in modo compatto e vale la pena leggerlo "
      "bene: si mettono in fila tutte le mosse coperte e si confronta la lista "
      "con range(n_moves). Un confronto di LISTE, non di insiemi, quindi "
      "verifica in un colpo solo tre proprieta' diverse -- che non manchi "
@@ -318,6 +336,37 @@ CONTROLLI = [
      "concretizzato e' il controllo 8, che invece e' indipendente per davvero."),
 
     # ==================================================================
+    ("h2", "La portata"),
+    ("c", "verify._check_reach"),
+    ("p",
+     "Il foglio Zone puo' dire, per ogni carroponte, fino a dove arriva lungo "
+     "la rotaia: dalla vasca minima alla massima (model.Portata). E' un "
+     "limite della macchina, non una zona di lavoro, e questo controllo "
+     "verifica che nessun carroponte lo superi."),
+    ("p",
+     "Si guarda la TRAIETTORIA, non la suddivisione in zone. Il docstring "
+     "dice perche': e' quella che la macchina percorre davvero, compresi gli "
+     "svincoli e i punti di passaggio messi a mano, che una zona non "
+     "racconta. E basta guardare gli estremi di ogni segmento, perche' ogni "
+     "segmento e' un movimento solo: non puo' andare oltre un estremo e "
+     "tornare indietro."),
+    ("p",
+     "Una violazione per carroponte, la prima: il `break` dopo la "
+     "segnalazione evita che lo stesso sconfinamento venga ripetuto per ogni "
+     "segmento che lo tocca. Il messaggio dice la quota raggiunta e la "
+     "portata sia per nome delle vasche sia in millimetri, cosi' si "
+     "riconosce subito quale vasca e' fuori."),
+    ("q",
+     "IL CONTROLLO TACE SE I CONTI NON TORNANO. La traiettoria h e' del "
+     "carroponte h solo se ci sono tante traiettorie quante portate. In un "
+     "ciclogramma composto a mano, con un carroponte che non ha ancora mosse, "
+     "le zone sono di meno e la numerazione slitta: confrontare la "
+     "traiettoria del secondo con la portata del secondo vorrebbe dire "
+     "confrontare carroponti diversi. Li' il controllo non si fa, ed e' "
+     "giusto: lo fa gia' il disegno, che non lascia dare una mossa fuori "
+     "portata."),
+
+    # ==================================================================
     ("h2", "3 e 4. I segmenti di ciascun carroponte"),
     ("p",
      "E' il controllo piu' lungo del modulo, e fa sei cose diverse su ogni "
@@ -335,7 +384,7 @@ CONTROLLI = [
      "mosse si sovrappongono nel tempo la catena non esiste, e quei controlli "
      "si mettono a segnalare la stessa cosa una volta per ogni coppia. Su una "
      "composizione a mano lasciata a meta' -- che e' lo stato normale mentre "
-     "si lavora -- significa trentacinque violazioni per sei fatti, con il "
+     "si lavora -- significa ventuno errori per sei fatti, con il "
      "messaggio utile sepolto in mezzo."),
     ("p",
      "La funzione restituisce una riga per COPPIA DI MOSSE, non per tratto: "
@@ -589,12 +638,37 @@ CONTROLLI = [
      "attraversa il confine fra un periodo e il successivo. E' proprio quello "
      "il piu' teso, perche' e' il ritorno da un capo all'altro della zona."),
     ("q",
-     "IL TERMINE `+T`. Quando la mossa successiva e' quella di confine basso "
-     "(k2 == z.lo), il prelievo avviene nel periodo DOPO: alla fase locale va "
-     "aggiunto un T. Senza quel termine, il verificatore confronterebbe un "
-     "arrivo a 95 s con un prelievo a 5 s e dichiarerebbe impossibile ogni "
-     "ciclogramma corretto. E' una riga sola, e sbagliarla produce errori a "
-     "raffica su soluzioni perfette."),
+     "IL TERMINE `+T`. Quando la mossa successiva e' la PRIMA del giro "
+     "(k2 == order[0]), il prelievo avviene nel periodo DOPO: alla fase "
+     "locale va aggiunto un T. Senza quel termine, il verificatore "
+     "confronterebbe un arrivo a 95 s con un prelievo a 5 s e dichiarerebbe "
+     "impossibile ogni ciclogramma corretto. E' una riga sola, e sbagliarla "
+     "produce errori a raffica su soluzioni perfette."),
+    ("q",
+     "PRIMA DEL GIRO, NON DI CONFINE BASSO. Il +T si attaccava alla mossa di "
+     "confine basso della zona (k2 == zone.lo). Per il solutore e' lo "
+     "stesso, perche' costringe quella mossa a essere anche la prima in "
+     "ordine di tempo; su un ciclogramma composto a mano no. Il docstring "
+     "racconta l'effetto: un 'non arriva in tempo' su giri perfettamente "
+     "validi, sfasato di esattamente un takt time. E' lo stesso difetto "
+     "raccontato sopra, a proposito dell'ordine di prelievo, visto dall'altro "
+     "capo."),
+    ("p",
+     "Quanto dura il rientro dipende da come il carroponte ci arriva, e il "
+     "codice distingue tre casi."),
+    ("li", "DIRETTO: dalla vasca in cui ha consegnato a quella da cui deve "
+           "prelevare, con data.empty_leg_seconds."),
+    ("li", "con una SOSTA in una vasca in mezzo: due traslazioni invece di "
+           "una, piu' i secondi passati fermi la'. Il commento lo dice "
+           "chiaro -- misurare il rientro diretto sarebbe piu' permissivo del "
+           "vero, cioe' proprio la svista che il modulo deve intercettare. In "
+           "piu' si controlla che la vasca della sosta sia nella zona del "
+           "carroponte: fuori, quel pezzo di rotaia e' del vicino."),
+    ("li", "con PUNTI DI PASSAGGIO messi a mano: l'orario lo calcola "
+           "model.orario_passaggi, e ogni punto e' una scadenza a se'. Un "
+           "punto raggiunto in ritardo e' un errore come mancare il prelievo, "
+           "e se ne segnala uno per punto; poi si controlla comunque "
+           "l'arrivo sulla vasca del prelievo."),
     ("p",
      "Il messaggio e' fra i piu' curati del modulo: nomina il carroponte, le "
      "due mosse, le due vasche per nome, e i due istanti che non tornano. Chi "
@@ -645,6 +719,14 @@ CONTROLLI = [
      "Un posto liberato nello stesso istante in cui ne serve un altro puo' "
      "essere riusato, e l'ordine opposto conterebbe un posto in piu' -- "
      "facendo risultare insufficiente una vasca che basta esattamente."),
+    ("q",
+     "QUELLA REGOLA REGGE SOLO SE GLI ISTANTI SONO DAVVERO UGUALI. Un pezzo "
+     "che occupa il posto per esattamente capacity * T -- e il modello lo "
+     "ammette -- esce nello stesso istante in cui entra quello di n periodi "
+     "dopo. Ma i due istanti sono calcolati sommando k * T in virgola mobile, "
+     "e possono differire di 1e-13: l'entrata finisce prima dell'uscita e "
+     "compare un posto in piu' che non esiste. Per questo gli eventi sono "
+     "arrotondati al microsecondo prima di essere ordinati."),
     ("p",
      "Il `max(1, ...)` finale copre il caso di una vasca attraversata senza "
      "mai sostare: zero sarebbe formalmente giusto e praticamente confondente."),
@@ -661,7 +743,10 @@ COLLISIONI = [
      "Terzo dei tre documenti su verify.py. E' il controllo 8: la distanza fra "
      "ogni coppia di carroponti, in ogni istante. E' anche l'unico controllo "
      "del progetto in cui non basta guardare il codice per capire se e' "
-     "giusto: serve un argomento."),
+     "giusto: serve un argomento. In fondo c'e' anche il controllo 10, "
+     "l'interblocco delle vasche, che fa la stessa domanda in un'altra forma: "
+     "non se due carroponti si avvicinano troppo, ma se si contendono la "
+     "stessa vasca."),
 
     # ==================================================================
     ("h2", "Il problema, prima del codice"),
@@ -750,7 +835,16 @@ COLLISIONI = [
     ("p",
      "L'accelerazione massima presente nella traiettoria: e' il termine a che "
      "entra nel limite d'errore. Si prende il MASSIMO e non una media perche' "
-     "il limite deve valere sempre, anche nel tratto peggiore. Il `default=0.0` "
+     "il limite deve valere sempre, anche nel tratto peggiore."),
+    ("q",
+     "CONTA ANCHE LA FRENATA. Il limite vuole la curvatura massima del "
+     "profilo, e su un carroponte che frena piu' forte di quanto accelera "
+     "quella sta nella rampa di frenata: per questo il massimo si prende "
+     "fra a_max e decel di ogni segmento. Guardare la sola a_max darebbe un "
+     "limite piu' piccolo del vero -- cioe', come dice il docstring, non un "
+     "limite."),
+    ("p",
+     "Il `default=0.0` "
      "copre le traiettorie fatte di sole attese, dove non c'e' nessuna "
      "cinematica: li' l'errore di campionamento e' nullo, e giustamente."),
 
@@ -856,6 +950,142 @@ COLLISIONI = [
      "-- perche' quello e' il punto in cui l'utente deve decidere: allargare "
      "la sicurezza o rivedere la geometria del carroponte sono due azioni "
      "diverse, e il numero unico non permette di scegliere."),
+
+    # ==================================================================
+    ("h2", "4. L'interblocco delle vasche"),
+    ("p",
+     "La distanza di sicurezza guarda solo DOVE sono i due carroponti, e "
+     "lascia che uno arrivi su una vasca mentre l'altro se ne sta andando, "
+     "se lo spazio basta. L'interblocco e' la regola del PLC, piu' severa: "
+     "chi deve andare in una vasca interbloccata non parte finche' il vicino "
+     "non l'ha lasciata ed e' ARRIVATO su un'altra. Qui conta che la vasca "
+     "sia libera, non che lo spazio basti."),
+    ("p",
+     "Quali vasche sono in conflitto lo decide model.vasche_in_interblocco: "
+     "la stessa vasca servita da due carroponti -- quella comune di un "
+     "confine -- e due vasche piu' vicine della distanza fra due ganci. Si "
+     "disattiva con interblocco_vasche = 0 fra i Parametri, e allora "
+     "coppie_interblocco e' vuoto e il controllo non fa niente."),
+
+    ("h3", "Prenotazione -- il tempo in cui una vasca e' impegnata"),
+    ("c", "verify.Prenotazione"),
+    ("p",
+     "La regola si traduce in un intervallo: un carroponte PRENOTA una vasca "
+     "da quando parte verso di lei a quando, ripartito, e' arrivato sulla "
+     "vasca dopo. Dentro ci sono la traslazione di andata, la fermata -- da "
+     "`arrivo` a `partenza` -- e la traslazione di uscita. Due prenotazioni "
+     "in conflitto non si devono sovrapporre."),
+    ("p",
+     "Gli istanti stanno sulla scala dei segmenti del carroponte e possono "
+     "uscire dal periodo: la prima prenotazione comincia prima dell'inizio "
+     "del giro, l'ultima finisce dopo. E' il conto della sovrapposizione, piu' "
+     "sotto, a tenere conto della periodicita'."),
+
+    ("h3", "prenotazioni -- ricavate dai segmenti"),
+    ("c", "verify.prenotazioni", None, "    traslazione_di = "),
+    ("p",
+     "La parte importante e' nell'ultima riga del docstring: e' la stessa "
+     "definizione con cui model.solve costruisce il vincolo, ma ricavata da "
+     "quello che il DISEGNO mostra e non dalle variabili del solutore. E' il "
+     "principio del modulo applicato all'interblocco: se il vincolo nel "
+     "modello fosse scritto male, ricostruire le prenotazioni dalle sue "
+     "variabili confermerebbe l'errore invece di trovarlo."),
+    ("p",
+     "vasca_in dice su quale vasca sta il carroponte a una certa quota, "
+     "confrontandola con i punti di APPROCCIO delle stazioni entro un "
+     "millimetro. Serve per i segmenti che non dichiarano una mossa -- "
+     "attese e corse a vuoto -- dove la vasca va riconosciuta dalla "
+     "posizione. Una quota che non e' di nessuna vasca da' None: e' uno "
+     "svincolo o un punto di passaggio, e chi e' li' sta ancora viaggiando."),
+    ("c", "verify.prenotazioni", "    traslazione_di = ", "    # fermate:"),
+    ("p",
+     "Prima si raccolgono le PRESENZE, cioe' gli intervalli in cui il "
+     "carroponte e' sopra una vasca. Quattro fonti, una per tipo di "
+     "segmento:"),
+    ("li", "presa, rilascio e traslazioni di cambio quota: la vasca e' quella "
+           "della mossa, la stazione k per la presa e k + 1 per il rilascio;"),
+    ("li", "il tratto a carico: un istante sulla vasca di partenza e uno su "
+           "quella di arrivo;"),
+    ("li", "un'attesa da fermo, se sta sopra una vasca;"),
+    ("li", "una corsa a vuoto: gli istanti in cui comincia o finisce su una "
+           "vasca."),
+    ("q",
+     "LE PRESENZE DI DURATA ZERO NON SONO UN DETTAGLIO. Un carroponte che "
+     "arriva su una vasca e riparte subito, senza attendere, non ha nessun "
+     "segmento fermo li' sopra: c'e' solo la fine di una traslazione e "
+     "l'inizio della successiva. Registrare quegli istanti e' l'unico modo "
+     "di vedere una sosta di zero secondi -- e il carroponte su quella vasca "
+     "c'e' passato, quindi l'ha prenotata."),
+    ("q",
+     "UNA TRASLAZIONE DI CAMBIO QUOTA APPARTIENE A PRESA O RILASCIO SECONDO "
+     "QUANDO AVVIENE. Il segmento 'quota' porta la mossa ma non dice se sta "
+     "dalla parte della presa o del rilascio. Lo dice il tempo: se finisce "
+     "prima che cominci il trasporto col pezzo della stessa mossa e' della "
+     "presa, altrimenti del rilascio. Sbagliare vorrebbe dire attribuire la "
+     "presenza alla vasca sbagliata."),
+    ("c", "verify.prenotazioni", "    # fermate:", None),
+    ("p",
+     "Poi le presenze diventano FERMATE: presenze consecutive sulla stessa "
+     "vasca si fondono in una sola, perche' in mezzo il carroponte non e' "
+     "arrivato su un'altra -- e la regola libera la vasca solo li'. Se il "
+     "giro si richiude sulla stessa vasca da cui comincia, la prima e "
+     "l'ultima fermata sono la stessa fermata a cavallo dell'inizio del "
+     "periodo, e si fondono spostando l'arrivo indietro di T."),
+    ("p",
+     "Infine ogni fermata diventa una prenotazione: comincia dove finisce la "
+     "fermata precedente e finisce dove comincia la successiva, con un T "
+     "tolto o aggiunto quando si scavalca l'inizio o la fine del giro. Con "
+     "meno di due fermate il carroponte non va da nessuna parte, e non "
+     "prenota niente."),
+    ("p",
+     "Il nome non ha il trattino basso perche' la funzione e' usata anche "
+     "fuori dal modulo: allinea_avvio.py la importa, insieme a "
+     "sovrapposizione."),
+
+    ("h3", "sovrapposizione -- due intervalli che si ripetono"),
+    ("c", "verify.sovrapposizione"),
+    ("p",
+     "Due prenotazioni si ripetono ogni T, quindi la domanda non e' se due "
+     "intervalli si sovrappongono ma se si sovrappone UNA QUALSIASI delle "
+     "loro repliche. Si prova b spostata di n periodi per ogni n che puo' "
+     "portarla a toccare a -- l'intervallo di n e' calcolato dagli estremi, "
+     "con un periodo di margine per parte -- e si tiene la sovrapposizione "
+     "piu' grande."),
+    ("p",
+     "Restituisce anche DI QUANTO e' stata spostata b, perche' il messaggio "
+     "deve dire a che istante comincia la prenotazione che entra in "
+     "conflitto. Il parametro `spostamento` serve a chi la chiama da fuori: "
+     "allinea_avvio.py la usa per provare se spostare rigidamente il giro di "
+     "un carroponte rispetto all'altro rompe l'interblocco. Il verificatore "
+     "lo lascia a zero."),
+
+    ("h3", "_check_interlock -- il controllo"),
+    ("c", "verify._check_interlock"),
+    ("p",
+     "Per ogni coppia di carroponti che ha vasche in conflitto, si "
+     "confrontano tutte le prenotazioni dell'uno con tutte quelle "
+     "dell'altro, ma solo sulle coppie di vasche che coppie_interblocco "
+     "dichiara in conflitto. Una sovrapposizione oltre time_tol e' un "
+     "errore."),
+    ("p",
+     "Come per le collisioni, si tiene solo il caso PEGGIORE per ogni coppia "
+     "di carroponti e di vasche: un giro che viola l'interblocco lo viola a "
+     "ogni ripetizione, e riportare ogni prenotazione direbbe la stessa cosa "
+     "piu' volte."),
+    ("p",
+     "Il messaggio dice chi tiene quale vasca, da quando e per quanto, di "
+     "quanto si sovrappongono, e chiude con le due vie d'uscita: chi arriva "
+     "deve aspettare che l'altro sia arrivato su un'altra vasca, oppure, se "
+     "basta la sola distanza di sicurezza, interblocco_vasche = 0 fra i "
+     "Parametri."),
+    ("q",
+     "PERCHE' NON BASTA IL CONTROLLO 8. Una soluzione puo' rispettare la "
+     "distanza minima in ogni istante e violare l'interblocco: uno arriva "
+     "sulla vasca comune mentre l'altro, ripartito, e' ancora in viaggio "
+     "verso la vasca dopo, abbastanza lontano da non toccarlo. Per la "
+     "geometria va bene; per il PLC no, e la linea si fermerebbe ad "
+     "aspettare -- cioe' girerebbe con un ciclogramma diverso da quello "
+     "calcolato."),
 ]
 
 

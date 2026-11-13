@@ -577,6 +577,18 @@ class ProblemData:
         for s in self.route:
             if s.tank_id not in self.tanks:
                 raise ValueError(f"vasca '{s.tank_id}' non definita in tanks")
+            if s.dwell_min > s.dwell_max:
+                raise ValueError(f"dwell_min > dwell_max per vasca '{s.tank_id}'")
+            if s.dwell_min < 0:
+                raise ValueError(
+                    f"dwell_min negativo per vasca '{s.tank_id}': il delta "
+                    f"negativo non puo' superare il tempo teorico"
+                )
+            if s.peso_sotto < 0 or s.peso_sopra < 0:
+                raise ValueError(
+                    f"peso dello scarto negativo per vasca '{s.tank_id}': i "
+                    f"pesi vanno da 0 (indifferente) in su"
+                )
         if self.portate is not None:
             if not self.portate:
                 raise ValueError(
@@ -596,18 +608,6 @@ class ProblemData:
                             f"la portata del carroponte {h + 1} nomina la vasca "
                             f"'{v}', che non e' definita in tanks"
                         )
-            if s.dwell_min > s.dwell_max:
-                raise ValueError(f"dwell_min > dwell_max per vasca '{s.tank_id}'")
-            if s.dwell_min < 0:
-                raise ValueError(
-                    f"dwell_min negativo per vasca '{s.tank_id}': il delta "
-                    f"negativo non puo' superare il tempo teorico"
-                )
-            if s.peso_sotto < 0 or s.peso_sopra < 0:
-                raise ValueError(
-                    f"peso dello scarto negativo per vasca '{s.tank_id}': i "
-                    f"pesi vanno da 0 (indifferente) in su"
-                )
         if self.takt_min > self.takt_max:
             raise ValueError("takt_min > takt_max")
         if self.takt_min <= 0:

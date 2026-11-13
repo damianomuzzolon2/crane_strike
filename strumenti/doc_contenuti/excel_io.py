@@ -1,7 +1,7 @@
 """
 Il testo dei documenti di excel_io.py.
 
-Ventinove fra funzioni e metodi, in tre documenti: leggere il file, generarlo,
+Cinquantadue fra funzioni e metodi, in tre documenti: leggere il file, generarlo,
 scrivere i risultati. E' il modulo che l'utente tocca davvero -- il resto del
 programma lo vede solo attraverso una finestra -- e per questo quasi ogni sua
 riga e' una decisione su come parlargli.
@@ -68,6 +68,14 @@ LETTURA = [
      "Non e' una semplificazione -- la precisione che serve avvicinandosi al "
      "telaio e' la stessa che serve avvicinandosi col telaio, perche' a "
      "imporla e' il punto di accoppiamento e non il carico appeso."),
+    ("p",
+     "In tutte e quattro le cinematiche velocita' e accelerazione sono "
+     "OBBLIGATORIE e la decelerazione e' facoltativa (vuota = frena come "
+     "accelera). Vale anche per il sollevamento, che un tempo era "
+     "facoltativo: ogni vasca dichiara la sua corsa verticale, e senza le "
+     "cinematiche di sollevamento quella corsa non ha una durata. "
+     "Dichiararle obbligatorie qui fa dire al file, con la cella, che cosa "
+     "manca, invece di scoprirlo piu' avanti."),
     ("q",
      "DUE PARAMETRI FACOLTATIVI CHE NON SONO INDIPENDENTI. La tabella sa dire "
      "'obbligatorio' o 'facoltativo' di un parametro alla volta, e non sa "
@@ -80,8 +88,29 @@ LETTURA = [
     ("h3", "I nomi vecchi, e perche' sono ancora qui"),
     ("c", "excel_io", "_INTERI = ", "@dataclass"),
     ("p",
-     "Due dizionari che non servono a leggere niente: servono a RICONOSCERE i "
-     "file di versioni precedenti e a dirlo con chiarezza."),
+     "_INTERI elenca i parametri che devono essere numeri interi: sono "
+     "conteggi (max_carroponti, max_soste_intermedie) o interruttori 0/1 "
+     "(takt_fisso, interblocco_vasche), e un 2,5 li' e' un errore di "
+     "compilazione da dire, non da troncare."),
+    ("p",
+     "RISOLUZIONE_TICK_PER_S e' un parametro che non e' piu' un parametro. "
+     "Fino a qualche versione fa stava nel foglio come "
+     "risoluzione_tick_per_s; adesso e' fissa a 100 tick al secondo, e il "
+     "commento dice perche': tutte le tolleranze del progetto (eps_seconds, il "
+     "mezzo tick della verifica) sono pensate su quel valore, e lasciarlo "
+     "cambiare da un file avrebbe voluto dire spostarle tutte insieme senza "
+     "che nessuno se ne accorga. "
+     "_NOMI_IGNORATI e' l'altra meta' della decisione: un file vecchio che ha "
+     "ancora quella riga si legge SENZA errore, e il valore scritto li' non "
+     "conta. Non c'e' niente da convertire e niente che l'utente debba fare, "
+     "quindi non c'e' niente da dirgli."),
+    ("p",
+     "PARAMETRI e VERSI_CAMBIO_QUOTA sono le stesse tabelle esposte con un "
+     "nome pubblico, per la finestra 'Dati linea', che mostra i parametri "
+     "fuori dal file e propone le due zone di cambio quota in un elenco."),
+    ("p",
+     "Gli ultimi due dizionari non servono a leggere niente: servono a "
+     "RICONOSCERE i file di versioni precedenti e a dirlo con chiarezza."),
     ("p",
      "_NOMI_IN_METRI si costruisce da solo, sostituendo '_mm' con '_m' nei "
      "nomi attuali. Il commento spiega la posta in gioco: leggere un file "
@@ -103,13 +132,22 @@ LETTURA = [
      "quindi ogni messaggio spiega anche come si converte -- con la formula e "
      "con un esempio numerico ('6 passi -> 300 mm', '15% -> 270 mm')."),
     ("p",
-     "Tre delle cinque voci raccontano lo stesso spostamento concettuale: "
+     "Tre delle sette voci raccontano lo stesso spostamento concettuale: "
      "altezza_sollevamento_mm, tempo_sgocciolamento_s e "
      "traslazione_con_gancio_basso erano proprieta' della LINEA e sono "
      "diventate proprieta' della singola VASCA. Il messaggio di quest'ultima "
      "dice anche perche' conviene -- 'i rientri che non le scavalcano non "
      "pagheranno piu' salita e discesa' -- perche' un utente che ha appena "
      "perso una riga di configurazione ha diritto di sapere cosa ci guadagna."),
+    ("p",
+     "takt_min_s e takt_max_s sono il caso opposto: non si e' spostato il "
+     "posto, si e' cambiata la forma. Il takt time adesso si dichiara come le "
+     "permanenze delle vasche -- un teorico e due tolleranze -- e il "
+     "messaggio propone due conversioni diverse degli stessi 110 e 150 "
+     "(teorico 130 con delta 20 e 20, oppure teorico 110 con delta 0 e 40), "
+     "perche' quale sia giusta dipende da quale valore si voleva davvero. "
+     "Le due voci hanno un messaggio ciascuna perche' un file vecchio puo' "
+     "averne una sola, ma la spiegazione sta in una."),
 
     # ==================================================================
     ("h2", "1. I mattoni"),
@@ -196,17 +234,24 @@ LETTURA = [
      "L'ordine e' quello delle dipendenze: le vasche prima del percorso, "
      "perche' il percorso le nomina. I tre fogli facoltativi -- Zone, "
      "CambioQuota, Ciclogramma -- si leggono solo se ci sono, e la loro "
-     "assenza non e' un errore."),
+     "assenza non e' un errore. Il quarto, Passaggi, si legge solo se c'e' "
+     "anche un ciclogramma da attaccargli: dei punti di passaggio senza il "
+     "ciclogramma a cui appartengono non saprebbero dove andare."),
     ("p",
      "Poi un solleva_se_presenti: da qui in avanti si costruiscono gli "
      "oggetti, e costruirli con dati mancanti darebbe eccezioni tecniche al "
      "posto dei messaggi utili gia' raccolti."),
     ("c", "excel_io._leggi_libro", "    def _kin_sollevamento", None),
     ("p",
-     "_kin_sollevamento restituisce None se manca uno dei due valori. Le "
-     "cinematiche di sollevamento sono facoltative: una linea senza "
-     "movimentazione verticale non ha motivo di dichiararle, e None e' il modo "
-     "in cui ProblemData sa che non ci sono."),
+     "_kin_sollevamento legge velocita' e accelerazione con par[...] e non "
+     "con par.get: sono obbligatorie, e se mancavano il solleva_se_presenti "
+     "qui sopra si e' gia' fermato con il messaggio giusto. La sola "
+     "decelerazione resta facoltativa, e None li' vuol dire 'frena come "
+     "accelera' -- non 'niente sollevamento'."),
+    ("p",
+     "La risoluzione temporale non viene dal file: time_scale riceve la "
+     "costante RISOLUZIONE_TICK_PER_S, anche se il file porta ancora la "
+     "vecchia riga risoluzione_tick_per_s."),
     ("q",
      "L'ULTIMO try/except E' IL PIU' INTERESSANTE. ProblemData ha le sue "
      "validazioni, e sono gia' scritte per un umano. Qui non si riscrive il "
@@ -218,7 +263,7 @@ LETTURA = [
     ("h2", "3. Le vasche"),
     ("c", "excel_io._leggi_vasche", None, "        svincoli = {}"),
     ("p",
-     "Una riga per vasca, otto colonne. Le righe senza id si SALTANO: cosi' si "
+     "Una riga per vasca, undici colonne. Le righe senza id si SALTANO: cosi' si "
      "puo' lasciare una riga vuota per separare gruppi di vasche, che e' quello "
      "che si fa naturalmente su un foglio lungo."),
     ("p",
@@ -260,20 +305,29 @@ LETTURA = [
      "insieme prima di costruire il problema."),
     ("c", "excel_io._leggi_vasche", "        # Se il gancio SCARICO", None),
     ("p",
-     "In coda si leggono `larghezza_mm` e `altezza_mm`, le due colonne che "
-     "servono solo a disegnare la simulazione. Vuote non sono un difetto e non "
-     "producono nessun messaggio: di parecchie linee il disegno non ce l'ha "
-     "nessuno, e il calcolo non le usa comunque. Scritte male si': un testo in "
-     "quelle celle viene segnalato come in tutte le altre."),
+     "La colonna H, con valore predefinito 1: il gancio scarico puo' passare "
+     "basso sopra questa vasca. Il commento dice perche' il predefinito e' "
+     "quello -- 'e' come sono fatte quasi tutte' -- e quindi la colonna si "
+     "compila solo dove c'e' davvero un ostacolo."),
     ("p",
-     "L'ultima colonna, con valore predefinito 1: il gancio scarico puo' "
-     "passare basso sopra questa vasca. Il commento dice perche' il "
-     "predefinito e' quello -- 'e' come sono fatte quasi tutte' -- e quindi la "
-     "colonna si compila solo dove c'e' davvero un ostacolo."),
+     "Poi `larghezza_mm` e `altezza_mm`, le due colonne che servono solo a "
+     "disegnare la simulazione. Vuote non sono un difetto e non producono "
+     "nessun messaggio: di parecchie linee il disegno non ce l'ha nessuno, e "
+     "il calcolo non le usa comunque. Scritte male si': un testo in quelle "
+     "celle viene segnalato come in tutte le altre."),
+    ("p",
+     "L'ultima colonna, `cover_presente`, dice se la vasca ha un coperchio. "
+     "Non cambia il ciclogramma: serve al programma dei carri, che sopra una "
+     "vasca coperta apre il coperchio prima di scendere e lo richiude dopo "
+     "essere risalito. Il predefinito e' 0, al contrario del gancio basso, "
+     "perche' e' 0 il caso comune -- la colonna si compila solo sulle vasche "
+     "coperte -- e perche' cosi' un file scritto prima che la colonna "
+     "esistesse si legge esattamente com'era."),
     ("p",
      "I due `continue` finali sono la rete: se anche un solo valore "
-     "obbligatorio manca, la vasca non si costruisce. L'errore e' gia' stato "
-     "registrato da _numero."),
+     "obbligatorio manca, o il gancio basso o il coperchio sono scritti male, "
+     "la vasca non si costruisce. L'errore e' gia' stato registrato da "
+     "_numero."),
 
     # ==================================================================
     ("h2", "4. Il percorso"),
@@ -296,8 +350,47 @@ LETTURA = [
      "controllo per tutte le righe successive, aggiungendo errori inventati a "
      "uno vero."),
     ("p",
-     "Il controllo dmin > dmax e' l'unico vincolo di coerenza fra due celle di "
-     "questo foglio, ed e' quello che intercetta l'inversione piu' comune."),
+     "Ogni tappa si dichiara con un tempo TEORICO e due tolleranze, il delta "
+     "negativo e il delta positivo: la finestra di processo e' teorico meno "
+     "il primo, teorico piu' il secondo, e a costruirla e' "
+     "StationSpec.da_teorico. I due delta sono AMPIEZZE, e il commento dice "
+     "cosa succederebbe senza il controllo sul segno: chi scrive '-15' "
+     "pensando 'quindici in meno' otterrebbe una finestra rovesciata, senza "
+     "nessun messaggio. Il controllo dneg > teorico intercetta l'altro modo di "
+     "rompere la finestra, una soglia minima negativa."),
+    ("p",
+     "Le ultime due colonne sono i pesi dello scarto dal teorico, sotto e "
+     "sopra: quanto conta, per il calcolo, allontanarsi dalla ricetta da un "
+     "lato o dall'altro. Li legge _peso_scarto, piu' sotto."),
+    ("c", "excel_io._percorso_vecchio_formato"),
+    ("p",
+     "I file compilati prima del passaggio al tempo teorico hanno in C e D la "
+     "permanenza minima e la massima. Si riconoscono da una parola "
+     "nell'intestazione ('min') e si leggono lo stesso, col ramo "
+     "`vecchio_formato` di _leggi_percorso: chi ha gia' descritto una linea "
+     "non deve ricompilarla. In quel ramo il solo vincolo fra due celle e' "
+     "dmin > dmax, che intercetta l'inversione piu' comune."),
+    ("q",
+     "IL FORMATO SI RICONOSCE DAI TITOLI, NON DAI NUMERI. In C e D ci sono "
+     "numeri in tutti e due i formati, e una coppia come 60 e 90 e' "
+     "plausibile sia come minimo e massimo sia come teorico e delta. Solo "
+     "l'intestazione dice quale dei due e'. La stessa funzione la usa "
+     "righe_da_file, che per un Percorso vecchio rinuncia a mostrare le "
+     "tabelle invece di metterci colonne che vogliono dire un'altra cosa."),
+    ("c", "excel_io._peso_scarto"),
+    ("p",
+     "Un peso vuoto vale 1, cioe' tutte le tappe contano uguale: e' il modo "
+     "in cui un file che non ha le colonne dei pesi si legge com'era. Due "
+     "rifiuti, ciascuno col suo perche'. Un peso negativo non ha senso -- "
+     "premierebbe l'allontanarsi dalla ricetta -- e il messaggio dice da dove "
+     "partono i pesi validi: da 0, 'scarto indifferente'."),
+    ("q",
+     "UN PESO PICCOLO CHE DIVENTA ZERO. Il solutore lavora con pesi interi, "
+     "moltiplicati per model.SCALA_PESI: un 0,001 arrotondato fa 0, e un "
+     "peso che l'utente voleva solo piccolo diventerebbe 'indifferente' "
+     "senza che nessuno l'abbia chiesto. Il messaggio non si ferma al "
+     "rifiuto, e indica la strada giusta: conta solo il RAPPORTO fra i pesi, "
+     "quindi per far contare poco una tappa si alzano le altre."),
 
     # ==================================================================
     ("h2", "5. I parametri"),
@@ -315,17 +408,43 @@ LETTURA = [
      "primo."),
     ("p",
      "L'ordine dei controlli nella prima passata non e' indifferente: prima i "
-     "nomi in metri, poi i sostituiti, poi il generico 'non riconosciuto'. Ogni "
-     "caso specifico deve essere intercettato PRIMA di quello generico, "
-     "altrimenti il messaggio utile non verrebbe mai emesso."),
+     "nomi in metri, poi quelli da ignorare (_NOMI_IGNORATI), poi i "
+     "sostituiti, poi il generico 'non riconosciuto'. Ogni caso specifico "
+     "deve essere intercettato PRIMA di quello generico, altrimenti il "
+     "messaggio utile non verrebbe mai emesso -- o, per risoluzione_tick_per_s, "
+     "un file vecchio perfettamente buono verrebbe rifiutato."),
     ("p",
      "Da notare la distinzione fra riga assente e riga presente ma vuota: per "
      "un parametro facoltativo valgono entrambe il predefinito, ma il codice le "
      "tratta separatamente perche' per un parametro obbligatorio la prima e' "
      "'assente' e la seconda produce un 'valore mancante' con la cella."),
+    ("p",
+     "In coda, due controlli che riguardano il VALORE e non la presenza: "
+     "quelli del takt time, in una funzione a parte, e quello sui due "
+     "interruttori takt_fisso e interblocco_vasche, che valgono 0 oppure 1 e "
+     "nient'altro. Un 2 sarebbe letto come 'vero' da bool() senza che "
+     "nessuno sappia cosa intendeva chi l'ha scritto."),
+    ("c", "excel_io._controlla_takt"),
+    ("p",
+     "Il takt time si dichiara come le permanenze delle vasche -- un teorico "
+     "e due ampiezze -- e i controlli sono gli stessi del foglio Percorso, "
+     "per la stessa ragione: un delta col segno meno rovescerebbe la banda "
+     "senza dirlo. In piu' c'e' il teorico che deve essere positivo, e il "
+     "delta negativo che non deve arrivare al teorico, perche' il ciclo "
+     "minimo verrebbe nullo o negativo."),
+    ("p",
+     "La chiusura `cella` serve a una cosa sola: citare nel messaggio la "
+     "riga in cui il parametro sta DAVVERO, presa da `grezzi`. I parametri "
+     "non hanno una riga fissa -- il foglio si puo' riordinare, e una riga "
+     "si puo' cancellare -- quindi la cella va cercata, e se il parametro "
+     "non c'e' resta solo la colonna, 'B'."),
+    ("p",
+     "Se uno dei tre valori manca o non si legge, la funzione non controlla "
+     "niente: l'errore e' gia' stato scritto, e confrontare un None con un "
+     "numero darebbe solo un'eccezione tecnica al posto del messaggio utile."),
 
     # ==================================================================
-    ("h2", "6. I tre fogli facoltativi"),
+    ("h2", "6. I fogli facoltativi"),
     ("c", "excel_io._leggi_zone"),
     ("p",
      "Il foglio Zone non dice quali mosse fa ciascun carroponte, ma FIN DOVE "
@@ -421,6 +540,44 @@ LETTURA = [
      "I carroponti sono numerati DA 1 nel file e da 0 nel programma. La "
      "conversione avviene qui (c - 1) e il controllo c < 1 intercetta chi ha "
      "scritto 0 pensando alla numerazione interna."),
+    ("p",
+     "Le due colonne della sosta per strada -- in quale vasca il carroponte "
+     "si ferma durante il rientro a vuoto, e per quanto -- vanno insieme: una "
+     "sola non dice niente, e una riga con una sola delle due e' un errore. "
+     "Tutte e due vuote vuol dire 'rientro diritto'. Per questo la lettura "
+     "restituisce un dizionario `soste` vuoto e non None: al contrario delle "
+     "attese, qui non c'e' una regola predefinita a cui delegare la scelta, e "
+     "vuoto e' gia' una risposta."),
+    ("c", "excel_io._stazione_di"),
+    ("p",
+     "La sosta si scrive col NOME della vasca, che e' quello che si legge "
+     "senza contare le righe del Percorso, mentre il programma la vuole come "
+     "indice di tappa. Questa funzione fa la traduzione, e None vuol dire che "
+     "la vasca non e' nel percorso: il carroponte non ci passa, e il "
+     "messaggio lo dice cosi'."),
+    ("p",
+     "Restituisce la PRIMA tappa e non 'quella giusta', e il docstring "
+     "spiega perche' non serve di piu': se una vasca compare due volte nella "
+     "ricetta, le due tappe stanno nello stesso punto della rotaia, e per "
+     "dire dove un carroponte resta fermo sono la stessa cosa."),
+
+    ("h3", "Il foglio Passaggi"),
+    ("c", "excel_io._leggi_passaggi"),
+    ("p",
+     "I punti di passaggio messi a mano sul grafico: istante, posizione e, "
+     "facoltativo, il carroponte che ci deve passare. Il docstring spiega "
+     "perche' stanno in un foglio a parte e non in una colonna del "
+     "Ciclogramma: non appartengono a una MOSSA. Sono punti che l'utente ha "
+     "messo dove voleva, e a quale rientro tocchino lo si ricalcola ogni "
+     "volta (model.assegna_passaggi). Rileggerli esattamente come erano "
+     "stati scritti e' l'unico modo perche' tornino uguali anche dopo aver "
+     "cambiato un tempo in vasca."),
+    ("p",
+     "Le regole sono quelle del resto del modulo. Una riga del tutto vuota si "
+     "salta; tempo e posizione sono obbligatori; il carroponte vuoto vuol "
+     "dire 'punto di nessuno', e se c'e' e' numerato da 1 nel file e da 0 nel "
+     "programma, con lo stesso controllo del foglio Ciclogramma per chi "
+     "scrive 0."),
 ]
 
 
@@ -460,6 +617,23 @@ MODELLO = [
      "Carico e scarico hanno corsa 0 e sgocciolamento 0, col commento che "
      "spiega perche': non sono bagni."),
     ("p",
+     "Il Percorso porta anche i pesi dello scarto, e il commento dice la "
+     "scelta: la zincatura, il bagno che fa il prodotto, pesa piu' dei "
+     "risciacqui (10 sotto e 3 sopra contro 1 e 1), e stare sotto il teorico "
+     "pesa piu' che starci sopra. E' il modo di far vedere a cosa servono "
+     "quelle due colonne senza doverlo spiegare."),
+    ("p",
+     "Nei Parametri: takt time teorico 300 s con 30 s di tolleranza per parte, traslazione a "
+     "500 mm/s con 200 mm/s^2 sia a vuoto sia col pezzo, sollevamento a "
+     "350 mm/s con 150 mm/s^2, ingombri asimmetrici (1660 e 620 mm). I "
+     "parametri della ricerca sono scritti uguali ai predefiniti -- takt_fisso "
+     "1, max_soste_intermedie 2, max_carroponti 10, "
+     "tempo_limite_per_tentativo_s 120 -- e scritti invece che lasciati "
+     "vuoti: chi apre il modello vede che ci sono e con che valore parte. "
+     "Le misure del pezzo restano vuote, e il commento "
+     "dice perche': servono solo alla simulazione, che finche' nessuno le "
+     "compila disegna il pezzo di una misura convenzionale."),
+    ("p",
      "La linea d'esempio non ha zone di cambio quota, e il commento dice che "
      "il foglio nasce comunque, vuoto e con le sole intestazioni, 'cosi' si "
      "vede che c'e' e cosa vorrebbe'. Un foglio facoltativo che non compare "
@@ -485,6 +659,15 @@ MODELLO = [
      "lettura, e devono restare d'accordo -- e' esattamente la coppia di punti "
      "in cui e' nato il difetto che il controllo delle colonne scambiate, nel "
      "primo documento, serve a diagnosticare."),
+    ("p",
+     "Fra i parametri manca risoluzione_tick_per_s, che non e' piu' un "
+     "parametro: e' fissa nel programma, e riscriverla nel file farebbe "
+     "credere che cambiarla serva a qualcosa. Le cinematiche di sollevamento "
+     "passano per la chiusura `cinematica`, che restituisce None quando "
+     "l'intera cinematica manca: dal file sono obbligatorie, ma in "
+     "ProblemData il campo resta facoltativo, e una linea costruita nel "
+     "codice puo' non averle. In quel caso la cella esce vuota, e sara' la "
+     "rilettura a dire che manca."),
 
     ("h3", "Le due porte d'ingresso"),
     ("c", "excel_io.scrivi_modello"),
@@ -523,7 +706,38 @@ MODELLO = [
      "salvato cosi' avrebbe i numeri come testo. Le colonne di testo "
      "(_COLONNE_DI_TESTO) restano testo: una vasca che si chiama '10' non deve "
      "diventare il numero 10."),
+    ("c", "excel_io.RigheLinea._argomenti"),
+    ("p",
+     "Il ponte fra le tabelle e il generatore del file: le stesse cinque "
+     "tabelle, nell'ordine e nella forma che _aggiungi_fogli_linea si "
+     "aspetta. L'unica traduzione e' sulle due tabelle facoltative: nella "
+     "finestra Zone e CambioQuota senza righe sono liste vuote, mentre il "
+     "generatore 'nessuna tabella' lo dice con None, come la sua firma e come "
+     "_righe_esempio. In tutti e due i casi il foglio nasce con la nota "
+     "'Vuoto = ...' al posto dei dati."),
     ("h3", "Da dove arrivano le tabelle"),
+    ("c", "excel_io._righe"),
+    ("p",
+     "Il generatore del file e la finestra parlano di righe in due forme "
+     "diverse: il primo le vuole come tuple, pronte da appendere a un "
+     "foglio, la seconda come liste, perche' le modifica cella per cella. "
+     "_righe fa la conversione una volta sola, copiando: la finestra puo' "
+     "modificare quello che riceve senza toccare la linea da cui viene. Zone "
+     "e CambioQuota assenti diventano liste vuote, cioe' tabelle senza righe."),
+    ("c", "excel_io.righe_esempio"),
+    ("c", "excel_io.righe_da_configurazione"),
+    ("p",
+     "Due funzioni di una riga, ed e' il punto: le tabelle della finestra "
+     "escono dalle STESSE funzioni che scrivono i file, _righe_esempio e "
+     "_righe_da_configurazione. La linea d'esempio che si vede nella "
+     "finestra e' quindi per costruzione quella del modello Excel, e una "
+     "linea gia' letta si mostra con gli stessi valori con cui verrebbe "
+     "risalvata."),
+    ("p",
+     "righe_da_configurazione e' anche il ripiego dell'interfaccia quando "
+     "righe_da_file non puo' rispondere (il Percorso del vecchio formato, "
+     "qui sotto): i valori sono gia' interpretati -- una cella 'posti' vuota "
+     "e' diventata 1 -- ma la linea si vede e si puo' correggere."),
     ("c", "excel_io.righe_da_file"),
     ("p",
      "Legge le CELLE, non i valori interpretati: una cella 'posti' vuota resta "
@@ -569,16 +783,35 @@ MODELLO = [
      "lettore la legge come un valore. Il foglio Istruzioni e' l'unico posto "
      "in cui si puo' scrivere in italiano senza rischi."),
     ("p",
-     "Il resto della funzione -- circa trecento righe -- e' la costruzione dei "
-     "sei fogli, foglio per foglio: intestazioni, dati, larghezze, note in "
-     "corsivo. E' codice ripetitivo per natura e si legge dall'alto in basso "
-     "come si legge il file che produce."),
+     "Il resto della funzione -- circa seicento righe, quasi tutte testo del "
+     "foglio Istruzioni -- e' la costruzione dei sei fogli fissi, foglio per "
+     "foglio: Istruzioni, Vasche, Percorso, Parametri, Zone, CambioQuota. "
+     "Intestazioni, dati, larghezze, note in corsivo: e' codice ripetitivo "
+     "per natura e si legge dall'alto in basso come si legge il file che "
+     "produce. Il foglio Parametri ha una riga per OGNI voce di _PARAMETRI, "
+     "anche se vuota, e alla descrizione dei facoltativi aggiunge il "
+     "predefinito: cosi' il file elenca da solo tutto quello che si puo' "
+     "dichiarare."),
+    ("p",
+     "Zone e CambioQuota nascono sempre, anche vuoti, con una nota che dice "
+     "cosa vuol dire lasciarli cosi'. La nota sta in una colonna FUORI da "
+     "quelle lette (la D per Zone, la G per CambioQuota), per la stessa "
+     "ragione per cui le spiegazioni stanno nelle Istruzioni."),
+    ("p",
+     "In coda, solo per una linea salvata, i fogli Ciclogramma e Passaggi. Il "
+     "secondo nasce soltanto se ci sono punti di passaggio, e il commento "
+     "dice perche': un foglio vuoto in piu' in ogni file non direbbe niente a "
+     "nessuno. I punti si scrivono ordinati per istante e posizione, col "
+     "carroponte numerato da 1 e con tutte le cifre, per lo stesso motivo "
+     "per cui non si tagliano nel Ciclogramma."),
 
     ("h3", "Il foglio Ciclogramma"),
     ("c", "excel_io._scrivi_foglio_ciclogramma"),
     ("p",
-     "Tre gradi di liberta' e nient'altro. Il docstring lo dice in modo "
-     "netto: non si scrivono gli istanti di prelievo ne' le traiettorie, "
+     "I gradi di liberta' e nient'altro: takt time, tempo in vasca di ogni "
+     "tappa, chi fa ogni trasporto, e dove ogni carroponte passa il tempo "
+     "morto (l'attesa dopo la consegna e l'eventuale sosta in una vasca in "
+     "mezzo). Il docstring lo dice in modo netto: non si scrivono gli istanti di prelievo ne' le traiettorie, "
      "perche' sono CONSEGUENZE, e riscriverle vorrebbe dire poterle rileggere "
      "in contrasto con quello da cui derivano."),
     ("q",
@@ -640,10 +873,14 @@ RISULTATI = [
     # ==================================================================
     ("h2", "Un file, due meta'"),
     ("p",
-     "Il file dei risultati contiene dodici fogli in due gruppi. Prima la "
-     "LINEA nel formato di ingresso, col ciclogramma dentro, cosi' lo stesso "
-     "file si riapre con 'Apri linea...' e il lavoro riprende da dov'era. Poi "
-     "il REFERTO: Riepilogo, Movimenti, TempiVerticali, FlussoPezzo, Verifica."),
+     "Il file dei risultati contiene quindici fogli in due gruppi, ciascuno "
+     "aperto da un cartello. Prima la LINEA (cartello Input) nel formato di "
+     "ingresso, col ciclogramma dentro: Istruzioni, Vasche, Percorso, "
+     "Parametri, Zone, CambioQuota, Ciclogramma, piu' Passaggi quando ci sono "
+     "punti di passaggio. Cosi' lo stesso file si riapre con 'Apri linea...' "
+     "e il lavoro riprende da dov'era. Poi il REFERTO (cartello Output): "
+     "Riepilogo, Movimenti, SequenzaCarri, TempiVerticali, FlussoPezzo, "
+     "Verifica."),
     ("p",
      "L'ordine e' quello in cui le cose sono successe -- si parte da una linea "
      "e se ne ricava un risultato -- ma il file si APRE sul Riepilogo, che e' "
@@ -695,12 +932,53 @@ RISULTATI = [
      "rientro a vuoto va dall'arrivo alla partenza della mossa SUCCESSIVA "
      "nell'ordine di visita."),
     ("p",
-     "L'ultimo caso -- l'attesa -- e' l'unico risolto guardando la POSIZIONE "
-     "invece della struttura: un'attesa puo' stare prima o dopo il rientro, e "
-     "si sceglie la stazione la cui posizione coincide con quella del tratto. "
+     "Il rientro a vuoto e l'attesa sono i due casi risolti guardando la "
+     "POSIZIONE invece della struttura, e per la stessa ragione: la sosta in "
+     "una vasca in mezzo. Con una sosta il rientro e' spezzato in due, e una "
+     "delle due estremita' di ciascun pezzo e' la vasca dove il carroponte si "
+     "e' fermato, che la struttura della mossa non conosce."),
+    ("p",
+     "Per l'attesa si provano prima i due estremi del rientro, che sono il "
+     "caso normale, e poi TUTTE le stazioni. Il commento dice cosa "
+     "succederebbe senza il secondo giro: la sosta in mezzo verrebbe "
+     "attribuita alla vasca di consegna, cioe' scritta nel posto sbagliato. "
      "Il valore di ripiego, se nessuna coincide, e' la stazione di arrivo "
      "della mossa appena finita."),
+    ("c", "excel_io._stazione_in_posizione"),
+    ("p",
+     "La ricerca per posizione del rientro a vuoto. Confronta con "
+     "approach_position e non con la posizione della vasca: con una zona di "
+     "cambio quota il rientro finisce al punto di cambio quota, non sopra la "
+     "stazione, ed e' li' che va cercato. Se in quel punto non c'e' nessuna "
+     "tappa -- e' il caso degli svincoli, che stanno fra le vasche -- "
+     "restituisce `altrimenti`, cioe' l'estremo dell'arco, e il commento in "
+     "_righe_movimenti dice che e' proprio quello che si vuole: un tratto "
+     "che passa da uno svincolo resta attribuito alle vasche fra cui viaggia."),
 
+    ("c", "excel_io._scrivi_sequenza_carri"),
+    ("p",
+     "Il foglio SequenzaCarri e' l'unico del referto che non e' fatto per "
+     "essere letto da una persona: e' il programma di ogni carro nel formato "
+     "delle tabelle del PLC, da incollare nel progetto cosi' com'e'. Per "
+     "questo ha una forma rigida -- un blocco di tre colonne per carro, con "
+     "una colonna vuota fra un blocco e l'altro, e cinque righe per passo: "
+     "il passo, poi command, param1, param2 e param3 -- e non porta "
+     "nient'altro in mezzo. Le spiegazioni, quando servono, stanno in "
+     "corsivo sotto l'ultimo passo, dove un copia-e-incolla del blocco non "
+     "le prende."),
+    ("p",
+     "Qui non si decide niente: i passi li calcola programma_carri, e questa "
+     "funzione li impagina. E' la stessa divisione del resto del modulo -- "
+     "excel_io scrive, la logica sta altrove -- e vuol dire che il programma "
+     "si puo' provare senza aprire un file Excel."),
+    ("q",
+     "IL PASSO 1 DIPENDE DALL'AVVIO. Il programma comincia dall'istante di "
+     "avvio scritto nel Riepilogo, se in quell'istante il carro e' fermo in "
+     "posizione bassa, altrimenti dal primo istante dopo in cui lo e'. "
+     "scrivi_risultati passa a questa funzione lo STESSO `avvio` che scrive "
+     "nel Riepilogo, ed e' questo che tiene d'accordo i due fogli: un carro "
+     "lasciato dove dice il Riepilogo riparte dal suo passo 1. La prima nota "
+     "sotto la tabella lo ripete, con l'istante."),
     ("c", "excel_io._utilizzo_carroponti"),
     ("p",
      "Una riga che risponde a una domanda che l'utente si pone sempre: quanto "
@@ -720,7 +998,7 @@ RISULTATI = [
      "guarda quando si cerca un foglio."),
     ("c", "excel_io._cartello"),
     ("p",
-     "Un foglio che non contiene dati: dice cosa viene dopo. Con dodici "
+     "Un foglio che non contiene dati: dice cosa viene dopo. Con quindici "
      "linguette di fila non si capisce dove finisce la linea e comincia il "
      "referto, e un cartello colorato lo si vede senza leggere niente."),
     ("q",
@@ -730,7 +1008,8 @@ RISULTATI = [
      "si aggiunge o si toglie un foglio, e un indice che mente e' peggio di "
      "nessun indice. La descrizione di ciascun foglio viene da _COSA_CONTIENE, "
      "e un foglio non elencato li' compare comunque, con la descrizione vuota: "
-     "si perde una spiegazione, non una riga."),
+     "si perde una spiegazione, non una riga. E' quello che succede oggi a "
+     "Passaggi, che in _COSA_CONTIENE non c'e'."),
     ("p",
      "Il cartello nasce in coda al gruppo e viene poi spostato davanti con "
      "move_sheet e un offset negativo. E' l'unico modo per sapere quali fogli "
@@ -745,16 +1024,22 @@ RISULTATI = [
      "file sarebbero due cose da tenere insieme e da non perdere."),
     ("c", "excel_io.scrivi_risultati", "    # -- prima la linea", "    def tabella"),
     ("p",
-     "La linea si riscrive solo se sono stati passati cfg e ciclogramma. "
-     "Senza, il file dei risultati e' solo un referto -- e non si riapre. E' "
-     "il motivo per cui sia l'interfaccia sia il comando da terminale li "
-     "passano sempre."),
+     "La linea si riscrive solo se e' stato passato cfg, e il foglio "
+     "Ciclogramma solo se c'e' anche il ciclogramma. Senza cfg il file dei "
+     "risultati e' solo un referto, senza cartelli -- e non si riapre. E' il "
+     "motivo per cui sia il salvataggio dall'interfaccia sia il comando da "
+     "terminale passano tutti e due."),
+    ("p",
+     "La linea si scrive con `dataclasses.replace(cfg, data=data)`: i dati "
+     "della configurazione, ma con il ProblemData che e' stato davvero "
+     "risolto. Il referto descrive quel ProblemData, e la linea che sta "
+     "nello stesso file deve essere la stessa."),
     ("c", "excel_io.scrivi_risultati", "    def tabella", "    # -- Riepilogo"),
     ("p",
      "`tabella` e' l'equivalente di `prepara` per i fogli del referto, con in "
      "piu' i formati numerici per colonna. Averla come chiusura locale invece "
      "che come funzione del modulo tiene vicino il codice a chi lo usa: e' "
-     "chiamata cinque volte, tutte dentro questa funzione."),
+     "chiamata quattro volte, tutte dentro questa funzione."),
     ("c", "excel_io.scrivi_risultati", "    # -- Riepilogo", "    # -- Movimenti"),
     ("p",
      "Il Riepilogo e' il foglio su cui il file si apre, e la sua struttura e' "
@@ -766,6 +1051,31 @@ RISULTATI = [
      "titolo di gruppo e una riga. Il risultato e' che il corpo del Riepilogo "
      "si legge come un elenco di cosa contiene, invece che come codice di "
      "formattazione."),
+    ("q",
+     "LO SCARTO DEL RIEPILOGO NON E' PESATO. Il calcolo rende minimo lo "
+     "scarto PESATO dai tempi teorici, ma nel Riepilogo va lo scarto SENZA "
+     "pesi (model.scarto_totale): la somma dei valori assoluti, in secondi. "
+     "Il motivo e' che il pesato si misura in secondi per peso, e non si "
+     "legge come una durata -- chi apre il foglio vuole sapere quanti "
+     "secondi di distacco dalla ricetta ci sono davvero. Il pesato non "
+     "sparisce: sta riga per riga in FlussoPezzo, accanto ai pesi che lo "
+     "producono. La voce si scrive con tutti e due gli obiettivi, perche' "
+     "anche col takt time libero lo scarto e' stato reso minimo, a parita' "
+     "di takt."),
+    ("p",
+     "Subito dopo la produzione viene il punto di avvio: dove portare a mano "
+     "i carroponti prima di dare il via, e in che istante del ciclo si "
+     "trovano cosi'. Il commento spiega la posizione: e' l'unica cosa del "
+     "Riepilogo che non descrive il ciclogramma ma dice come USARLO, e chi "
+     "legge il foglio per mettere in marcia la linea trova prima il takt "
+     "time e poi da dove partire. Se la finestra non ne passa uno, si prende "
+     "il primo che trova_avvio propone."),
+    ("p",
+     "Poi sicurezza (con le vasche interbloccate, 'la prima cosa da sapere "
+     "davanti a un takt time piu' alto del previsto'), movimentazione "
+     "verticale, esito della verifica, la tabella dei carroponti con il loro "
+     "utilizzo e, solo se ce ne sono, le soste durante il rientro a vuoto: "
+     "si vedrebbero anche in Movimenti, ma li' bisogna saperle cercare."),
     ("c", "excel_io.scrivi_risultati", "    # -- Tempi verticali", "    # -- Flusso del pezzo"),
     ("p",
      "Il foglio TempiVerticali risponde alla domanda 'dove va il tempo di "
@@ -786,8 +1096,14 @@ RISULTATI = [
      "una minoranza dei lettori; metterli sopra allontanerebbe dal primo "
      "schermo i tre dati che interessano tutti."),
     ("p",
-     "In fondo i due cartelli, creati per ultimi perche' devono elencare fogli "
-     "che a quel punto esistono tutti."),
+     "Fra i dettagli c'e' anche la risoluzione temporale, in tick al secondo: "
+     "non si sceglie piu' dal file, e il valore scritto qui e' sempre la "
+     "costante RISOLUZIONE_TICK_PER_S."),
+    ("p",
+     "In fondo il cartello Output, creato per ultimo perche' deve elencare "
+     "fogli che a quel punto esistono tutti; quello Input e' stato messo "
+     "subito dopo i fogli della linea, per la stessa ragione. Infine il file "
+     "viene fatto aprire sul Riepilogo, che non e' piu' il primo foglio."),
 ]
 
 

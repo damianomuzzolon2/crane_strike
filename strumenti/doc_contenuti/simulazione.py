@@ -1,7 +1,7 @@
 """
 Il testo dei documenti di simulazione.py.
 
-Sessantasette fra funzioni e metodi, in tre documenti che seguono la divisione
+Settantadue fra funzioni e metodi, in tre documenti che seguono la divisione
 del modulo: cosa c'e' da sapere, chi lo sa dire, chi lo disegna.
 """
 
@@ -53,6 +53,10 @@ MODELLO = [
      "devono voler dire una cosa sola, di quale carroponte si tratta. E' la "
      "stessa disciplina di plotting.py, dove l'arcobaleno per tipo di tratto "
      "e' stato tolto."),
+    ("p",
+     "_ALFA_FUORI_PERCORSO e' l'opacita' delle vasche che stanno sulla linea "
+     "ma che la ricetta non usa: si disegnano, ma sbiadite. Il perche' e' nel "
+     "terzo documento, con la scena fissa."),
 
     # ==================================================================
     ("h2", "1. Le strutture"),
@@ -517,8 +521,8 @@ FINESTRA = [
     ("p",
      "Gli oggetti grafici di un carroponte, creati UNA volta e poi spostati. "
      "E' la scelta che rende l'animazione fluida: ridisegnare tutto a ogni "
-     "fotogramma con matplotlib e' troppo lento per venti fotogrammi al "
-     "secondo, mentre spostare gli oggetti esistenti no."),
+     "fotogramma con matplotlib e' troppo lento per venticinque fotogrammi al "
+     "secondo (PASSO_MS = 40), mentre spostare gli oggetti esistenti no."),
     ("c", "simulazione.FinestraSimulazione", None, "    def __init__"),
     ("q",
      "PERCHE' UNA FINESTRA A SE'. Il docstring lo dice: la simulazione si "
@@ -532,6 +536,20 @@ FINESTRA = [
      "velocita' parte da 1x: e' la velocita' reale, ed e' quella con cui si "
      "capisce se un movimento e' plausibile -- una simulazione accelerata "
      "rende tutto convincente."),
+    ("p",
+     "Il logo IMEL si legge dal file UNA volta sola, qui, e si tiene in "
+     "self._logo: la scena si ricostruisce a ogni aggiornamento del "
+     "ciclogramma, e rileggere ogni volta lo stesso PNG sarebbe lavoro buttato. "
+     "Se il file non si legge, self._logo resta None e la simulazione si apre "
+     "lo stesso, senza logo: un'immagine decorativa non e' un motivo per "
+     "rifiutarsi di mostrare la linea."),
+    ("q",
+     "IL TEMPO NON PARTE DA ZERO. self.t_avvio e' il punto di avvio scelto "
+     "nella finestra principale, ed e' da li' che la simulazione parte e li' "
+     "che torna 'Torna all'inizio'. Il commento ne da' la ragione: lo 0 del "
+     "ciclogramma e' solo l'origine dei tempi, non un istante in cui "
+     "l'impianto si accende, e partire da li' farebbe vedere la linea da un "
+     "punto che nessuno ha scelto."),
     ("c", "simulazione.FinestraSimulazione.aggiorna"),
     ("p",
      "Rilegge il ciclogramma. Si chiama anche mentre la finestra e' aperta: "
@@ -539,6 +557,39 @@ FINESTRA = [
      "senza doverla chiudere e riaprire. E' la ragione per cui la scena si "
      "ricostruisce da zero invece di essere creata una volta sola nel "
      "costruttore."),
+    ("p",
+     "Insieme al ciclogramma riceve `avvio_t`, l'istante di avvio dentro il "
+     "ciclo (None se non c'e', e allora si parte da 0), e lo passa a "
+     "_imposta_avvio: se e' cambiato, la simulazione ci salta, perche' il "
+     "punto di avvio nuovo e' quello che si vuole guardare."),
+    ("q",
+     "PRIMA SI COSTRUISCE, POI SI SOSTITUISCE. La Simulazione nuova si crea in "
+     "una variabile locale e solo dopo prende il posto di quella vecchia: se "
+     "il ciclogramma nuovo non e' simulabile, l'eccezione arriva prima che la "
+     "finestra abbia toccato qualcosa, e la finestra resta su quello di prima "
+     "invece di trovarsi con i dati nuovi e la simulazione vecchia."),
+    ("c", "simulazione.FinestraSimulazione._metti_logo"),
+    ("p",
+     "Il logo IMEL sulla riga del titolo, allineato al bordo sinistro del "
+     "disegno: e' dove sta anche nel PNG del ciclogramma (plotting.aggiungi_logo "
+     "usa lo stesso file, PERCORSO_LOGO), cosi' le due viste si riconoscono "
+     "come parti dello stesso strumento. L'altezza e' fissata a circa 15 "
+     "punti, qualunque sia la risoluzione dell'immagine: lo zoom si ricava "
+     "dal numero di righe di pixel."),
+    ("p",
+     "E' un AnnotationBbox ancorato all'angolo in alto a sinistra degli ASSI, "
+     "non della figura: quando la finestra cambia misura gli assi si spostano "
+     "e il logo li segue senza che nessuno debba ricalcolarne la posizione. Lo "
+     "spostamento di 5 punti a destra lo mette in riga con la legenda, e i "
+     "6 + 5 in verticale lo centrano sulla riga del titolo, che sta 6 punti "
+     "sopra gli assi ed e' alta circa 10."),
+    ("q",
+     "VA RIMESSO DOPO OGNI assi.clear(). Essendo un oggetto degli assi, "
+     "_prepara_scena lo cancella insieme a tutto il resto; per questo lo si "
+     "aggiunge li', subito dopo il titolo, e non una volta sola nel "
+     "costruttore. E' anche ESCLUSO dal tight_layout (set_in_layout(False)): "
+     "sta nella fascia che il titolo riserva gia', e lasciandolo dentro il "
+     "calcolo dei margini li allargherebbe per niente."),
 
     # ==================================================================
     ("h2", "3. _prepara_scena -- quello che non si muove"),
@@ -550,6 +601,19 @@ FINESTRA = [
      "grande della linea: l'altezza del telaio, il bordo delle vasche, il "
      "franco sopra la rotaia. Cosi' il disegno resta proporzionato sia su una "
      "linea con corse di 800 mm sia su una con corse di 3 metri."),
+    ("p",
+     "Le posizioni da disegnare non sono solo quelle del percorso. Le vasche "
+     "dichiarate ma che la ricetta non usa stanno comunque sulla linea, e il "
+     "carroponte ci passa sopra: si aggiungono anche loro, e le loro posizioni "
+     "si annotano in posizioni_fuori_percorso, che il resto della scena usa "
+     "per disegnarle SBIADITE (_ALFA_FUORI_PERCORSO), etichetta compresa. "
+     "Senza, il disegno mostrava dei buchi dove nel capannone c'e' una vasca."),
+    ("q",
+     "FUORI PERCORSO CONTA LA POSIZIONE, NON LA VASCA. Una vasca inutilizzata "
+     "che sta alla stessa quota di una usata aggiunge solo il suo nome "
+     "all'etichetta; sbiadita viene solo una posizione in cui il percorso non "
+     "si ferma MAI. Altrimenti si spegnerebbe una vasca in cui i pezzi "
+     "entrano davvero."),
     ("p",
      "Dove la linea le DICHIARA, pero', si usano le misure vere: la larghezza "
      "di ogni vasca (`Tank.larghezza`), la larghezza del pezzo e il rapporto "
@@ -598,6 +662,11 @@ FINESTRA = [
      "dentro la postazione, funi che ci passano attraverso -- si sarebbe "
      "ripresentato su qualunque postazione con una rulliera piu' bassa. Ora e' "
      "una regola sola per tutti i casi."),
+    ("p",
+     "Una posizione fuori percorso si disegna da vasca anche se nessuna tappa "
+     "ci si immerge -- nessuna tappa ci si ferma proprio -- ma con vasca e "
+     "bagno trasparenti, e SENZA il pelo libero mosso: quell'onda farebbe "
+     "sembrare la vasca in uso, che e' proprio quello che non e'."),
     ("c", "simulazione.FinestraSimulazione._misura_il_pezzo"),
     ("p",
      "Il telaio e' un MARKER e non un rettangolo in coordinate della linea: "
@@ -611,6 +680,16 @@ FINESTRA = [
      "in verticale -- e un marker e' un simbolo unico: la larghezza in punti "
      "da' la DIMENSIONE del marker, e il rapporto fra le due misure da' la "
      "FORMA, schiacciando i vertici del simbolo in verticale."),
+    ("q",
+     "MATPLOTLIB NORMALIZZA I SIMBOLI FATTI A MANO. Prima di moltiplicarlo "
+     "per la dimensione, scala il simbolo perche' la sua coordinata piu' "
+     "grande in valore assoluto valga 0,5. Finche' il telaio e' piu' largo "
+     "che alto sullo schermo la coordinata piu' grande e' il mezzo telaio "
+     "orizzontale e non cambia niente; quando e' piu' alto che largo -- la "
+     "linea vista intera, venti metri in mille pixel -- la piu' grande e' "
+     "l'altezza, e il simbolo veniva rimpicciolito di quel rapporto: un "
+     "puntino in una vasca vuota. Per questo la dimensione si gonfia di "
+     "max(1, 2 * verticale)."),
     ("p",
      "Si rifa' ogni volta che la scala puo' essere cambiata: a scena finita, "
      "a ogni ridimensionamento della finestra (_ridimensionata) e a ogni "
@@ -646,8 +725,11 @@ FINESTRA = [
      "        # -- pezzi", None),
     ("p",
      "Carroponti e pezzi sono gli oggetti che si muovono: si creano qui e si "
-     "spostano a ogni fotogramma. Il numero di pezzi da creare e' il massimo "
-     "che possono essere contemporaneamente in linea."),
+     "spostano a ogni fotogramma. Un _Carro per carroponte; i pezzi invece "
+     "sono UN oggetto solo, una Line2D senza linea che ripete il simbolo del "
+     "telaio in ogni punto, e a ogni fotogramma riceve le coordinate di "
+     "tutti i pezzi in linea. Quanti siano non importa: non c'e' niente da "
+     "creare in anticipo."),
     ("c", "simulazione.FinestraSimulazione._crea_carro"),
     ("c", "simulazione.FinestraSimulazione._posiziona_carro"),
     ("c", "simulazione._percorso_telaio"),
@@ -662,11 +744,42 @@ FINESTRA = [
     ("h2", "4. I comandi"),
     ("c", "simulazione.FinestraSimulazione.avvia_o_ferma"),
     ("c", "simulazione.FinestraSimulazione.da_capo"),
+    ("p",
+     "'Torna all'inizio' torna al punto di AVVIO, non a zero: e' l'istante "
+     "da cui la simulazione e' partita, ed e' quello che si vuole rivedere."),
+    ("c", "simulazione.FinestraSimulazione._imposta_avvio"),
+    ("p",
+     "Memorizza l'istante di avvio e, se e' cambiato, ci porta anche il tempo "
+     "corrente; restituisce True in quel caso, cosi' chi la chiama sa se c'e' "
+     "da ridisegnare. Se l'avvio non e' cambiato non si tocca niente: "
+     "aggiorna la chiama a ogni modifica del ciclogramma, e riportare "
+     "indietro il tempo a ogni ritocco farebbe perdere l'istante che si stava "
+     "guardando."),
+    ("q",
+     "IL MODULO SULLA DURATA. L'istante si riporta dentro il giro con "
+     "`% self.sim.durata`. Il docstring spiega perche' non si perde niente: "
+     "la durata e' un numero INTERO di takt, e l'istante di avvio sta in "
+     "[0, T), quindi e' sempre dentro il giro. La tolleranza di 1e-9 sul "
+     "confronto evita di contare come 'cambiato' un avvio che differisce solo "
+     "per un arrotondamento."),
+    ("c", "simulazione.FinestraSimulazione.imposta_avvio"),
+    ("p",
+     "La versione pubblica, che la finestra principale chiama quando l'utente "
+     "sposta il punto di avvio senza cambiare il ciclogramma. Proprio perche' "
+     "il ciclogramma e' lo stesso, non serve passare da aggiorna e "
+     "ricostruire la scena: basta saltare all'istante nuovo e ridisegnare un "
+     "fotogramma. Il controllo su self.sim copre il caso di una finestra la "
+     "cui simulazione non c'e' ancora."),
     ("c", "simulazione.FinestraSimulazione._fotogramma"),
     ("p",
      "Di quanti secondi di simulazione avanza un fotogramma: dipende dalla "
      "velocita' scelta e dalla frequenza di aggiornamento. E' l'unico punto in "
-     "cui la velocita' entra, ed e' giusto che sia uno solo."),
+     "cui la velocita' entra, ed e' giusto che sia uno solo: lo usano sia "
+     "l'animazione sia i pulsanti di passo, e il docstring spiega perche' "
+     "deve essere cosi' -- 'un fotogramma' premendo Avanti dev'essere "
+     "esattamente il salto che la riproduzione farebbe da sola, altrimenti "
+     "passo a passo e andatura normale mostrerebbero due sequenze diverse. La "
+     "stessa manopola regola quindi anche la finezza del passo."),
     ("c", "simulazione.FinestraSimulazione.avanti"),
     ("c", "simulazione.FinestraSimulazione.indietro"),
     ("c", "simulazione.FinestraSimulazione._passo"),
@@ -716,6 +829,11 @@ FINESTRA = [
      "bilancino anche dopo il rimappaggio. E' facile che una funzione di "
      "rimappaggio sia coerente per il gancio e non per il pezzo."),
     ("c", "simulazione.FinestraSimulazione._titolo"),
+    ("p",
+     "Il titolo dice a che istante si e' e su quanti takt gira la "
+     "simulazione; se c'e' un punto di avvio diverso da zero lo dice "
+     "anche, perche' altrimenti una riproduzione che non parte da 0 "
+     "sembrerebbe un errore."),
     ("c", "simulazione.FinestraSimulazione._descrizione"),
     ("p",
      "Il testo che accompagna il fotogramma: quale carroponte sta facendo "
@@ -724,11 +842,18 @@ FINESTRA = [
      "dedurlo."),
     ("c", "simulazione.FinestraSimulazione.destroy"),
     ("p",
-     "La chiusura ferma il timer e libera la figura matplotlib. Non e' "
-     "formalita': un timer che continua a scattare su una finestra distrutta "
-     "solleva eccezioni a raffica, e una figura non liberata resta in memoria "
-     "-- e queste finestre si aprono e si chiudono molte volte in una "
+     "La chiusura ferma i due timer -- quello dell'animazione e quello della "
+     "raffica -- e solo dopo distrugge la tela. Non e' formalita': un timer "
+     "che continua a scattare su una finestra distrutta solleva eccezioni a "
+     "raffica, e queste finestre si aprono e si chiudono molte volte in una "
      "sessione di lavoro."),
+    ("q",
+     "IL RIDISEGNO IN CODA SI LASCIA FINIRE. draw_idle non disegna subito: "
+     "lascia un ridisegno in coda che scatta appena Tk e' libero. Chiudendo "
+     "la finestra subito dopo un passo, quel ridisegno si sveglierebbe su una "
+     "tela che non esiste piu' e finirebbe nel gestore degli errori di sfondo "
+     "-- invisibile in un eseguibile senza console, ma pur sempre un errore. "
+     "update_idletasks lo fa finire adesso, che tutto e' ancora in piedi."),
 ]
 
 

@@ -93,6 +93,14 @@ RIGA_PER_RIGA = [
      "e' una proprieta' calcolata e non un campo: e' la somma di quelli dei "
      "singoli, e tenerlo come dato indipendente vorrebbe dire poterlo avere "
      "diverso dai suoi addendi."),
+    ("p",
+     "`indice` e `totale` dicono che posto occupa fra gli istanti "
+     "equivalenti, nell'ordine in cui li restituisce `trova_avvii`: per primo "
+     "quello con piu' margine, poi gli altri in ordine di tempo lungo il giro. "
+     "`margine` e' proprio quel margine: per quanti secondi, prima e dopo "
+     "l'istante, TUTTI i carroponti restano a riposo -- il lato piu' stretto "
+     "del carroponte piu' stretto. Vale zero per un istante che dura un attimo "
+     "e per un avvio approssimato."),
 
     # ==================================================================
     ("h2", "2. Le finestre di riposo"),
@@ -137,6 +145,15 @@ RIGA_PER_RIGA = [
      "trasla, o che lo tiene a una quota diversa dal fondo chiude la finestra. "
      "Il fondo si prende da `corsa_verticale` della stazione, non da una "
      "costante: ogni vasca ha la sua."),
+    ("q",
+     "ZERO E NONE SONO DUE RISPOSTE DIVERSE. Zero vuol dire che il gancio e' "
+     "fermo in fondo per UN ISTANTE soltanto -- un aggancio di 0 s: il "
+     "carroponte arriva sopra la vasca e comincia subito a sollevare -- e "
+     "quell'istante e' un punto di avvio buono, perche' li' il carroponte si "
+     "puo' lasciare. None vuol dire che all'estremo della presa o del "
+     "rilascio il gancio NON e' fermo in fondo nemmeno per un istante. Per "
+     "questo `quanto` parte da None e diventa un numero alla prima fase che "
+     "va, anche se dura zero."),
 
     ("h3", "finestre_di_riposo -- la lettura dei segmenti"),
     ("c", "avvio.finestre_di_riposo"),
@@ -157,6 +174,13 @@ RIGA_PER_RIGA = [
      "(plotting.eventi_del_trasporto) e la simulazione, e per la stessa ragione: "
      "il tratto a carico c'e' sempre ed e' uno solo per mossa, mentre presa e "
      "rilascio possono essere spezzati in piu' tratti."),
+    ("p",
+     "Una testa o una coda si aggiunge quando `_coda_ferma_in_basso` non "
+     "risponde None, anche se risponde zero; e nel filtro che segue una "
+     "finestra lunga zero si tiene, e si scarta solo una con la fine prima "
+     "dell'inizio. E' l'istante in cui il carroponte arriva e solleva subito "
+     "(o rilascia e riparte subito): fermo in basso per un attimo, e per "
+     "l'avvio un attimo basta."),
     ("p",
      "In fondo le finestre adiacenti si fondono. Un rilascio che finisce, lo "
      "sgancio, e l'attesa che segue sono un unico tratto di tempo in cui il "
@@ -220,6 +244,11 @@ RIGA_PER_RIGA = [
      "rientra dentro la prima: in quel caso sono la stessa finestra vista da "
      "due parti. Il `min(b, a + T)` alla fine impedisce che una finestra lunga "
      "piu' di un periodo si avvolga su se stessa."),
+    ("p",
+     "La durata si limita fra zero e T, ma una finestra lunga zero non si "
+     "scarta: resta un punto, `(a, a)`, e conta come riposo esattamente come "
+     "una finestra larga -- per lo stesso motivo per cui la tiene "
+     "`finestre_di_riposo`."),
 
     ("h3", "_distanza -- quanto manca"),
     ("c", "avvio._distanza"),
@@ -239,7 +268,9 @@ RIGA_PER_RIGA = [
      "Di quanto si puo' arretrare e di quanto si puo' avanzare partendo da t "
      "senza uscire dalla finestra che lo contiene. E' il MARGINE del carroponte "
      "su quell'istante, e serve a scegliere, fra tutti gli istanti buoni, quello "
-     "che ne lascia il piu' possibile da entrambe le parti."),
+     "che ne lascia il piu' possibile da entrambe le parti. Dallo stesso conto "
+     "esce anche il `margine` di ogni Avvio, che decide quale proporre per "
+     "primo (sezione 5)."),
 
     # ==================================================================
     ("h2", "5. La ricerca degli istanti"),
@@ -293,6 +324,24 @@ RIGA_PER_RIGA = [
      "carroponti. Se invece l'errore non e' zero si tiene il PRIMO, che e' la "
      "regola dichiarata: a pari errore, il primo istante."),
     ("p",
+     "Insieme all'istante si tiene il suo MARGINE. Centrato, l'istante ha "
+     "davanti e dietro lo stesso spazio, `(dietro + avanti) / 2`; nel caso "
+     "approssimato il margine resta zero."),
+    ("p",
+     "Poi l'ORDINE della lista. Gli istanti si mettono in ordine di tempo, e "
+     "la lista si fa ruotare in modo che cominci da quello con piu' margine: "
+     "gli altri seguono nel loro ordine naturale, girando, cosi' il pulsante "
+     "li scorre come si scorre il giro. Il margine si confronta a meno della "
+     "tolleranza: due tratti larghi uguali differiscono solo per "
+     "arrotondamenti, e allora vince il primo nel ciclo."),
+    ("q",
+     "IL PRIMO DEV'ESSERE IL PIU' COMODO. E' quello che finisce nel file dei "
+     "risultati, sul terminale e nel grafico, ed e' quello che la finestra "
+     "mostra appena calcolato. Un istante lungo un attimo -- un carroponte che "
+     "arriva sopra una vasca e solleva subito -- e' un avvio esatto, ma senza "
+     "margine ne' prima ne' dopo: se c'e' un tratto in cui tutti restano fermi "
+     "per secondi, si propone quello."),
+    ("p",
      "I carroponti senza nessuna finestra restano fuori dal confronto e vengono "
      "segnalati con `mai`: nessun istante li accontenterebbe, e farli pesare "
      "sull'errore aggiungerebbe la stessa costante a ogni candidato senza "
@@ -300,18 +349,21 @@ RIGA_PER_RIGA = [
     ("q",
      "PERCHE' TUTTI E NON UNO SOLO. All'errore minimo ci arriva quasi sempre "
      "piu' di un tratto del ciclo, e sono tratti lontani fra loro: sulla linea "
-     "d'esempio sono CINQUE, uno per ogni coppia di vasche in cui i due "
-     "carroponti si trovano fermi insieme. Sono equivalenti, e sceglierne uno "
+     "d'esempio sono TRE. Sono equivalenti, e sceglierne uno "
      "sarebbe una decisione che questo modulo non ha gli elementi per prendere: "
      "quale convenga davvero dipende dall'impianto -- da dove si entra, dove si "
      "vuole il pezzo quando si riparte. Si restituiscono tutti, e nella finestra "
-     "si scorrono col pulsante 'Avvio'."),
+     "si scorrono col pulsante 'Avvio'. L'unica preferenza che il modulo si "
+     "prende e' quella dell'ordine: per primo il piu' largo."),
 
     ("h3", "trova_avvio -- il primo"),
     ("c", "avvio.trova_avvio"),
     ("p",
-     "Tre righe sopra `trova_avvii`. E' quello che si scrive quando non c'e' "
-     "nessuno a scegliere: il foglio Riepilogo, il PNG da riga di comando. "
+     "Tre righe sopra `trova_avvii`: il primo della lista, cioe' quello con "
+     "piu' margine. E' quello che si scrive quando non c'e' nessuno a "
+     "scegliere: il foglio Riepilogo, il PNG e il terminale di ciclogramma.py. "
+     "Lo usa anche allinea_avvio.py, per sapere se il punto di avvio e' gia' "
+     "esatto e se lo e' diventato dopo lo spostamento dei giri. "
      "L'interfaccia invece passa a `plot_cyclogram` e a `scrivi_risultati` "
      "l'istante che l'utente sta guardando -- il file e l'immagine che escono "
      "insieme devono dire quello che ha davanti, non un altro."),
@@ -336,6 +388,12 @@ RIGA_PER_RIGA = [
      "`carri` traduce l'indice di ZONA nel numero di CARROPONTE da mostrare, "
      "come nella simulazione: in un ciclogramma composto a meta' le zone vengono "
      "riempite per continuita' e i due numeri divergono."),
+    ("p",
+     "Quando gli istanti equivalenti sono piu' d'uno, la nota dell'istante "
+     "dice quale si sta leggendo e quanti sono ('il 1o di 5 istanti "
+     "equivalenti'). Va detto qui e non solo sul pulsante che li scorre: chi "
+     "legge il foglio dei risultati o il terminale il pulsante non ce l'ha, e "
+     "crederebbe che l'istante scritto sia l'unico possibile."),
     ("p",
      "Il caso `avvio is None` non salta la riga, la scrive dicendo che non e' "
      "calcolabile. Una sezione che sparisce senza spiegazione fa pensare a una "

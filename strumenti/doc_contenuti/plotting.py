@@ -1,7 +1,7 @@
 """
 Il testo dei documenti di plotting.py.
 
-Nove funzioni, ma il modulo e' interessante piu' per le scelte di
+Una dozzina di funzioni, ma il modulo e' interessante piu' per le scelte di
 disegno che per il codice: buona parte dei suoi commenti racconta cose che
 sono state PROVATE e tolte. Questo documento le riprende, perche' sono la
 parte che non si ricava rileggendo il codice.
@@ -86,7 +86,7 @@ RIGA_PER_RIGA = [
      "excel_io.py e simulazione.py."),
 
     ("h3", "Quali tratti sono davvero traslazioni"),
-    ("c", "plotting", "# I tratti in cui il carroponte trasla", "def _sample_segment"),
+    ("c", "plotting", "# I tratti in cui il carroponte trasla", "def cartella_risorse"),
     ("p",
      "_KINEMATIC_KINDS elenca i tre soli tipi in cui il carroponte si sposta "
      "lungo la rotaia. Presa, rilascio, attesa e corse verticali del gancio "
@@ -169,6 +169,33 @@ RIGA_PER_RIGA = [
      "scomposizione che usa il modello CP-SAT per calcolare la durata della "
      "presa. Se le fasi cambiano, il punto si sposta da solo: non c'e' una "
      "seconda descrizione della presa da tenere allineata."),
+
+    ("h3", "inizio_sgocciolamento -- dove finisce la salita"),
+    ("c", "plotting.inizio_sgocciolamento"),
+    ("p",
+     "Il punto in cui il sollevamento del telaio finisce e comincia lo "
+     "sgocciolamento. Sul ciclogramma tutta la presa e' un tratto piatto: "
+     "la salita ha la sua freccia, ma senza un punto alla fine non si "
+     "vedrebbe dove smette di salire e dove il telaio resta sospeso a "
+     "sgocciolare. E' l'unico cambio di fase marcato oltre ai quattro di "
+     "eventi_del_trasporto (vedi il paragrafo 4)."),
+    ("p",
+     "Il conto e' lo stesso di _aggancio_dall_inizio_presa: si sommano le "
+     "durate delle fasi di pick_phases() finche' non si arriva a quella "
+     "chiamata 'sgocciolamento'. Qui pero' si parte da inizio_presa, che il "
+     "chiamante passa, e si restituisce gia' l'istante assoluto, insieme "
+     "alla posizione."),
+    ("p",
+     "La posizione e' quella della fase quando la fase la dichiara, e "
+     "altrimenti quella della stazione: la stessa regola di corse_verticali. "
+     "Con una zona di cambio quota il telaio sgocciola sopra la stazione, "
+     "prima di tornare al punto di cambio quota, e il punto va li'."),
+    ("q",
+     "NONE QUANDO LA VASCA NON SGOCCIOLA. Con uno sgocciolamento di durata "
+     "zero non c'e' niente da separare: il punto cadrebbe sulla partenza, "
+     "che ha gia' il suo, o a meta' di un altro movimento. La funzione "
+     "restituisce None anche se fra le fasi uno sgocciolamento non c'e' "
+     "affatto, e il chiamante non disegna niente."),
 
     ("h3", "eventi_del_trasporto -- l'unica definizione dei punti"),
     ("c", "plotting.eventi_del_trasporto"),
@@ -333,16 +360,26 @@ RIGA_PER_RIGA = [
     ("p",
      "Il commento lungo sopra questo blocco e' il piu' istruttivo del modulo, "
      "perche' spiega cosa NON si e' fatto. Marcare ogni cambio di fase -- fine "
-     "discesa, fine aggancio, fine sollevamento, fine sgocciolamento -- "
-     "avrebbe riempito la linea di punti fino a non vedere piu' niente. Usare "
+     "discesa, fine aggancio, fine sgocciolamento -- avrebbe riempito la "
+     "linea di punti fino a non vedere piu' niente. Usare "
      "simboli diversi per l'aggancio e per la partenza avrebbe chiesto "
      "all'occhio di leggere una differenza che il disegno mostra gia' da "
      "solo: se li' la linea diventa obliqua il carroponte parte, se resta "
      "piatta il telaio cambia mano."),
     ("p",
-     "Restano quattro punti per trasporto: aggancio, sgancio, partenza e "
-     "arrivo di ogni traslazione. Tutti con lo stesso simbolo e senza voce in "
-     "legenda."),
+     "Restano quattro punti per trasporto -- aggancio, sgancio, partenza e "
+     "arrivo di ogni traslazione -- piu' uno: la FINE DEL SOLLEVAMENTO, da "
+     "inizio_sgocciolamento. E' l'unica eccezione alla regola, e il commento "
+     "dice perche': sul tratto piatto della presa separa la salita, che ha "
+     "la freccia, dallo sgocciolamento, e senza quel punto i due tratti "
+     "sarebbero indistinguibili. Se la vasca non sgocciola il punto non c'e'. "
+     "Tutti con lo stesso simbolo e senza voce in legenda."),
+    ("q",
+     "IL QUINTO PUNTO E' SOLO DEL CICLOGRAMMA. eventi_del_trasporto, che "
+     "usano anche i disegni del pettine, ne restituisce sempre quattro; la "
+     "fine del sollevamento la aggiunge plot_cyclogram chiamando a parte "
+     "inizio_sgocciolamento. Chi volesse lo stesso punto sui giri del "
+     "pettine deve aggiungerlo anche li'."),
     ("p",
      "In fondo al blocco si preparano anche le FRECCE delle corse verticali, "
      "da corse_verticali, divise per verso. Anche loro senza voce in legenda: "
@@ -359,7 +396,8 @@ RIGA_PER_RIGA = [
      "trasporto. Prendendo i tratti di presa uno per uno, i punti si "
      "moltiplicherebbero. Da li' si risale all'inizio della presa "
      "sottraendo pick_time_at(k), e si chiedono i quattro istanti a "
-     "eventi_del_trasporto."),
+     "eventi_del_trasporto. Lo stesso inizio_presa, tenuto in una variabile, "
+     "va poi a inizio_sgocciolamento."),
     ("p",
      "Il secondo ramo -- `elif` -- marca gli estremi delle traslazioni che NON "
      "sono il trasporto: il rientro a vuoto e il vai-e-torna di una zona di "
@@ -472,12 +510,53 @@ RIGA_PER_RIGA = [
      "e' il contenitore a decidere i margini, e forzarli qui darebbe un "
      "risultato peggiore."),
     ("p",
+     "Subito dopo, e solo per il PNG, il logo IMEL: lo mette aggiungi_logo, "
+     "spiegata qui sotto. Sul ciclogramma a schermo il logo non c'e'."),
+    ("p",
      "Il valore restituito dipende da chi ha creato la figura. Se l'ha creata "
      "questa funzione (ax era None) restituisce la FIGURA, che e' quello che "
      "serve per salvarla o mostrarla; se gliel'hanno passata, restituisce "
      "l'ASSE, perche' la figura e' gia' di chi l'ha fatta. E' una piccola "
      "asimmetria, ma e' quella che permette allo stesso codice di servire sia "
      "il comando da terminale sia la finestra."),
+
+    ("h3", "Il logo sul PNG: cartella_risorse e aggiungi_logo"),
+    ("c", "plotting", "def cartella_risorse", "def aggiungi_logo"),
+    ("p",
+     "Il logo e' un file, risorse/logo_imel.png, e la prima cosa e' "
+     "trovarlo. Accanto al modulo, quando si lancia il sorgente; dentro "
+     "sys._MEIPASS, quando gira l'eseguibile fatto con PyInstaller, che "
+     "scompatta i file del pacchetto in una cartella sua. getattr con il "
+     "valore di riserva sceglie fra i due senza un if."),
+    ("p",
+     "PERCORSO_LOGO e' calcolato una volta, al caricamento del modulo, e lo "
+     "importa anche simulazione.py per il logo della sua finestra: il file e' "
+     "uno, e il posto dove cercarlo e' scritto in un punto solo."),
+    ("c", "plotting.aggiungi_logo"),
+    ("p",
+     "Il logo va in alto a sinistra, nella fascia sopra gli assi dove sta "
+     "anche il titolo. Il titolo e' centrato, quindi i due non si coprono."),
+    ("q",
+     "VA CHIAMATA DOPO tight_layout. Il logo sta su assi propri, aggiunti "
+     "con fig.add_axes, che tight_layout non sa sistemare; e la posizione si "
+     "calcola da dove sono finiti gli assi del grafico, che prima di "
+     "tight_layout non e' ancora quella definitiva. E' una funzione a se' "
+     "perche' la usa anche interfaccia.py, che salva il PNG su una figura "
+     "sua senza passare da save_path: li' si chiama tight_layout e poi "
+     "aggiungi_logo, nello stesso ordine."),
+    ("p",
+     "La fascia che lascia tight_layout basta appena per il titolo. Se e' "
+     "meno di 0.6 pollici la si allarga abbassando il bordo superiore degli "
+     "assi (subplots_adjust), e poi si rilegge la posizione. Il logo e' alto "
+     "il 70% della fascia e centrato in verticale dentro di essa; la "
+     "larghezza si ricava dall'altezza tenendo conto di due rapporti -- "
+     "quello della figura, perche' le coordinate sono frazioni della figura "
+     "e non pollici, e quello dell'immagine -- cosi' il logo non esce "
+     "schiacciato. Gli assi del logo hanno un'etichetta propria e niente "
+     "tacche ne' bordi (axis('off'))."),
+    ("p",
+     "Se il file non si legge, la funzione esce senza dire niente: un logo "
+     "che manca non deve impedire di salvare il ciclogramma."),
 ]
 
 DOCUMENTI = [
