@@ -45,10 +45,12 @@ create_cyclograms/
   test/        i test e l'esempio d'uso in codice
   strumenti/   compila_nuitka.py, costruisci_exe.py e la ricetta PyInstaller,
                genera_utente.py, genera_doc.py con i testi in doc_contenuti/,
-               cattura_schermate.py e genera_manuale_operatore.py
+               cattura_schermate.py, genera_manuale_operatore.py e
+               genera_manuale_excel.py
   risorse/     icona.png, icona.ico (ricavata dalla prima) e logo_imel.png
   doc/         i documenti Word riga per riga, uno o piu' per modulo, il
-               manuale operatore e le immagini di questo README
+               manuale operatore, il manuale di compilazione dell'Excel e
+               le immagini di questo README
   dati/        la linea d'esempio (linea.xlsx) e l'immagine dei suoi risultati
   .github/     la CI: i test girano scrivendo "check" in una pull request
 ```
@@ -123,7 +125,8 @@ OR-Tools installato.
 | `strumenti/cranestrike.spec` | — | La ricetta per PyInstaller: cosa includere, cosa escludere, come impacchettare. Non si lancia a mano, la usa `costruisci_exe.py`. |
 | `strumenti/genera_doc.py` | 681 | Produce i documenti Word in `doc/`: la spiegazione riga per riga di ogni modulo e l'albero delle chiamate. Il codice citato **non e' ricopiato**, viene estratto dal sorgente per nome a ogni generazione. Vedi *La documentazione in `doc/`*. |
 | `strumenti/cattura_schermate.py` | 293 | Apre davvero l'interfaccia sulla linea d'esempio, la pilota da codice e **fotografa ogni pagina** per il manuale operatore (in `doc/manuale_operatore/img/`). Solo Windows; durante la cattura non toccare mouse e tastiera. Vedi *La documentazione in `doc/`*. |
-| `strumenti/genera_manuale_operatore.py` | 927 | Scrive il **manuale operatore** (`doc/manuale_operatore/manuale_operatore.docx`) dalle schermate catturate: figure annotate, ritagli e testo, che sta nella lista `CONTENUTO` del file. |
+| `strumenti/genera_manuale_operatore.py` | 939 | Scrive il **manuale operatore** (`doc/manuale_operatore/manuale_operatore.docx`) dalle schermate catturate: figure annotate, ritagli e testo, che sta nella lista `CONTENUTO` del file. |
+| `strumenti/genera_manuale_excel.py` | 1429 | Scrive il **manuale di compilazione del file Excel** (`doc/manuale_excel/manuale_compilazione_excel.docx`): i fogli disegnati dal modello vero, gli schemi di ogni parametro disegnati con matplotlib e il testo in `contenuto()`. Non apre il programma. |
 | `strumenti/genera_utente.py` | 58 | Chiede nome e password di una persona da abilitare e stampa la voce da incollare in `UTENTI` di `accesso.py`. Vedi *Utenti e password*. |
 | `CraneStrike.bat` | — | Avvia l'interfaccia con un doppio clic, senza aprire il terminale. |
 
@@ -1382,8 +1385,8 @@ pagina e finestra (accesso, finestra principale, Dati linea, Fattibilita',
 Simulazione), i colori del verdetto e le procedure passo per passo. **Non**
 spiega come si compila la linea: della finestra `Dati linea` mostra le
 schermate e dice che ci sono dati da compilare, ma il significato di colonne e
-parametri sta in un documento a parte (e in *Come modellare il tuo caso*, qui
-sotto).
+parametri sta nel manuale di compilazione dell'Excel, qui sotto (e in *Come
+modellare il tuo caso*).
 
 Le figure sono **schermate vere**, prese dal programma che gira sulla linea
 d'esempio, non disegni. Quando l'interfaccia cambia si rifanno:
@@ -1406,6 +1409,34 @@ schermo. Il testo del manuale sta nella lista `CONTENUTO` di
 alla lista `PULSANTI` dello stesso file, che decide la numerazione della
 figura annotata. L'indice del documento e' un campo di Word: si aggiorna con
 F9 dopo averlo aperto.
+
+### Il manuale di compilazione dell'Excel
+
+`doc/manuale_excel/manuale_compilazione_excel.docx` spiega, foglio per foglio
+e colonna per colonna, **cosa scrivere nel file della linea e che cosa
+rappresenta sull'impianto**: posizioni, corse, sgocciolamento, svincoli,
+permanenze e pesi, takt time, profili di velocita', ingombri, zone e cambio
+quota, ciascuno con uno schema. Chiude con gli errori di compilazione piu'
+frequenti e una lista di controllo.
+
+```bash
+python strumenti/genera_manuale_excel.py       # figure + documento Word
+```
+
+Non serve aprire il programma: le immagini dei fogli si ricavano dal modello
+che scrive `excel_io.scrivi_modello` (quindi colonne e valori d'esempio sono
+sempre quelli veri), gli schemi sono disegnati da codice e il messaggio
+d'errore d'esempio si ottiene facendo leggere un file sbagliato apposta. Le
+due schermate della finestra `Dati linea` si prendono da
+`doc/manuale_operatore/img/`, e l'impaginazione e' quella del manuale
+operatore. Quando si aggiunge una colonna o un parametro si aggiorna il testo
+in `contenuto()` e si rilancia; la tabella riassuntiva dei parametri si
+compone da sola da `excel_io.PARAMETRI`.
+
+| percorso | contenuto |
+| --- | --- |
+| `doc/manuale_excel/img/` | i fogli Excel disegnati e gli schemi dei parametri |
+| `doc/manuale_excel/manuale_compilazione_excel.docx` | il manuale |
 
 ## Creare l'eseguibile per PC senza Python
 
