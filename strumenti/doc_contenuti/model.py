@@ -320,15 +320,12 @@ STRUTTURE = [
      "quella massima di sollevamento -- 'non e' un avvicinamento, e' un "
      "refuso'. Seguono le misure di solo disegno (larghezza e altezza delle "
      "vasche e del pezzo), rifiutate solo se zero o negative."),
-    ("q",
-     "UN BLOCCO RIENTRATO UN LIVELLO DI TROPPO. I controlli sulle "
-     "permanenze -- dwell_min non oltre dwell_max, dwell_min non negativo, "
-     "pesi non negativi -- stanno nel codice DENTRO `if self.portate is not "
-     "None`, dopo il ciclo sulle portate, e usano la variabile `s` rimasta "
-     "dall'ultimo giro del ciclo sul percorso. Cosi' come sono scritti "
-     "scattano solo quando le portate sono dichiarate, e guardano solo "
-     "l'ultima tappa. Chi legge il blocco deve saperlo: un dwell_min "
-     "negativo su una tappa in mezzo non viene fermato qui."),
+    ("p",
+     "Le permanenze si controllano tappa per tappa, nello stesso ciclo che "
+     "verifica che la vasca esista: dwell_min non oltre dwell_max, dwell_min "
+     "non negativo (il delta negativo non puo' superare il tempo teorico), e "
+     "pesi dello scarto non negativi. Valgono per ogni tappa del percorso, "
+     "che le portate siano dichiarate o no."),
     ("p",
      "L'ultimo controllo del blocco e' di natura diversa: se qualche vasca ha "
      "una corsa verticale, kin_lift_loaded diventa obbligatoria. E il "
