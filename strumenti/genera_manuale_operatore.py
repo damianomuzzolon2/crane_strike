@@ -155,6 +155,217 @@ def prepara_immagini():
     sim.crop((0, sim.height - 92, 300, sim.height - 52)).resize((600, 80), Image.LANCZOS).save(
         os.path.join(ANNOTATE, "comandi_simulazione.png")
     )
+    schema_fattibilita_vasche()
+    schema_fattibilita_carri()
+
+
+# --------------------------------------------------------------------------
+# Schemi disegnati: cosa contano i limiti di Fattibilita'
+# --------------------------------------------------------------------------
+#
+# Non sono schermate: sono disegni di principio, con vasche e tempi di
+# fantasia. Le lunghezze dei segmenti NON sono in scala: servono a leggere
+# cosa si somma, non quanto vale.
+
+GRIGIO = (90, 90, 90)
+VERDE = (30, 130, 60)
+C_BAGNO = (205, 225, 245)
+C_SOLLEVA = (250, 225, 190)
+C_CARICO = (245, 200, 200)
+C_VUOTO = (215, 215, 215)
+C_CARRO2 = (200, 230, 205)
+
+
+def _font_normale(dimensione: int):
+    for nome in ("arial.ttf", "segoeui.ttf", "DejaVuSans.ttf"):
+        try:
+            return ImageFont.truetype(nome, dimensione)
+        except OSError:
+            pass
+    return ImageFont.load_default()
+
+
+def _testo_centrato(d, cx, cy, testo, font, colore=(0, 0, 0)):
+    righe = testo.split("\n")
+    alt = [d.textbbox((0, 0), r, font=font) for r in righe]
+    h_riga = max(b[3] - b[1] for b in alt) + 4
+    y = cy - h_riga * len(righe) / 2
+    for r, (l, t, rr, _) in zip(righe, alt):
+        d.text((cx - (rr - l) / 2 - l, y - t), r, fill=colore, font=font)
+        y += h_riga
+
+
+def _freccia(d, x0, y, x1, colore, tratteggio=False, spessore=4):
+    """Freccia orizzontale da x0 a x1 all'altezza y."""
+    verso = 1 if x1 > x0 else -1
+    punta = 18
+    fine = x1 - verso * punta
+    if tratteggio:
+        x, passo = x0, 16
+        while (fine - x) * verso > 0:
+            x2 = x + verso * passo
+            if (fine - x2) * verso < 0:
+                x2 = fine
+            d.line((x, y, x2, y), fill=colore, width=spessore)
+            x += verso * passo * 1.8
+    else:
+        d.line((x0, y, fine, y), fill=colore, width=spessore)
+    d.polygon([(x1, y), (fine, y - 10), (fine, y + 10)], fill=colore)
+
+
+def _vasca(d, cx, y, nome, font, larghezza=120, altezza=70, evidenzia=False):
+    x0, x1 = cx - larghezza / 2, cx + larghezza / 2
+    d.rectangle((x0, y, x1, y + altezza), fill=C_BAGNO, outline=(40, 70, 110), width=3)
+    d.rectangle((x0, y, x1, y + 12), fill="white")
+    if evidenzia:
+        d.rectangle((x0 - 6, y - 6, x1 + 6, y + altezza + 6), outline=ROSSO, width=3)
+    _testo_centrato(d, cx, y + altezza + 24, nome, font)
+
+
+def _carro(d, cx, y, nome, colore, font):
+    d.rectangle((cx - 45, y, cx + 45, y + 34), fill=colore, outline=(40, 40, 40), width=2)
+    _testo_centrato(d, cx, y + 17, nome, font, "white")
+    d.line((cx, y + 34, cx, y + 58), fill=(40, 40, 40), width=3)
+
+
+def _barra(d, x, y, segmenti, font, altezza=64):
+    """Segmenti [(larghezza, testo, colore)] affiancati; torna la x finale."""
+    for larghezza, testo, colore in segmenti:
+        d.rectangle((x, y, x + larghezza, y + altezza), fill=colore, outline=(60, 60, 60), width=2)
+        _testo_centrato(d, x + larghezza / 2, y + altezza / 2, testo, font)
+        x += larghezza
+    return x
+
+
+def _graffa(d, x0, x1, y, testo, font, colore=VERDE):
+    """Parentesi sotto una barra, da x0 a x1, con la scritta sotto."""
+    d.line((x0, y, x0, y + 14), fill=colore, width=3)
+    d.line((x1, y, x1, y + 14), fill=colore, width=3)
+    d.line((x0, y + 14, x1, y + 14), fill=colore, width=3)
+    _testo_centrato(d, (x0 + x1) / 2, y + 42, testo, font, colore)
+
+
+def _titolo_riquadro(d, x, y, testo, font):
+    d.text((x, y), testo, fill=(31, 42, 54), font=font)
+
+
+def schema_fattibilita_vasche():
+    """Le tre cose che il limite di una vasca somma: occupazione del posto,
+    cambio pezzo con un carro solo, cambio pezzo con due carri."""
+    W, H = 1600, 1470
+    img = Image.new("RGB", (W, H), "white")
+    d = ImageDraw.Draw(img)
+    f_tit = _font(32)
+    f = _font_normale(25)
+    f_b = _font(24)
+
+    # -- 1. occupazione -----------------------------------------------------
+    _titolo_riquadro(d, 40, 25, "1.  Quanto resta occupato un posto della vasca", f_tit)
+    x0 = 160
+    x1 = _barra(d, x0, 95, [
+        (330, "il carro cala\nil pezzo", C_CARICO),
+        (620, "bagno minimo", C_BAGNO),
+        (330, "il carro solleva\ne sgocciola", C_SOLLEVA),
+    ], f)
+    _graffa(d, x0, x1, 170, "occupazione del posto  —  diviso per i posti della vasca, "
+            "il takt non può essere più corto", f)
+    d.line((40, 270, W - 40, 270), fill=(200, 200, 200), width=2)
+
+    # -- 2. un carro solo ---------------------------------------------------
+    _titolo_riquadro(d, 40, 295, "2.  Cambio pezzo con un carro solo (vasca a un posto)", f_tit)
+    xa, xb, xc = 400, 800, 1200
+    yv = 560
+    for cx, nome, ev in ((xa, "vasca prima", False), (xb, "VASCA", True), (xc, "vasca dopo", False)):
+        _vasca(d, cx, yv, nome, f_b, evidenzia=ev)
+    _carro(d, xb, 360, "carro", ROSSO, f_b)
+    _freccia(d, xb + 20, 430, xc, ROSSO)
+    _bollino(d, (xb + xc) / 2, 430, "1", ROSSO, r=16)
+    _freccia(d, xc, 480, xa, GRIGIO, tratteggio=True)
+    _bollino(d, (xa + xb) / 2, 480, "2", GRIGIO, r=16)
+    _freccia(d, xa, 530, xb - 20, ROSSO)
+    _bollino(d, (xa + xb) / 2, 530, "3", ROSSO, r=16)
+    x0 = 100
+    x1 = _barra(d, x0, 700, [
+        (300, "bagno minimo\ndel pezzo vecchio", C_BAGNO),
+        (360, "1  porta via il vecchio\n(preleva, trasla, cala)", C_CARICO),
+        (300, "2  torna indietro\na vuoto", C_VUOTO),
+        (440, "3  porta il nuovo\n(preleva, trasla, cala)", C_CARICO),
+    ], f)
+    _graffa(d, x0, x1, 775, "da un pezzo al successivo: il takt non può essere più corto", f)
+    d.line((40, 875, W - 40, 875), fill=(200, 200, 200), width=2)
+
+    # -- 3. due carri -------------------------------------------------------
+    _titolo_riquadro(d, 40, 900, "3.  Cambio pezzo con due carri (vasca a un posto)", f_tit)
+    yv = 1120
+    for cx, nome, ev in ((xa, "vasca prima", False), (xb, "VASCA", True), (xc, "vasca dopo", False)):
+        _vasca(d, cx, yv, nome, f_b, evidenzia=ev)
+    _carro(d, xb, 965, "A", ROSSO, f_b)
+    _carro(d, xa, 965, "B", VERDE, f_b)
+    _freccia(d, xb + 55, 990, xb + 260, ROSSO)
+    _testo_centrato(d, xb + 330, 975, "A si\nallontana", f, ROSSO)
+    _freccia(d, xa + 20, 1075, xb - 20, VERDE)
+    _testo_centrato(d, (xa + xb) / 2, 1100, "B porta il nuovo", f, VERDE)
+    x0 = 100
+    x1 = _barra(d, x0, 1250, [
+        (300, "bagno minimo\ndel pezzo vecchio", C_BAGNO),
+        (300, "A solleva\nil vecchio", C_SOLLEVA),
+        (300, "A si allontana\n(se le vasche\nsono vicine)", C_VUOTO),
+        (500, "B arriva e cala il nuovo", C_CARRO2),
+    ], f, altezza=100)
+    _graffa(d, x0, x1, 1360, "da un pezzo al successivo: il takt non può essere più corto", f)
+
+    img.save(os.path.join(ANNOTATE, "schema_fattibilita_vasche.png"))
+
+
+def schema_fattibilita_carri():
+    """Il giro di ogni carro: le mosse a carico della sua zona, una dopo
+    l'altra, piu' un rientro a vuoto. I bagni non ci sono."""
+    W, H = 1600, 860
+    img = Image.new("RGB", (W, H), "white")
+    d = ImageDraw.Draw(img)
+    f_tit = _font(32)
+    f = _font_normale(25)
+    f_b = _font(24)
+
+    nomi = ["carico", "V1", "V2", "V3", "V4", "V5", "scarico"]
+    xs = [140 + i * 220 for i in range(len(nomi))]
+    yv = 330
+    for x, n in zip(xs, nomi):
+        _vasca(d, x, yv, n, f_b, larghezza=110)
+
+    # zone: carro 1 fa le mosse carico->V3, carro 2 V3->scarico
+    for (a, b), colore, nome, y in (((0, 3), ROSSO, "carro 1", 70), ((3, 6), VERDE, "carro 2", 70)):
+        sx = 18 if a else 0
+        d.line((xs[a] + sx, y, xs[a] + sx, y + 16), fill=colore, width=3)
+        d.line((xs[b] - (18 if b < 6 else 0), y, xs[b] - (18 if b < 6 else 0), y + 16),
+               fill=colore, width=3)
+        d.line((xs[a] + sx, y, xs[b] - (18 if b < 6 else 0), y), fill=colore, width=3)
+        _testo_centrato(d, (xs[a] + xs[b]) / 2, y - 30, "zona del " + nome, f_b, colore)
+        for k in range(a, b):
+            _freccia(d, xs[k] + 22, 150, xs[k + 1] - 22, colore)
+            _bollino(d, (xs[k] + xs[k + 1]) / 2, 150, str(k - a + 1), colore, r=16)
+        _freccia(d, xs[b] - 10, 240 if a == 0 else 280, xs[a] + 10, colore, tratteggio=True)
+    _testo_centrato(d, (xs[0] + xs[3]) / 2, 212, "rientro a vuoto", f, ROSSO)
+    _testo_centrato(d, (xs[3] + xs[6]) / 2, 252, "rientro a vuoto", f, VERDE)
+
+    d.line((40, 470, W - 40, 470), fill=(200, 200, 200), width=2)
+    _titolo_riquadro(d, 40, 495, "Il giro di un carro in un periodo (qui il carro 1)", f_tit)
+    x0 = 160
+    x1 = _barra(d, x0, 565, [
+        (300, "1  carico → V1\npreleva, trasla, cala", C_CARICO),
+        (300, "2  V1 → V2\npreleva, trasla, cala", C_CARICO),
+        (300, "3  V2 → V3\npreleva, trasla, cala", C_CARICO),
+        (380, "rientro a vuoto\nV3 → carico", C_VUOTO),
+    ], f, altezza=80)
+    _graffa(d, x0, x1, 655, "giro del carro: il takt non può essere più corto", f)
+    _testo_centrato(
+        d, W / 2, 800,
+        "I bagni non si contano: mentre un pezzo è in vasca il carro sposta gli altri.\n"
+        "Fra tutte le divisioni in zone si tiene quella in cui il giro più lungo è il più breve.",
+        f, GRIGIO,
+    )
+
+    img.save(os.path.join(ANNOTATE, "schema_fattibilita_carri.png"))
 
 
 # --------------------------------------------------------------------------
@@ -319,6 +530,36 @@ CONTENUTO = [
           "**potrebbe** funzionare: lo dirà `Calcola auto`."),
     ("p", "La finestra indica anche la vasca **collo di bottiglia** e quanti "
           "carroponti servono almeno. Si chiude con `Chiudi`."),
+    ("h3", "Cosa contano i limiti"),
+    ("p", "I limiti sono **ottimisti di proposito**: contano solo i tempi che "
+          "nessun ciclogramma può evitare. Per questo un limite sopra il takt "
+          "basta a dire che la linea è impossibile, mentre un limite sotto il "
+          "takt non basta a dire che è possibile."),
+    ("p", "**Le vasche.** Per ogni vasca il limite è il più alto fra due tempi:"),
+    ("b", "**l'occupazione del posto**: il tempo per calare il pezzo, più il bagno "
+          "minimo, più il tempo per sollevarlo e sgocciolare. Se la vasca ha più "
+          "posti, o il pezzo ci passa più volte, i tempi si sommano e si dividono "
+          "per i posti;"),
+    ("b", "**il cambio pezzo**, solo per una vasca a un posto: fra un pezzo e il "
+          "successivo il pezzo vecchio deve finire il bagno e uscire, e il nuovo "
+          "deve arrivare. Con un carro solo, il carro porta via il vecchio, torna "
+          "a vuoto alla vasca prima e porta il nuovo. Con due carri, quello che "
+          "porta il nuovo deve aspettare che l'altro abbia liberato la vasca e, "
+          "se le vasche sono vicine, che si sia allontanato. Si tiene il più "
+          "veloce dei due modi."),
+    ("img", "schema_fattibilita_vasche", 15.5,
+     "Cosa somma il limite di una vasca. Le lunghezze non sono in scala."),
+    ("p", "**I carroponti.** In un periodo ogni carro deve fare tutte le mosse "
+          "della sua zona (prelevare, traslare, calare) e almeno un rientro a "
+          "vuoto dalla fine della zona all'inizio. I bagni non si contano: mentre "
+          "un pezzo è in vasca il carro sposta gli altri. Per ogni numero di "
+          "carroponti il programma cerca la divisione in zone con il giro più "
+          "lungo più breve possibile: quel giro è il limite."),
+    ("img", "schema_fattibilita_carri", 15.5,
+     "Cosa somma il limite dei carroponti: le mosse della zona e un rientro a vuoto."),
+    ("p", "Restano fuori, e li aggiunge solo il calcolo vero: le attese oltre il "
+          "bagno minimo, i trasferimenti a vuoto fra una mossa e l'altra quando "
+          "il carro non le fa in fila, e gli ingombri fra carroponti vicini."),
 
     ("h2", "4.5  [5] Calcola auto"),
     ("p", "Il programma cerca da solo il **numero minimo di carroponti** e la "
